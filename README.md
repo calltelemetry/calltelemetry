@@ -2,6 +2,7 @@
 
 ### Install Docker and Docker Compose for your OS
 https://docs.docker.com/docs.docker.com
+
 https://docs.docker.com/compose/install/
 
 ### First - Launch the Web App (Elixir) and the Database (Postgres)
