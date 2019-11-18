@@ -1,0 +1,23 @@
+version: "1"
+services:
+  db:
+    image: "postgres"
+    restart: "always"
+    environment:
+      - POSTGRES_USER=calltelemetry
+      - POSTGRES_PASSWORD=changeme
+      - POSTGRES_DB=calltelemetry_prod
+    expose: [5432]
+    volumes:
+      - ./postgres-data:/var/lib/postgresql/data
+  web:
+    image: "calltelemetry/web:latest"
+    ports: ["4000:4000"]
+    environment:
+      - DB_USER=calltelemetry
+      - DB_PASSWORD=changeme
+      - DB_HOSTNAME=db
+      - DB_NAME=calltelemetry_prod
+      - K8S_PORT=4000
+      - URL_PORT=4000
+      - SECRET_KEY_BASE=wu3JgPq0IMvIMsJJZ940biL7jVkhLvHJ9I6aqlvhgonVA2eMdOgmdEjWMFAjRKSr
