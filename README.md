@@ -1,4 +1,8 @@
-# On Premise version of Call Telemetry
+# On Premise version of CallTelemetry CURRI Blocking
+
+### Install Docker and Docker Compose for your OS
+https://docs.docker.com/docs.docker.com
+https://docs.docker.com/compose/install/
 
 ### First - Launch the Web App (Elixir) and the Database (Postgres)
 ``` bash
