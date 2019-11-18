@@ -1,4 +1,4 @@
-version: "1"
+version: "3"
 services:
   db:
     image: "postgres"
@@ -11,7 +11,7 @@ services:
     volumes:
       - ./postgres-data:/var/lib/postgresql/data
   web:
-    image: "calltelemetry/web:latest"
+    image: "calltelemetry/web:version-0.2.9"
     ports: ["4000:4000"]
     environment:
       - DB_USER=calltelemetry

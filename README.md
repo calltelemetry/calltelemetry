@@ -1,4 +1,5 @@
-# Support Repo for CallTelemetry
+# CallTelemetry
+## Scalable Spam / Robo Call Blocking for Cisco UCM
 
 
 ## On-Prem Instructions
@@ -10,10 +11,16 @@ https://docs.docker.com/v17.09/engine/installation/
 https://docs.docker.com/compose/install/
 
 ### First - Launch the Web App (Elixir) and the Database (Postgres)
+Clone the repo or download the docker-compose.yml file.
+
+
 ``` bash
+git clone https://github.com/calltelemetry/calltelemetry.git
+cd calltelemetry
 docker-compose up -d
 
 ```
+ 
 
 ### Run Initial Migrations and OnPrem Admin.
 You should migrate anytime you upgrade versions - the database structure may have changed.
@@ -32,4 +39,4 @@ Password: admin
 
 # FAQ
 ### Licensing On-Prem
-The build - calltelemetry/web:version-0.2.6 is unlimited in usage but this Beta release is set to expire Feb 1, 2020. There will be a new release to extend the trial or license the server before that time.
+The build - calltelemetry/web:version-0.2.9 is unlimited in usage but this Beta release is set to expire Feb 1, 2020. There will be a new release to extend the trial or license the server before that time.
