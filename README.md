@@ -16,10 +16,12 @@ docker-compose run web ./prod/rel/cdrcisco/bin/cdrcisco eval Cdrcisco.Release.mi
 ```
 
 ### Last - Run the initial Admin user creation.
-Username admin@example.com
-
-Password admin
 
 ``` bash
 docker-compose run web ./prod/rel/cdrcisco/bin/cdrcisco eval Cdrcisco.Seeds.onprem_admin
 ```
+Once completed, you can login to CallTelemetry at http://yourIP:4000
+
+Username: admin@example.com
+
+Password: admin
