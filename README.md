@@ -22,10 +22,12 @@ docker-compose up -d
 ```
  
 
-### Provision the initial On-Prem Admin user.
+### Run DB Migrations Provision the initial On-Prem Admin user.
 The onprem_admin seed creates admin@example.com with a password of admin. You can change them inside the web app.
 
 ``` bash
+docker-compose run web ./prod/rel/cdrcisco/bin/cdrcisco eval Cdrcisco.Release.migrate
+
 docker-compose run web ./prod/rel/cdrcisco/bin/cdrcisco eval Cdrcisco.Seeds.onprem_admin
 ```
 Once completed, you can login to CallTelemetry at http://yourIP:4000
