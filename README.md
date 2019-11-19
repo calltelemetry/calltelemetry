@@ -22,13 +22,10 @@ docker-compose up -d
 ```
  
 
-### Run Initial Migrations and OnPrem Admin.
-You should migrate anytime you upgrade versions - the database structure may have changed.
-The onprem_admin seed creates admin@example.com with a password of admin. You can change it in the web app.
+### Provision the initial On-Prem Admin user.
+The onprem_admin seed creates admin@example.com with a password of admin. You can change them inside the web app.
 
 ``` bash
-docker-compose run web ./prod/rel/cdrcisco/bin/cdrcisco eval Cdrcisco.Release.migrate
-
 docker-compose run web ./prod/rel/cdrcisco/bin/cdrcisco eval Cdrcisco.Seeds.onprem_admin
 ```
 Once completed, you can login to CallTelemetry at http://yourIP:4000
@@ -39,4 +36,5 @@ Password: admin
 
 # FAQ
 ### Licensing On-Prem
-The build - calltelemetry/web:version-0.2.9 is unlimited in usage but this Beta release is set to expire Feb 1, 2020. There will be a new release to extend the trial or license the server before that time.
+The Docker builds are unlimited while in Open Beta, and expires Feb 1, 2020. 
+There will always be a free version, but licensing is not defined yet.
