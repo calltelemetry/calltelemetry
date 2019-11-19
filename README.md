@@ -6,17 +6,17 @@
 * Call Blocking Control using Cisco Unified Policy Routing API / Curri API / External Call Control Profile. One URL to paste into Callmanager and you can apply the ECC profile to any Trunk, Route Pattern, Translation, or Directory Number, even to multiple CUCM Clusters to have complete call enforcement.
 * Post a request in Issues for what you want next. 
 
+# Cloud or On-Prem - Doesn't matter.
+Sign up at www.calltelemetry.com and try it out live on a single phone, or if you want it on-prem, follow the on-prem guide. Features are the same either way you choose.
 
+## On-Prem Guide
 
-## On-Prem Instructions
-The code is inside a private repo, please use this repo for issue tracking purposes.
-
-### Install Docker and Docker Compose for your OS
+### Install Docker and Docker Compose for your OS of choice
 https://docs.docker.com/v17.09/engine/installation/
 
 https://docs.docker.com/compose/install/
 
-### First - Launch the Web App (Elixir) and the Database (Postgres)
+### Launch the Web App (Elixir) and the Database (Postgres)
 Clone the repo or download the docker-compose.yml file.
 
 
@@ -41,6 +41,12 @@ Once completed, you can login to CallTelemetry at http://yourIP:4000
 Username: admin@example.com
 
 Password: admin
+
+### Now go block some calls.
+I am working on more content. For now, a full walkthrough of no config to blocking calls on a single phone is best seen in this video.
+
+<iframe width="883" height="461" src="https://www.youtube.com/embed/q--jzdSkEDw" frameborder="0" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+
 
 
 # FAQ
