@@ -45,7 +45,7 @@ Password: admin
 ### Now go block some calls.
 I am working on more content. For now, a full walkthrough of no config to blocking calls on a single phone is best seen in this video.
 
-<iframe width="883" height="461" src="https://www.youtube.com/embed/q--jzdSkEDw" frameborder="0" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+https://studio.youtube.com/video/q--jzdSkEDw/edit
 
 
 
