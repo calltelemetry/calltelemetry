@@ -1,6 +1,12 @@
 # CallTelemetry
 ## Scalable Spam / Robo Call Blocking for Cisco UCM
 
+## Features
+### Call Blocking within Callmanager
+* Call Blocking Control using Cisco Unified Policy Routing API / Curri API / External Call Control Profile. One URL to paste into Callmanager and you can apply the ECC profile to any Trunk, Route Pattern, Translation, or Directory Number, even to multiple CUCM Clusters to have complete call enforcement.
+* Post a request in Issues for what you want next. 
+
+
 
 ## On-Prem Instructions
 The code is inside a private repo, please use this repo for issue tracking purposes.
@@ -35,6 +41,7 @@ Once completed, you can login to CallTelemetry at http://yourIP:4000
 Username: admin@example.com
 
 Password: admin
+
 
 # FAQ
 ### Licensing On-Prem
