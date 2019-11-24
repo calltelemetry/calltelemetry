@@ -1,5 +1,5 @@
 # CallTelemetry
-## Scalable Call Action As a Service (CaaS) Platform for Cisco Callmanager
+## Scalable Call Action Platform for Cisco Callmanager
 
 ## Solutions
 ### Robo / Spam / Call Blocking across all Callmanagers in your environment
