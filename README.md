@@ -1,13 +1,18 @@
 # CallTelemetry
-## Scalable Spam / Robo Call Blocking for Cisco UCM
+## Scalable Call Action As a Service (CaaS) Platform for Cisco Callmanager
 
-## Features
-### Call Blocking within Callmanager
+## Solutions
+### Robo / Spam / Call Blocking across all Callmanagers in your environment
 * Call Blocking Control using Cisco Unified Policy Routing API / Curri API / External Call Control Profile. One URL to paste into Callmanager and you can apply the ECC profile to any Trunk, Route Pattern, Translation, or Directory Number, even to multiple CUCM Clusters to have complete call enforcement.
-* Post a request in Issues for what you want next. 
+### CDR Integration - coming soon in 0.3.x Train
+* Process Call Detail Records in realtime for actions.
+* Trigger Malicious Caller-ID (MCID), including alerts and automatically blacklisting the caller.
+
+## Post a request in Issues for what you want next. 
 
 # Cloud or On-Prem - Doesn't matter.
-Sign up at www.calltelemetry.com and try it out live on a single phone, or if you want it on-prem, follow the on-prem guide. Features are the same either way you choose.
+Want Cloud? Visit www.calltelemetry.com
+Want an On-Premise solution? Follow the guide below, nothing is shared with the cloud.
 
 ## On-Prem Guide
 
