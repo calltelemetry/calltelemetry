@@ -1,60 +1,45 @@
-# CallTelemetry
-## Scalable Call Action Platform for Cisco Callmanager
-
-## Solutions
-### Robo / Spam / Call Blocking across all Callmanagers in your environment
-* Call Blocking Control using Cisco Unified Policy Routing API / Curri API / External Call Control Profile. One URL to paste into Callmanager and you can apply the ECC profile to any Trunk, Route Pattern, Translation, or Directory Number, even to multiple CUCM Clusters to have complete call enforcement.
-### CDR Integration - coming soon in 0.3.x Train
-* Process Call Detail Records in realtime for actions.
-* Trigger Malicious Caller-ID (MCID), including alerts and automatically blacklisting the caller.
-
-## Post a request in Issues for what you want next. 
-
-# Cloud or On-Prem - Doesn't matter.
-Want Cloud? Visit www.calltelemetry.com
-Want an On-Premise solution? Follow the guide below, nothing is shared with the cloud.
-
-## On-Prem Guide
+## On-Prem Installation Guide
 
 ### Install Docker and Docker Compose for your OS of choice
+Install Docker
 https://docs.docker.com/v17.09/engine/installation/
-
+Install Docker-Compose
 https://docs.docker.com/compose/install/
 
-### Launch the Web App (Elixir) and the Database (Postgres)
-Clone the repo or download the docker-compose.yml file.
+Unoffical Guide that looks concise and helpful for Linux
+https://cwiki.apache.org/confluence/pages/viewpage.action?pageId=94798094
 
+Assuming you can run these two commands - you are good to proceed.
+```
+docker --version
+docker-compose --version
+```
+
+### Check your Port 22 for CDR SFTP
+I use port 22 for Secure FTP (SFTP) transfer of CDR records. If you host on a linux OS, you probably already use port 22. The SFTP service onboard the container is locked down to the container, with no shell access, and the login is fully integrated with the web interface. If you login to the web page with admin@example.com - use the same username and password on the SFTP service.
+I designed the service on Kubernetes, which does not need port 22. For now, change your host port to any other port for SSH access like this
+```
+vi /etc/ssh/sshd_config
+```
+edit port from 22 to 2222
+save and restart.
+
+### Launch the Web App (Elixir) and the Database (Postgres)
+Clone the on-premise github repo. 
 
 ``` bash
 git clone https://github.com/calltelemetry/calltelemetry.git
 cd calltelemetry
-docker-compose up -d
+docker-compose up (-d for daemon mode)
 
 ```
  
-
-### Run DB Migrations Provision the initial On-Prem Admin user.
-The onprem_admin seed creates admin@example.com with a password of admin. You can change them inside the web app.
-
-``` bash
-docker-compose run web ./prod/rel/cdrcisco/bin/cdrcisco eval Cdrcisco.Release.migrate
-
-docker-compose run web ./prod/rel/cdrcisco/bin/cdrcisco eval Cdrcisco.Seeds.onprem_admin
-```
 Once completed, you can login to CallTelemetry at http://yourIP:4000
 
 Username: admin@example.com
 
 Password: admin
 
-### Now go block some calls.
-I am working on more content. For now, a full walkthrough of no config to blocking calls on a single phone is best seen in this video.
+Since you are running it locally inside Docker, the CURRI API URL will only know itself as localhost. So when you copy and paste the URL into Callmanager, update the IP to your host's IP Address.
 
-https://studio.youtube.com/video/q--jzdSkEDw/edit
-
-
-
-# FAQ
-### Licensing On-Prem
-The Docker builds are unlimited while in Open Beta, and expires Feb 1, 2020. 
-There will always be a free version, but licensing is not defined yet.
+#### That's it. Now go block some calls!
