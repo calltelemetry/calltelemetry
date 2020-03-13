@@ -11,7 +11,7 @@ services:
     volumes:
       - ./postgres-data:/var/lib/postgresql/data
   web:
-    image: "calltelemetry/web:0.3.2"
+    image: "calltelemetry/web:0.3.3"
     restart: "always"
     ports: ["4000:4000", "22:2222", "5060:5060/udp"]
     environment:
