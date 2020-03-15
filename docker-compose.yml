@@ -11,15 +11,13 @@ services:
     volumes:
       - ./postgres-data:/var/lib/postgresql/data
   web:
-    image: "calltelemetry/web:0.3.3"
+    image: "calltelemetry/web:0.3.4"
     restart: "always"
-    ports: ["4000:4000", "22:2222", "5060:5060/udp"]
+    ports: ["80:4000", "22:3022", "5060:5060/udp"]
     environment:
       - DB_USER=calltelemetry
       - DB_PASSWORD=changeme
       - DB_HOSTNAME=db
       - DB_NAME=calltelemetry_prod
-      - K8S_PORT=4000
-      - URL_PORT=4000
-      - RENDER_EXTERNAL_HOSTNAME=$HOST_IP
+      - PORT=4000
       - SECRET_KEY_BASE=wu3JgPq0IMvIMsJJZ940biL7jVkhLvHJ9I6aqlvhgonVA2eMdOgmdEjWMFAjRKSr
