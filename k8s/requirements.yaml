@@ -1,0 +1,6 @@
+dependencies:
+  - name: postgresql
+    version: 8.6.4
+    repository: https://charts.bitnami.com/bitnami
+    tags:
+      - calltelemetry-database

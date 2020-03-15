@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ template "name" . }}-lb
+  namespace: calltelemetry
+  labels:
+    app: calltelemetry
+spec:
+  type: LoadBalancer
+  selector:
+    app: calltelemetry
+  ports:
+    - port: 80
+      targetPort: 8080
+      protocol: TCP
+      name: http
+    - port: 22
+      targetPort: 3022
+      protocol: TCP
+      name: sftp
