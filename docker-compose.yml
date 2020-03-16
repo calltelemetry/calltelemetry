@@ -5,7 +5,7 @@ services:
     restart: "always"
     environment:
       - POSTGRES_USER=calltelemetry
-      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_PASSWORD=changme
       - POSTGRES_DB=calltelemetry_prod
     expose: [5432]
     volumes:
@@ -16,7 +16,7 @@ services:
     ports: ["80:4000", "22:3022"]
     environment:
       - DB_USER=calltelemetry
-      - DB_PASSWORD=postgres
+      - DB_PASSWORD=changeme
       - DB_HOSTNAME=db
       - DB_NAME=calltelemetry_prod
       - PORT=4000
