@@ -1,14 +1,30 @@
-# Incoming Call Blocking for Cisco Callmanager using Policy API
-Self-hosted Call policy api server for incoming call blocking and triggers.
+# Call Policy Platform for Cisco CUCM / Callmanager
+---
 
-Latest version 0.3.4
+### Automatic Incoming Robocall and Spam Blocking for Cisco Callmanager using Cisco's Policy API. 
+
+---
 Features:
-* CURRI / External Call Control Policy API server
-* Automatic call blocking - CDR Parsing of Malicious Caller ID calls to block list - users just press the MCID softkey to add a call to the block list.
-* Self hosted anywhere via Docker or Kubernetes 
-* Can apply policies to any Phone, Route Pattern, or Translation Pattern, even across over multiple CUCM Clusters.
-* Flexible rules - calling, called or exact matches
-* Full onboarding instuctions and video walkthroughs.
-* Web Dashboard with logs
+
+* Self-hosted - Docker or Kubernetes guides
+* Cloud Demo - Login and try it out live on your Callmanager
+* Universal Policy Control across unlimited clusters
+* CDR detection spam robo callers (MCID Tagging)
+* Incoming call blocking - stop chasing call blocking rules
+* Greeting Injection on Permit or Blocked calls.
+
+
+---
+
+Change log of major features:
+
+* 03-20-2020 - 0.3.5 - Permit rules added, and Greeting Injection
+* 03-15-2020 - 03.4 - UI Enhancement, Kubernetes, Video and Howto Guides.
+* 02-27-2020 - 0.3.3 - Called Party Rules
+* 12-10-2019 - 0.3.2 - SIP Integration Testing
+* 12-04-2019 - 0.3.1 - CDR Integration with MCID added
+* 11-01-2019 - 0.2.9 - First Public Self-hosted release
+
+Visit www.calltelemetry.com/release_notes for full release notes.
 
 Visit www.calltelemetry.com/getting_started for the latest instructions on downloading.
