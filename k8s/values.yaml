@@ -6,7 +6,7 @@ image:
 resources: {}
 global:
   postgresql:
-    username: postgres
-    password: postgres
+    # username: postgres
+    # password: postgres
     database: calltelemetry_prod
     name: calltelemetry_db
