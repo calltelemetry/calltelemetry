@@ -46,6 +46,6 @@ spec:
                   name: {{ .Release.Name }}-postgresql
                   key: postgresql-password
             - name: DB_NAME
-              value: {{ .Values.postgresql.postgresqlDatabase }}
+              value: {{ .Values.postgresql.database }}
             - name: DB_HOSTNAME
               value: {{ .Release.Name }}-postgresql.{{ .Release.Namespace }}.svc.cluster.local 
