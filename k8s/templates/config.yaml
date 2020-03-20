@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: configmap-updater
+  labels:
+    app: configmap-updater
+spec:
+  selector:
+    matchLabels:
+      app: configmap-updater
+  template:
+    metadata:
+      labels:
+        app: configmap-updater
+    spec:
+      containers:
+      - name: configmap-updater
+        image: alpine:3.10
+        command: ['sh', '-c' ]
+        args:
+        - | #!/bin/sh
+            set -x
+
+            apk --update add curl
+            curl -LO https://storage.googleapis.com/kubernetes-release/release/v1.16.0/bin/linux/amd64/kubectl
+            chmod +x kubectl
+
+            export CONFIGMAP="config"
+            export SERVICE="calltelemetry-service"
+
+            while true
+            do
+                IP=`./kubectl get services -n calltelemetry -o json-path='{.items[0].status.loadBalancer.ingress[0].ip}'`
+                PATCH=`printf '{"data":{"EXTERNAL_IP": "%s"}}' $IP`
+                echo ${PATCH}
+                ./kubectl patch configmap/config -n calltelemetry --type=merge -p "${PATCH}"
+
+                sleep 10
+            done
