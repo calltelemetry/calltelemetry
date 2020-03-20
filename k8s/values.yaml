@@ -4,8 +4,9 @@ image:
   tag: 0.3.5
   annotations:
 resources: {}
-postgresql:
-  postgresqlUsername: postgres
-  postgresqlPassword: postgres
-  postgresqlDatabase: calltelemetry_prod
-  name: calltelemetry_db
+global:
+  postgresql:
+    username: postgres
+    password: postgres
+    database: calltelemetry_prod
+    name: calltelemetry_db
