@@ -24,6 +24,8 @@ spec:
             - containerPort: 8080
             - containerPort: 3022
           env:
+            - name: VERSION
+              value: "0.3.6"
             - name: HOST
               value: {{ .Values.hostname }}
             - name: PORT
