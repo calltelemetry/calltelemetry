@@ -34,7 +34,7 @@ spec:
                 IP=`./kubectl get services -n calltelemetry -o json-path='{.items[0].status.loadBalancer.ingress[0].ip}'`
                 PATCH=`printf '{"data":{"EXTERNAL_IP": "%s"}}' $IP`
                 echo ${PATCH}
-                ./kubectl patch configmap/config -n calltelemetry --type=merge -p "${PATCH}"
+                ./kubectl patch configmap/{{ template "name" . }}-config -n calltelemetry --type=merge -p "${PATCH}"
 
                 sleep 10
             done
