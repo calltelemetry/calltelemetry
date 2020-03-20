@@ -36,7 +36,7 @@ spec:
             - name: EXTERNAL_IP
               valueFrom:
                 configMapKeyRef:
-                  name: config
+                  name: {{ template "name" . }}-config
                   key: EXTERNAL_IP
             - name: DB_USER
               value:  postgres
