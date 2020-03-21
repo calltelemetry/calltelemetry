@@ -3,14 +3,14 @@ entries:
   calltelemetry:
   - apiVersion: v1
     appVersion: 0.3.6
-    created: "2020-03-20T19:38:04.28895-05:00"
+    created: "2020-03-20T19:40:50.729439-05:00"
     dependencies:
     - name: postgresql
       repository: https://charts.bitnami.com/bitnami
       tags:
       - calltelemetry-database
       version: 8.6.4
-    digest: 0c9b890a9000a9c0b3e9313543fbbbcf9404b195b6796474d87e04ca4e6378bb
+    digest: 51f6ad6d0c6c3ce7b54e9d8edc618244c5ae515f536e2256f3e010f4edec8f42
     home: http://www.calltelemetry.com/
     name: calltelemetry
     urls:
@@ -18,7 +18,7 @@ entries:
     version: 0.3.6
   - apiVersion: v1
     appVersion: 0.3.5
-    created: "2020-03-20T19:38:04.285604-05:00"
+    created: "2020-03-20T19:40:50.726167-05:00"
     dependencies:
     - name: postgresql
       repository: https://charts.bitnami.com/bitnami
@@ -33,7 +33,7 @@ entries:
     version: 0.3.5
   - apiVersion: v1
     appVersion: 0.3.4
-    created: "2020-03-20T19:38:04.276928-05:00"
+    created: "2020-03-20T19:40:50.718706-05:00"
     dependencies:
     - name: postgresql
       repository: https://charts.bitnami.com/bitnami
@@ -49,7 +49,7 @@ entries:
   postgresql:
   - apiVersion: v1
     appVersion: 11.7.0
-    created: "2020-03-20T19:38:04.291988-05:00"
+    created: "2020-03-20T19:40:50.732376-05:00"
     description: Chart for PostgreSQL, an object-relational database management system
       (ORDBMS) with an emphasis on extensibility and on standards-compliance.
     digest: 0add9e54dad92494348563a8676cf126274d86e6a7cdc3a541f5a556fe2b8e90
@@ -73,4 +73,4 @@ entries:
     urls:
     - https://calltelemetry.github.io/calltelemetry/k8s/charts/postgresql-8.6.4.tgz
     version: 8.6.4
-generated: "2020-03-20T19:38:04.267386-05:00"
+generated: "2020-03-20T19:40:50.709628-05:00"
