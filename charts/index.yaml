@@ -1,0 +1,19 @@
+apiVersion: v1
+entries:
+  calltelemetry:
+  - apiVersion: v1
+    appVersion: 0.3.6
+    created: "2020-04-22T02:59:57.184673824Z"
+    dependencies:
+    - name: postgresql
+      repository: https://charts.bitnami.com/bitnami
+      tags:
+      - calltelemetry-database
+      version: 8.6.4
+    digest: da3e93088760edb0b43355af5b0ce02ae2cbd3761e81d4d8006e5bfee7be00bb
+    home: http://www.calltelemetry.com/
+    name: calltelemetry
+    urls:
+    - calltelemetry-0.3.6.tgz
+    version: 0.3.6
+generated: "2020-04-22T02:59:57.173357611Z"
