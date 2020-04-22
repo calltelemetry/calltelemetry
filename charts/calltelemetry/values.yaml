@@ -1,0 +1,11 @@
+hostname: myserver.mydomain.com
+image:
+  repository: calltelemetry/web
+  tag: 0.3.6
+  annotations:
+resources: {}
+postgresql:
+  postgresqlUsername: postgres
+  # postgresqlPassword: super
+  postgresqlDatabase: calltelemetry_prod
+  name: calltelemetry_db
