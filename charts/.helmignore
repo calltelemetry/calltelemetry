@@ -22,4 +22,3 @@
 .vscode/
 k8s/
 docker-compose.yml
-call*.tgz

@@ -24,6 +24,8 @@ spec:
             - containerPort: 8080
             - containerPort: 3022
           env:
+            - name: VERSION
+              value: "0.3.6"
             - name: HOST
               value: {{ .Values.hostname }}
             - name: PORT
@@ -33,11 +35,8 @@ spec:
                 secretKeyRef:
                   name: secrets
                   key: secret_key_base
-            - name: EXTERNAL_IP
-              valueFrom:
-                configMapKeyRef:
-                  name: {{ template "name" . }}-config
-                  key: EXTERNAL_IP
+            -name: EXTERNAL_IP
+              value: {{ (index (lookup "v1" "Service" "calltelemetry" "calltelemetry-lb").status.loadBalancer.ingress 0).ip }}
             - name: DB_USER
               value:  postgres
             - name: DB_PASSWORD
@@ -46,6 +45,6 @@ spec:
                   name: {{ .Release.Name }}-postgresql
                   key: postgresql-password
             - name: DB_NAME
-              value: {{ .Values.global.postgresql.database }}
+              value: {{ .Values.postgresql.postgresqlDatabase }}
             - name: DB_HOSTNAME
               value: {{ .Release.Name }}-postgresql.{{ .Release.Namespace }}.svc.cluster.local 
