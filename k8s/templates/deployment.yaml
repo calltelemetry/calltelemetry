@@ -1,0 +1,51 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ template "name" . }}-app
+  namespace: calltelemetry
+  labels:
+    app: calltelemetry
+spec:
+  selector:
+    matchLabels:
+      app: calltelemetry       
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: calltelemetry
+    spec:
+      containers:
+        - name: calltelemetry
+          image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+            - containerPort: 3022
+          env:
+            - name: HOST
+              value: {{ .Values.hostname }}
+            - name: PORT
+              value: "8080"
+            - name: SECRET_KEY_BASE
+              valueFrom:
+                secretKeyRef:
+                  name: secrets
+                  key: secret_key_base
+            - name: EXTERNAL_IP
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ template "name" . }}-config
+                  key: EXTERNAL_IP
+            - name: DB_USER
+              value:  postgres
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-postgresql
+                  key: postgresql-password
+            - name: DB_NAME
+              value: {{ .Values.global.postgresql.database }}
+            - name: DB_HOSTNAME
+              value: {{ .Release.Name }}-postgresql.{{ .Release.Namespace }}.svc.cluster.local 

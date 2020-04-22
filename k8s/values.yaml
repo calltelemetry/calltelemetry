@@ -1,0 +1,10 @@
+hostname: 
+image:
+  repository: calltelemetry/web
+  tag: 0.3.5
+  annotations:
+resources: {}
+global:
+  postgresql:
+    database: calltelemetry_prod
+    name: calltelemetry_db
