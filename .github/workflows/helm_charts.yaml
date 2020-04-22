@@ -2,24 +2,20 @@ name: Release Charts
 
 on: push
   # push:
-    # branches:
-      # - master
-
+  #   paths:
+  #     - 'charts/**'
 jobs:
   release:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v1
-
+      
       - name: Configure Git
         run: |
-          git config user.name "$GITHUB_ACTOR"
-          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
-
+          git config user.name "jason-calltelemetry"
+          git config user.email "jason-calltelemetry@users.noreply.github.com"
       - name: Run chart-releaser
-        uses: helm/chart-releaser-action@v1.0.0-rc.1
-        charts_dir: /charts
-        charts_repo_url: https://calltelemetry.github.io/calltelemetry
-        env:
-          CR_TOKEN: "${{ secrets.CR_TOKEN }}"
+        uses: calltelemetry/helm-gh-pages-action@master
+        with:
+          access-token: ${{ secrets.CR_TOKEN }}
