@@ -1,0 +1,64 @@
+apiVersion: v1
+entries:
+  calltelemetry:
+  - apiVersion: v1
+    appVersion: 0.3.6
+    created: "2020-04-22T02:35:08.202117102Z"
+    dependencies:
+    - name: postgresql
+      repository: https://charts.bitnami.com/bitnami
+      tags:
+      - calltelemetry-database
+      version: 8.6.4
+    digest: 784df7c4e16dfd367327171286ab712c73c2f7e551ac37e2f0f53e15088fb84c
+    home: http://www.calltelemetry.com/
+    name: calltelemetry
+    urls:
+    - calltelemetry-0.3.6.tgz
+    version: 0.3.6
+  - apiVersion: v1
+    appVersion: 0.3.6
+    created: "2020-04-22T02:35:08.232061597Z"
+    dependencies:
+    - name: postgresql
+      repository: https://charts.bitnami.com/bitnami
+      tags:
+      - calltelemetry-database
+      version: 8.6.4
+    digest: 2a359a87442e798d594eef5aefe9c9e8297e7e4956edbc0c9b211d7fb49ee300
+    home: http://www.calltelemetry.com/
+    name: calltelemetry
+    urls:
+    - k8s/calltelemetry-0.3.6.tgz
+    version: 0.3.6
+  - apiVersion: v1
+    appVersion: 0.3.5
+    created: "2020-04-22T02:35:08.229007307Z"
+    dependencies:
+    - name: postgresql
+      repository: https://charts.bitnami.com/bitnami
+      tags:
+      - calltelemetry-database
+      version: 8.6.4
+    digest: 16939c2402382df571b9c7e4f0e88c466a67734573fbb556dcc43d32fcd73e20
+    home: http://www.calltelemetry.com/
+    name: calltelemetry
+    urls:
+    - k8s/calltelemetry-0.3.5.tgz
+    version: 0.3.5
+  - apiVersion: v1
+    appVersion: 0.3.4
+    created: "2020-04-22T02:35:08.223646426Z"
+    dependencies:
+    - name: postgresql
+      repository: https://charts.bitnami.com/bitnami
+      tags:
+      - calltelemetry-database
+      version: 8.6.4
+    digest: ab0046f565609f45dc68f254f740e0f1f0d7842148178e339f28f3640e3f5c7f
+    home: http://www.calltelemetry.com/
+    name: calltelemetry
+    urls:
+    - k8s/calltelemetry-0.3.4.tgz
+    version: 0.3.4
+generated: "2020-04-22T02:35:08.198908713Z"
