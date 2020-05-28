@@ -35,7 +35,7 @@ spec:
                 secretKeyRef:
                   name: secrets
                   key: secret_key_base
-            -name: EXTERNAL_IP
+            - name: EXTERNAL_IP
               value: {{ .Values.external_ip}}
             - name: DB_USER
               value:  postgres
