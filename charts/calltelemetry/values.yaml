@@ -1,7 +1,7 @@
 hostname: myserver.mydomain.com
 image:
   repository: calltelemetry/web
-  tag: 0.3.6rc3
+  tag: 0.3.6rc4
   annotations:
 resources: {}
 postgresql:
