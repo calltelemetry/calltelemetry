@@ -36,7 +36,7 @@ spec:
                   name: secrets
                   key: secret_key_base
             -name: EXTERNAL_IP
-              value: {{ (index (lookup "v1" "Service" "calltelemetry" "calltelemetry-lb").status.loadBalancer.ingress 0).ip }}
+              value: {{ .Values.external_ip}}
             - name: DB_USER
               value:  postgres
             - name: DB_PASSWORD
