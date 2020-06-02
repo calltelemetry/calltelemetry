@@ -1,9 +1,25 @@
 apiVersion: v1
 entries:
+  CallTelemetry:
+  - apiVersion: v1
+    appVersion: 0.3.6
+    created: "2020-06-02T03:04:07.063993012Z"
+    dependencies:
+    - name: postgresql
+      repository: https://charts.bitnami.com/bitnami
+      tags:
+      - calltelemetry-database
+      version: 8.6.4
+    digest: a6e70832f3d79177edea720c7aa39ec7df02fbaf52a448f730a8d82a2dfcf8b2
+    home: http://www.calltelemetry.com/
+    name: CallTelemetry
+    urls:
+    - CallTelemetry-0.3.6.tgz
+    version: 0.3.6
   calltelemetry:
   - apiVersion: v1
-    appVersion: 0.3.5
-    created: "2020-06-01T22:01:38.866086-05:00"
+    appVersion: 0.3.6
+    created: "2020-06-02T03:04:07.079237915Z"
     dependencies:
     - name: postgresql
       repository: https://charts.bitnami.com/bitnami
@@ -14,11 +30,6 @@ entries:
     home: http://www.calltelemetry.com/
     name: calltelemetry
     urls:
-    - https://calltelemetry.github.io/calltelemetry/ccharts/charts/calltelemetry-0.3.5.tgz
-    version: 0.3.5
-  - apiVersion: v1
-    appVersion: 0.3.4
-    created: "2020-06-01T22:01:38.860597-05:00"
     dependencies:
     - name: postgresql
       repository: https://charts.bitnami.com/bitnami
@@ -29,6 +40,3 @@ entries:
     home: http://www.calltelemetry.com/
     name: calltelemetry
     urls:
-    - https://calltelemetry.github.io/calltelemetry/ccharts/charts/calltelemetry-0.3.4.tgz
-    version: 0.3.4
-generated: "2020-06-01T22:01:38.853821-05:00"
