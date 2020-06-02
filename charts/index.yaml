@@ -3,7 +3,7 @@ entries:
   CallTelemetry:
   - apiVersion: v1
     appVersion: 0.3.6
-    created: "2020-05-28T03:18:28.076631912Z"
+    created: "2020-06-02T03:22:03.503240291Z"
     dependencies:
     - name: postgresql
       repository: https://charts.bitnami.com/bitnami
@@ -16,25 +16,25 @@ entries:
     urls:
     - CallTelemetry-0.3.6.tgz
     version: 0.3.6
-  calltelemetry:
   - apiVersion: v1
     appVersion: 0.3.6
-    created: "2020-05-28T03:18:28.096384911Z"
+    created: "2020-06-02T03:22:03.516558875Z"
     dependencies:
     - name: postgresql
       repository: https://charts.bitnami.com/bitnami
       tags:
       - calltelemetry-database
       version: 8.6.4
-    digest: da3e93088760edb0b43355af5b0ce02ae2cbd3761e81d4d8006e5bfee7be00bb
+    digest: a6e70832f3d79177edea720c7aa39ec7df02fbaf52a448f730a8d82a2dfcf8b2
     home: http://www.calltelemetry.com/
-    name: calltelemetry
+    name: CallTelemetry
     urls:
     - calltelemetry-0.3.6.tgz
     version: 0.3.6
+  calltelemetry:
   - apiVersion: v1
     appVersion: 0.3.5
-    created: "2020-05-28T03:18:28.091566016Z"
+    created: "2020-06-02T03:22:03.514160878Z"
     dependencies:
     - name: postgresql
       repository: https://charts.bitnami.com/bitnami
@@ -49,7 +49,7 @@ entries:
     version: 0.3.5
   - apiVersion: v1
     appVersion: 0.3.4
-    created: "2020-05-28T03:18:28.082642555Z"
+    created: "2020-06-02T03:22:03.509283384Z"
     dependencies:
     - name: postgresql
       repository: https://charts.bitnami.com/bitnami
@@ -64,17 +64,17 @@ entries:
     version: 0.3.4
   - apiVersion: v1
     appVersion: 0.3.6
-    created: "2020-05-28T03:18:28.099795449Z"
+    created: "2020-06-02T03:22:03.519734372Z"
     dependencies:
     - name: postgresql
       repository: https://charts.bitnami.com/bitnami
       tags:
       - calltelemetry-database
       version: 8.6.4
-    digest: f123a42e70234fc84b990200407efbf4654e6bbc1b78c104665cd096a023fb9a
+    digest: 2306f064c1cfd57227f48af868f327c7210af83f051fab80e477f5b4f483bab2
     home: http://www.calltelemetry.com/
     name: calltelemetry
     urls:
     - calltelemetry-0.3.6rc3.tgz
     version: 0.3.6rc3
-generated: "2020-05-28T03:18:28.041062272Z"
+generated: "2020-06-02T03:22:03.468927832Z"
