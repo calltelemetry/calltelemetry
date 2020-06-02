@@ -3,7 +3,7 @@ name: Release Charts
 on:
   push:
     paths:
-      - 'charts/**'
+      - 'charts/calltelemetry/**'
 jobs:
   release:
     runs-on: ubuntu-latest
