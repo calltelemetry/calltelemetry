@@ -1,7 +1,7 @@
 hostname: 
 image:
   repository: calltelemetry/web
-  tag: 0.3.6
+  tag: 0.3.5
   annotations:
 resources: {}
 global:

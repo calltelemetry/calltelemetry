@@ -1,6 +1,6 @@
 name: Release Charts
 
-on: release
+on:
   push:
     paths:
       - 'charts/**'
