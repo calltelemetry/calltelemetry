@@ -1,4 +1,4 @@
-hostname: calltelemetry-test
+hostname:
 image:
   repository: calltelemetry/web
   tag: 0.3.6

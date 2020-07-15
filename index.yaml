@@ -3,7 +3,7 @@ entries:
   calltelemetry:
   - apiVersion: v1
     appVersion: 0.3.6
-    created: "2020-07-14T20:54:30.100881-05:00"
+    created: "2020-07-14T21:02:05.664412-05:00"
     dependencies:
     - name: postgresql
       repository: https://charts.bitnami.com/bitnami
@@ -19,7 +19,7 @@ entries:
   calltelmetry-test:
   - apiVersion: v1
     appVersion: 0.3.7
-    created: "2020-07-14T20:54:30.103404-05:00"
+    created: "2020-07-14T21:02:05.668373-05:00"
     dependencies:
     - name: postgresql
       repository: https://charts.bitnami.com/bitnami
@@ -32,36 +32,4 @@ entries:
     urls:
     - https://calltelemetry.github.io/calltelemetry/calltelmetry-test-0.3.7.tgz
     version: 0.3.7
-  stable:
-  - apiVersion: v1
-    appVersion: 0.3.6
-    created: "2020-07-14T20:54:30.105955-05:00"
-    dependencies:
-    - name: postgresql
-      repository: https://charts.bitnami.com/bitnami
-      tags:
-      - calltelemetry-database
-      version: 8.6.4
-    digest: c666376f40618a243b9ed131ebee93c844e3de4421f29eed99c9863d78053521
-    home: http://www.calltelemetry.com/
-    name: stable
-    urls:
-    - https://calltelemetry.github.io/calltelemetry/stable-0.3.6.tgz
-    version: 0.3.6
-  test:
-  - apiVersion: v1
-    appVersion: 0.3.7
-    created: "2020-07-14T20:54:30.109784-05:00"
-    dependencies:
-    - name: postgresql
-      repository: https://charts.bitnami.com/bitnami
-      tags:
-      - calltelemetry-database
-      version: 8.6.4
-    digest: 0a5222587d9994e5a085d203ed04792ecf87242f6cb3032406e074897ba979a2
-    home: http://www.calltelemetry.com/
-    name: test
-    urls:
-    - https://calltelemetry.github.io/calltelemetry/test-0.3.7.tgz
-    version: 0.3.7
-generated: "2020-07-14T20:54:30.095418-05:00"
+generated: "2020-07-14T21:02:05.659873-05:00"
