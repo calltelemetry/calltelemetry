@@ -39,13 +39,13 @@ spec:
                   name: {{ template "name" . }}-config
                   key: EXTERNAL_IP
             - name: DB_USER
-              value:  {{ .Values.global.postgresqlUsername }}
+              value:  {{ .Values.global.postgresql.postgresqlUsername }}
             - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ .Release.Name }}-postgresql
                   key: postgresql-password
             - name: DB_NAME
-              value: {{ .Values.global.postgresqlDatabase }}
+              value: {{ .Values.global.postgresql.postgresqlDatabase }}
             - name: DB_HOSTNAME
               value: {{ .Release.Name }}-postgresql.{{ .Release.Namespace }}.svc.cluster.local 
