@@ -41,10 +41,11 @@ spec:
             - name: DB_USER
               value:  {{ .Values.global.postgresql.postgresqlUsername }}
             - name: DB_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Release.Name }}-postgresql
-                  key: postgresql-password
+              value:  {{ .Values.global.postgresql.postgresqlPassword }}
+              # valueFrom:
+                # secretKeyRef:
+                  # name: {{ .Release.Name }}-postgresql
+                  # key: postgresql-password
             - name: DB_NAME
               value: {{ .Values.global.postgresql.postgresqlDatabase }}
             - name: DB_HOSTNAME
