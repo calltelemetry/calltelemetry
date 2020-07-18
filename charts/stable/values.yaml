@@ -6,5 +6,5 @@ image:
 resources: {}
 global:
   postgresql:
-    database: calltelemetry_prod
-    name: calltelemetry_db
+    postgresqlDatabase: calltelemetry_db
+    postgressqlUsername: calltelemetry
