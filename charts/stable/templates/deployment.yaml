@@ -39,9 +39,9 @@ spec:
                   name: {{ template "name" . }}-config
                   key: EXTERNAL_IP
             - name: DB_USER
-              value:  {{ .Values.global.postgresql.postgresqlUsername }}
+              value:  postgres
             - name: DB_PASSWORD
-              value: postgres
+              value: calltelemetry-postgres
               # valueFrom:
                 # secretKeyRef:
                   # name: {{ .Release.Name }}-postgresql

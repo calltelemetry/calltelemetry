@@ -7,5 +7,5 @@ resources: {}
 global:
   postgresql:
     postgresqlDatabase: calltelemetry_db
-    postgresqlUsername: calltelemetry
-    postgresqlPassword: postgres
+    # postgresqlUsername: calltelemetry
+    postgresqlPassword: calltelemetry-postgres
