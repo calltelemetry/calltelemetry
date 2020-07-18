@@ -8,4 +8,4 @@ global:
   postgresql:
     postgresqlDatabase: calltelemetry_db
     postgresqlUsername: calltelemetry
-    postgresqlPassword: {{ randAlphaNum 10 | quote }}
+    postgresqlPassword: postgres
