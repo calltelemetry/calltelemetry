@@ -41,11 +41,10 @@ spec:
             - name: DB_USER
               value:  postgres
             - name: DB_PASSWORD
-              value: calltelemetry-postgres
-              # valueFrom:
-                # secretKeyRef:
-                  # name: {{ .Release.Name }}-postgresql
-                  # key: postgresql-password
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-postgresql
+                  key: postgresql-password
             - name: DB_NAME
               value: {{ .Values.global.postgresql.postgresqlDatabase }}
             - name: DB_HOSTNAME

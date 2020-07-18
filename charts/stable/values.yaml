@@ -8,5 +8,4 @@ global:
   postgresql:
     image.tag: 9.6.18
     postgresqlDatabase: calltelemetry_db
-    # postgresqlUsername: calltelemetry
-    postgresqlPassword: calltelemetry-postgres
+    postgresqlUsername: calltelemetry
