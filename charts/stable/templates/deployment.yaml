@@ -26,7 +26,7 @@ spec:
           env:
             - name: HOST
               value: {{ .Values.hostname }}
-            - name: PORT
+            - name: INTERNAL_PORT
               value: "8080"
             - name: SECRET_KEY_BASE
               valueFrom:
