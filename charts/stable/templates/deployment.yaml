@@ -38,6 +38,8 @@ spec:
                 configMapKeyRef:
                   name: {{ template "name" . }}-config
                   key: EXTERNAL_IP
+            - name: EXTERNAL_PORT
+              value: "80"
             - name: DB_USER
               value:  calltelemetry
             - name: DB_PASSWORD
