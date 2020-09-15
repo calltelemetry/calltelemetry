@@ -5,7 +5,6 @@ nav:
     - Licensing: licensing.md
     - Features: 
       - "Policy Features": features/policy.md
-      - "Spam Features": features/spam.md
       - "Webhooks": features/webhooks.md
     - Deployment:
       - "Platform Choices": deployment/choices.md
