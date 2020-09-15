@@ -1,0 +1,23 @@
+site_name: CallTelemetry
+nav:
+    - Home: index.md
+    - Architecture: architecture.md
+    - Licensing: licensing.md
+    - Features: 
+      - "Policy Features": features/policy.md
+      - "Spam Features": features/spam.md
+      - "Webhooks": features/webhooks.md
+    - Deployment:
+      - "Platform Choices": deployment/choices.md
+      - "Cloud": deployment/cloud.md
+      - "OVA Appliance": deployment/ova.md
+      - "Docker": deployment/docker.md
+      - "Kubernetes": deployment/k8s.md
+    - Appliance Setup:
+      - "Call Control": setup/curri.md
+      - "CDR": setup/cdr.md
+      - "MCID Spam Tags": setup/mcid.md
+theme: readthedocs
+google_analytics: ['UA-153385083-2', 'mkdocs.org']
+markdown_extensions:
+  - attr_list
