@@ -19,12 +19,12 @@ Restart Linux.
 You will have to SSH to Linux on 2222 now, instead of 22.
 
 
-#### Clone the Repo and Launch the containers!
+#### Grab the Docker Compose file and Launch the containers!
 ``` bash
-sudo apt install -y git
 sudo snap install docker
 sudo apt-get install docker-compose
-git clone https://github.com/calltelemetry/calltelemetry.git
+mkdir calltelemetry
+wget https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/docker-compose.yml
 cd calltelemetry
 sudo docker-compose up
 ```

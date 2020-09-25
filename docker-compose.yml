@@ -1,7 +1,7 @@
 version: "3"
 services:
   db:
-    image: "postgres"
+    image: "bitnami/postgresql"
     restart: "always"
     environment:
       - POSTGRES_USER=calltelemetry
@@ -19,7 +19,9 @@ services:
       - DB_PASSWORD=postgres
       - DB_HOSTNAME=db
       - DB_NAME=calltelemetry_prod
-      - PORT=4000
+      - INTERNAL_PORT=4000
+      - EXTERNAL_PORT=80
       - HOSTNAME=$DEFAULT_IPV4
       - EXTERNAL_IP=$DEFAULT_IPV4
       - SECRET_KEY_BASE=wu3JgPq0IMvIMsJJZ940biL7jVkhLvHJ9I6aqlvhgonVA2eMdOgmdEjWMFAjRKSr
+      - SIGNING_SALT=7HekGYwxATz33gM/rH9q2mV+uKJq5/H
