@@ -20,4 +20,6 @@ services:
       - DB_HOSTNAME=db
       - DB_NAME=calltelemetry_prod
       - PORT=4000
+      - HOSTNAME=$DEFAULT_IPV4
+      - EXTERNAL_IP=$DEFAULT_IPV4
       - SECRET_KEY_BASE=wu3JgPq0IMvIMsJJZ940biL7jVkhLvHJ9I6aqlvhgonVA2eMdOgmdEjWMFAjRKSr
