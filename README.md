@@ -29,4 +29,4 @@ Change log:
 
 Visit www.calltelemetry.com/release_notes for full release notes.
 
-Visit www.calltelemetry.comfor the latest information.
+Visit www.calltelemetry.com for the latest information.
