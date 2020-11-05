@@ -3,9 +3,10 @@ nav:
     - Home: index.md
     - Architecture: architecture.md
     - Licensing: licensing.md
-    - Features: 
-      - "Policy Features": features/policy.md
+    - Features:
+      - "Apps": features/apps.md
       - "Webhooks": features/webhooks.md
+      - "Building Rules": features/policy.md
     - Deployment:
       - "Platform Choices": deployment/choices.md
       - "Cloud": deployment/cloud.md
