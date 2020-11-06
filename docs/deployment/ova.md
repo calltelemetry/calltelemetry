@@ -2,7 +2,7 @@ Difficulty: Easy
 
 Download the OVA and import to Vmware, Virtualbox, etc.
 
-<a href="https://storage.googleapis.com/ct_ovas/CallTelemetry-038-CentOS.ova">Download OVA Appliance for 0.3.8 (2Gb)</a>
+<a href="https://storage.googleapis.com/ct_ovas/CallTelemetry-039-CentOS.ova">Download Latest OVA Appliance (2.4Gb)</a>
 
 OS Details
 ```
