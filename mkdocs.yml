@@ -1,12 +1,13 @@
 site_name: CallTelemetry
+site_url: https://docs.calltelemetry.com
 nav:
     - Home: index.md
     - Architecture: architecture.md
     - Licensing: licensing.md
     - Change Log: changelog.md
+    - Cloud Demo: cloud.md
     - Installing:
       # - "Platform Choices": deployment/choices.md
-      - "Cloud Demo": deployment/cloud.md
       - "OVA Appliance": deployment/ova.md
       - "Docker": deployment/docker.md
       - "Kubernetes": deployment/k8s.md
@@ -25,10 +26,14 @@ nav:
       - "CDR": troubleshooting/cdr.md
       # - "CURRI/ECC": troubleshooting/curri.md
 
-theme: material
-  # font:
-  #   text: Roboto
-  #   code: Roboto Mono
+theme: 
+  name: material
+  logo: assets/logo.png
+  features:
+    - navigation.tabs
+  font:
+    text: Roboto
+    code: Roboto Mono
 google_analytics: ['UA-153385083-2', 'mkdocs.org']
 markdown_extensions:
   - attr_list
@@ -36,3 +41,4 @@ markdown_extensions:
   - pymdownx.superfences
   - pymdownx.details
   - pymdownx.tabbed
+copyright: Copyright &copy; 2020 CallTelemetry

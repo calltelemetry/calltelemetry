@@ -3,10 +3,10 @@ Download the OVA and import to Vmware.
 Requirements:
 
 * 2 vCPU  
-* 4GB RAM  
+* 2GB RAM  
 * 10GB Disk Space (OVA currently requests 100GB)
 
-<a href="https://storage.googleapis.com/ct_ovas/CallTelemetry-040.ova">Download Latest OVA Appliance (3.5Gb)</a>
+<a href="https://storage.googleapis.com/ct_ovas/CallTelemetry-040-slim.ova">Download Latest OVA Appliance (1.4Gb)</a>
 
 OS Details
 ```
