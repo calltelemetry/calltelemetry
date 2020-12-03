@@ -8,15 +8,14 @@ Once docker boots, visit http://localhost, Sign up with any login you like.
 
 ![docker install](docker-install.gif)  
 
-#### Linux only: Change port 22 for CDR SFTP
-Since we run our own SFTP server, so we need to change Linux's SSH port from 22 to 2222 (or any other port than 22). 
-If you like VIM like me...
-```
-sudo vi /etc/ssh/sshd_config
-```
-Edit port from 22 to 2222. Save.
-Restart Linux.
-You will have to SSH to Linux on 2222 now, instead of 22.
+!!! warning "Linux only: Change port 22 for CDR SFTP"
+    Since we run our own SFTP server, so we need to change Linux's SSH port from 22 to 2222 (or any other port than 22). 
+    ```
+    echo "Port 2222" >> /etc/ssh/sshd_config
+    systemctl restart sshd.service
+    ```
+
+    You will have to SSH to Linux on 2222 now, instead of 22.
 
 
 #### Grab the Docker Compose file and Launch the containers!

@@ -1,11 +1,11 @@
+# CDR Server
 CallTelemetry runs a SFTP Server that accepts Cisco CDR formatted files, processes them, and decodes every field.
 
-This can be used for Rule Matching and alerts, even without attaching the Policy API. Right now, I'm not matching rules on CDR Events.
+!!! note "CDR Events do NOT trigger rule matches (yet)."
 
-# Step 1. Enable CDR Processing
-1. Go to Callmanager Serviceability - CDR Management. 
-2. Add a new CDR Billing Server.
-This only needs to be done on the publisher node.
-Use the IP of your CallTelemetry server, and the username and password you login to the UI with.
+# 1. Obtain your CDR Credentials
+![cdr](cdr-credentials.png)
 
-![cdr](cdr-sftp.png)
+# 2. Enable CDR Processing
+## Within Callmanager Serviceability - CDR Management, add server.
+![cdr](cdr-server.png)

@@ -1,5 +1,7 @@
-The Cloud Environment is free and unlimited - so test it and look around.
+The Cloud Environment is ** free ** and unlimited. 
 
-You can login to the cloud and start serving using any of the Policy and Webhooks. 
+!!! note "CDR Processing is not yet supported on Cloud Demo."
 
-You can't process CDR into the cloud (yet!). Let me know if you're a candidate for production hosting. 
+!!! warning "Data will be reset on new releases!" 
+    Do not use it for production use.
+

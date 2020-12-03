@@ -3,21 +3,36 @@ nav:
     - Home: index.md
     - Architecture: architecture.md
     - Licensing: licensing.md
-    - Features:
-      - "Apps": features/apps.md
-      - "Webhooks": features/webhooks.md
-      - "Building Rules": features/policy.md
-    - Deployment:
-      - "Platform Choices": deployment/choices.md
-      - "Cloud": deployment/cloud.md
+    - Change Log: changelog.md
+    - Installing:
+      # - "Platform Choices": deployment/choices.md
+      - "Cloud Demo": deployment/cloud.md
       - "OVA Appliance": deployment/ova.md
       - "Docker": deployment/docker.md
       - "Kubernetes": deployment/k8s.md
-    - Appliance Setup:
+    - User Guide:
+      - "Policies": features/policy.md
+      - "MCID Blocking": features/mcid.md
+      - "Apps": features/apps.md
+      - "App - Webhook": features/webhooks.md
+      - "Organizations": features/organizations.md
+    - Integration Guides:
       - "Call Control": setup/curri.md
       - "CDR": setup/cdr.md
       - "MCID Spam Tags": setup/mcid.md
-theme: readthedocs
+    - Troubleshooting:
+      - "Logs": troubleshooting/logs.md
+      - "CDR": troubleshooting/cdr.md
+      # - "CURRI/ECC": troubleshooting/curri.md
+
+theme: material
+  # font:
+  #   text: Roboto
+  #   code: Roboto Mono
 google_analytics: ['UA-153385083-2', 'mkdocs.org']
 markdown_extensions:
   - attr_list
+  - admonition
+  - pymdownx.superfences
+  - pymdownx.details
+  - pymdownx.tabbed
