@@ -14,7 +14,6 @@
 * Daily SQL backups on the OVA
 * Breaking Changes:
   * WebHooks are now an App.
-* Because of many database changes for Organization Ownership - This upgrade will cause a loss of data. Backup manually before updating.
 * Kubernetes manifest is not ready for 0.4.0 yet - coming soon.
   
 ## 0.3.9 <small>- 11/5/2020</small>
