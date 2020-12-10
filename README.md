@@ -11,13 +11,14 @@ Features:
 * Greeting Injection on any call
 * Redirect calls via policy
 * Change Calling / Called Names and Numbers via rules
-* Email Alerts on any rule - even 911 notifications
+* Email, SMS, Webex Teams Alerts - real-time instant notifications, even 911 notifications
 * Free while in Beta -  Still VERY actively developing.
 
 ---
 
 Change log:
-* 09-25-2020 - 0.3.8 - Apps + WebHooks, OVA Appliance, lots of User Interface work!
+* 11-07-2020 - 0.3.9 - Customizable Apps, Native Webex Teams, SMS, and Email Apps
+* 09-25-2020 - 0.3.8 - WebHooks, OVA Appliance, lots of User Interface work!
 * 08-05-2020 - 0.3.7 - Redirect / Calling / Called Party Modifications, Live Logging
 * 07-17-2020 - 0.3.6 - Email Alerts added, Kubernetes IP Discovery.
 * 03-20-2020 - 0.3.5 - Permit rules added, and CURRI Greeting Injection
