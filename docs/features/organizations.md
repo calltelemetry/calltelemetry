@@ -1,6 +1,6 @@
 # Organizations / Teams
 
-!!! note "Each user on creation is assigned their own unique Organizaton."
+!!! note "Each user on creation is assigned their own unique Organization as their email address."
 
 # Add Users
 
