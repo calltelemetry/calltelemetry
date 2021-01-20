@@ -1,7 +1,12 @@
 
 # Changelog
-
-## 0.4.0 <small>- December 2, 2020</small>
+<!-- ## 0.4.1 <small>-1/31/2021</small>
+* New Deployment: HA on K3s. 3+ Node resillient cluster.
+* Load testing for sizing - plan for 35/call requests per second per core.
+* Bug Fixes
+* UI updates
+* New App: TrueSpam Spam Lookup -->
+## 0.4.0 <small>-12/2/2020</small>
 * New App: Send Message to Calling Number - for Post Call Surveys
 * New App: Webhooks (migrated from existing Webhook feature)
 * New MCID Page - CDR Status, and MCIDs
@@ -104,44 +109,34 @@ Support:
 
 
 ## 0.3.3 <small>- 2/27/2020</small>
-## Enhancements
+Enhancements
 * Called party rules. Policies can now be Calling, Called, or Both party matches now. Rules have a calling and called field. Policy type determines what is used. 
 * UX Enhancements
 * Time limits removed, no expiration date.
 
 ## 0.3.2 <small>- 12/10/2019</small>
-### New Features
+New Features
 * SIP Service - Point a route pattern at a Callmanager SIP Trunk towards the IP of the CallTelemetry host (on-premise), and you can now transfer calls to add them to the call block list. 
 * UX Enhancements
 
-### Bug Fixes
+Bug Fixes
 * Call Pagination issues
 
 ## 0.3.1 <small>- 12/4/2019</small>
 
-### New Features
+New Features
 Introducing the Industry First CDR to CURRI Integration, allowing automatic incoming call blocking!
 * SFTP Server - To accept CDR uploads from Callmanager. Tightly integrated so that the login is exactly the same as the Web Interface of your server.
 * CDR Parser - Full support of all CDR(Call Detail Record) fields from Cisco UCM viewable in the web UI. We support 11.x and 12.x. If you have errors send an example of your failed CDR file to me, I can easily add more parsers.
 * MCID Automatic Blocking - Detection of Malicious Caller-ID (MCID) flag and automatically blacklisting the caller without any interaction beyond the user pressing the MCID softkey.
 
-#### Upgrading to 0.3.1
-Update your docker-composer versions to 0.3.1 to get the new build.
-
-``` bash
-git clone https://github.com/calltelemetry/calltelemetry.git
-cd calltelemetry
-
-docker-compose up (add -d for daemon in background)
-```
-
 ## 0.2.9 <small>- 11/1/2019</small>
 First Public Release for On-Prem. 
 
 0.2.9 expires Feb 1 2020.
-### New Features
+New Features
 * Cisco Incoming Call Blocking - You can apply a call block policy to any Route Pattern, Translation, or Directory Number. You can spread that to multiple CUCM Clusters to have complete call blocking globally.
 * Call Logging - All calls from devices using the policy are available in the CURRI Call log.
 
-##  Version 0.2.0 <small>- 9/1/2019</small>
+## 0.2.0 <small>- 9/1/2019</small>
 Cloud only. Proof of concept available for public demo.
