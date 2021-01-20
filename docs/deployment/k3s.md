@@ -2,6 +2,8 @@
 
 Although it is a long page, once you have 3 machines running with static IPs, installing the software takes only 15-30 minutes. 
 
+## Architecture
+![k3s](k3s-architecture.png)  
 ## Start with CallTelemetry Cluster OVA
 The nodes boot up and display their DHCP Address on login screen.
 SSH to the nodes on port 22.
