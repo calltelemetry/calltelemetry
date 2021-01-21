@@ -1,22 +1,24 @@
-# Call Policy API for realtime call data from Cisco CUCM / Callmanager
+# Call Policy API Cisco Callmanager / Communications Manager
 
 ---
 Features:
 
-* Runs anywhere - SaaS, Vmware OVA appliance, Docker or Kubernetes.
-* Apps & Webhooks off realtime call data
+* OVA Appliance or Kuberentes HA Cluster on-premise
+* Apps & Webhooks from realtime call data
 * CDR Anlytics of spam robo callers (using Cisco MCID Tagging users submissions)
-* Central API for Policy Control across unlimited clusters.
+* Central Policy API across unlimited clusters.
 * Inbound & Outbound call block rules to block harassing callers or spam.
 * Greeting Injection on any call
 * Redirect calls via policy
-* Change Calling / Called Names and Numbers via rules
+* Change Calling / Called Names and Numbers
 * Email, SMS, Webex Teams Alerts - real-time instant notifications, even 911 notifications
-* Free while in Beta -  Still VERY actively developing.
+* Free while in Beta -  Still VERY actively developing. 
+* Contact me if you have a use case involving realtime calls.
 
 ---
 
 Change log:
+* 12-02-2020 - 0.4.0 - Send Message to Caller, Bulk Import/Export, IOS Reject Rule Import, Organizations
 * 11-07-2020 - 0.3.9 - Customizable Apps, Native Webex Teams, SMS, and Email Apps
 * 09-25-2020 - 0.3.8 - WebHooks, OVA Appliance, lots of User Interface work!
 * 08-05-2020 - 0.3.7 - Redirect / Calling / Called Party Modifications, Live Logging
@@ -28,6 +30,6 @@ Change log:
 * 12-04-2019 - 0.3.1 - CDR Integration with MCID added
 * 11-01-2019 - 0.2.9 - First Public Self-hosted release
 
-Visit www.calltelemetry.com/release_notes for full release notes.
+Visit the (Change log)[https://docs.calltelemetry.com/changelog/] full release notes.
 
-Visit www.calltelemetry.com for the latest information.
+Visit (CallTelemetry)[www.calltelemetry.com] for the latest information.
