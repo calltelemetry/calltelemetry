@@ -4,7 +4,7 @@ Although it is a long page, the entire deployment is only about 30 minutes.
 
 ## Architecture
 ![k3s](k3s-architecture.png)  
-## Deploy 3 or more CallTelemetry Cluster OVAs - 10 minutes
+## Deploy 3 or more CallTelemetry Cluster OVAs
 [Download CentOS 8.3 OVA File - 900MB](https://storage.googleapis.com/ct_ovas/CT-cluster-040-centos-8.3-x86_64.ova)
 
 The OVA includes a couple utilities - helm, kubectl, k9s, and saves you a little time "building" the OS. It's prebuilt from CentOS 8.3 with all updates applied.
@@ -45,7 +45,8 @@ in CentOS you can static the NICs like this
 sudo nmtui
 ```
 
-# Install First K3s Master Node - 2 minutes
+# Install First K3s Master Node
+Time: about 2 minutes
 Copy and paste this via SSH on the first node.
 
 ```
@@ -58,7 +59,8 @@ mkdir .kube
 sudo cat /etc/rancher/k3s/k3s.yaml > ~/.kube/config
 ```
 
-# Install K3s Masters 2 and 3 - 5 minutes
+# Install K3s Masters 2 and 3
+Time: about 5 minutes
 
 !!! note "Change the K3S_URL IP address to Master node 1's IP Address"
 
@@ -85,7 +87,8 @@ ct-node-3   Ready    control-plane,etcd,master   19s     v1.20.0+k3s2
 calltelemetry@hp-k3s-1:~$
 ```
 
-# Install MetalLB, Scale DNS Pods, and Traefik Proxy (5 minutes)
+# Install MetalLB, Scale DNS Pods, and Traefik Proxy
+Time: about 5 minutes
 Copy and Paste this block
 ```
 kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/v0.9.5/manifests/namespace.yaml
@@ -131,7 +134,8 @@ pgo              postgres-operator-7b94775688-dv6nm        4/4     Running     1
 
 !!! warning "Wait for postgres-operator to be running before continue"
 
-# Deploy SQL HA with 2 Replicas - 5 minutes
+# Deploy SQL HA with 2 Replicas
+Time: About 5 minutes
 ## Run SQL the Setup Script
 (Run this on Node 1) Leave this window open after running the port-forward.
 You will have 2 windows open to Node 1.
@@ -187,10 +191,10 @@ cluster : ctsql
 		primary (ctsql-6895cd4bb-2f524): UP
 		replica (ctsql-iulc-75ccc767c7-wwd2k): UP
 		replica (ctsql-yzgz-8689bb9998-c2mlf): UP
-calltelemetry@hp-k3s-1:~$
 ```
 
-# Deploy CallTelemetry - 2 minutes
+# Deploy CallTelemetry
+Time: About 2 minutes
 Copy and paste this into a text editor, edit it with your password if you changed it, and assign 2 static IPS for primary and secondary. Cluster IP start and end are not use for CallTelemetry, but helpful to be set.
 
 This step creates a ct_values.yaml file in the local folder. Edit it on the server or in notepad.
@@ -220,7 +224,8 @@ helm upgrade calltelemetry -f ct_values.yaml
 Check the deployment - you should see 3 CallTelemetry-web servers running.
 
 ```
-alltelemetry@hp-k3s-1:~$ kubectl get pods
+kubectl get pods
+
 NAME                      READY   STATUS    RESTARTS   AGE
 calltelemetry-web-fqlv5   1/1     Running   0          4m21s
 calltelemetry-web-gp2f9   1/1     Running   0          4m21s
@@ -233,13 +238,13 @@ traefik-99bfb8458-8xdvj   1/1     Running   0          16m
 
 Check your IPs assigned, you should see your IPs listed here
 ```
-calltelemetry@hp-k3s-1:~$ kubectl get services
+kubectl get services
+
 NAME                      TYPE           CLUSTER-IP      EXTERNAL-IP       PORT(S)                      AGE
 calltelemetry-primary     LoadBalancer   10.43.195.226   192.168.123.135   80:30609/TCP,22:32207/TCP    13m
 calltelemetry-secondary   LoadBalancer   10.43.122.52    192.168.123.136   80:32049/TCP,22:32124/TCP    13m
 kubernetes                ClusterIP      10.43.0.1       <none>            443/TCP                      2d18h
 traefik                   LoadBalancer   10.43.171.164   192.168.123.139   80:31050/TCP,443:30731/TCP   22h
-calltelemetry@hp-k3s-1:~$
 ```
 
 Setup DNS records to point to your 2 IP Addresses - primary and secondary.
@@ -254,7 +259,7 @@ Use these 2 records for the CURRI API, and the primary for the CDR desintation.
 In our case, the password for postgres user is calltelemetry
 
 ``` bash
-calltelemetry@hp-k3s-1:~$ pgo show user -n pgo ctsql --show-system-accounts
+pgo show user -n pgo ctsql --show-system-accounts
 
 CLUSTER USERNAME    PASSWORD                 EXPIRES STATUS ERROR
 ------- ----------- ------------------------ ------- ------ -----
@@ -262,7 +267,6 @@ ctsql   crunchyadm                           never   ok
 ctsql   postgres    calltelemetry            never   ok
 ctsql   primaryuser random_pass never   ok
 ctsql   testuser    random_pass never   ok
-calltelemetry@hp-k3s-1:~$
 ```
 
 ## SQL - Crunchy Data PostgreSQL Operator
