@@ -1,50 +1,51 @@
 # K3S Cluster Guide
 
-Although it is a long page, once you have 3 machines running with static IPs, installing the software takes only 15-30 minutes. 
+Although it is a long page, the entire deployment is only about 30 minutes.
 
 ## Architecture
 ![k3s](k3s-architecture.png)  
-## Start with CallTelemetry Cluster OVA
+## Deploy 3 or more CallTelemetry Cluster OVAs - 10 minutes
+[Download CentOS 8.3 OVA File - 900MB](https://storage.googleapis.com/ct_ovas/CT-cluster-040-centos-8.3-x86_64.ova)
+
+The OVA includes a couple utilities - helm, kubectl, k9s, and saves you a little time "building" the OS. It's prebuilt from CentOS 8.3 with all updates applied.
+You can install this on ANY linux distro, but the support required to do so is beyond my time. 
+
+??? note "I want to install CentOS myself - what's missing?"
+    # enable snaps
+    yum install -y epel-release
+    yum install -y snapd
+    yum install -y wget
+    systemctl enable --now snapd.socket
+    ln -s /var/lib/snapd/snap /snap
+    snap wait system seed.loaded
+    systemctl restart snapd.seeded.service
+    # install kubectl and helm
+    snap install kubectl --classic
+    snap install helm --classic
+
+
 The nodes boot up and display their DHCP Address on login screen.
 SSH to the nodes on port 22.
 Default password is calltelemetry/calltelemetry
 
-!!! note "Change the password - it's not used anywhere else."
+!!! note "It's OK to Change the password - it's not used anywhere else."
 
-!!! warning "Set hostnames and MAC addresses"
-    In Vmware edit the NIC settings and choose regenerate MAC. This is probably done when you import the VM.
+!!! warning "Change hostnames!"
+    If you do not set the hostname per node, you will not get very far without things failing.
 
 I recommend ct-node-1, ct-node-2, ct-node-3, etc, but this is your choice.
 ```
-sudo hostnamect set-hostname ct-node-1
+sudo hostnamect ct-node-1
 ```
-Repeat for other nodes.
+Repeat for other nodes 2 and 3.
 
-### Static IP the NICs
-Edit this file to your NIC preference
-??? "Change IP in Ubuntu"
-    ```
-    sudo vi /etc/netplan/01-netcfg.yaml
-    network:
-    version: 2
-    renderer: networkd
-    ethernets:
-        ens3:
-        dhcp4: no
-        addresses:
-            - 192.168.121.221/24
-        gateway4: 192.168.121.1
-        nameservers:
-            addresses: [8.8.8.8, 1.1.1.1]
-    ```
-    Save (ESC :wq)
+### Static IP the NICs is recommended.
+in CentOS you can static the NICs like this
+``` 
+sudo nmtui
+```
 
-    Then run 
-    ```
-    sudo netplan apply
-    ```
-
-# Install First K3s Master Node
+# Install First K3s Master Node - 2 minutes
 Copy and paste this via SSH on the first node.
 
 ```
@@ -57,14 +58,14 @@ mkdir .kube
 sudo cat /etc/rancher/k3s/k3s.yaml > ~/.kube/config
 ```
 
-# Install K3s Masters 2 and 3
+# Install K3s Masters 2 and 3 - 5 minutes
 
 !!! note "Change the K3S_URL IP address to Master node 1's IP Address"
 
 ```
+export K3S_URL="https://192.168.123.167:6443"
 export INSTALL_K3S_CHANNEL=stable
 export K3S_TOKEN="calltelemetry"
-export K3S_URL="https://192.168.123.180:6443"
 export K3S_KUBECONFIG_MODE="0644"
 curl -sfL https://get.k3s.io | sh -s server - --no-deploy traefik --disable servicelb
 rm -rf .kube
@@ -73,20 +74,18 @@ sudo cat /etc/rancher/k3s/k3s.yaml > ~/.kube/config
 sudo cat /var/lib/rancher/k3s/server/node-token
 ```
 
-!!! warning "Wait for Node 2 to start before joining Node 3."
-
 Check the health of the nodes before continuing - all should say running.
 
 ```
 calltelemetry@hp-k3s-1:~$ kubectl get nodes
 NAME       STATUS   ROLES                       AGE     VERSION
-hp-k3s-1   Ready    control-plane,etcd,master   4m36s   v1.20.0+k3s2
-hp-k3s-2   Ready    control-plane,etcd,master   40s     v1.20.0+k3s2
-hp-k3s-3   Ready    control-plane,etcd,master   19s     v1.20.0+k3s2
+ct-node-1   Ready    control-plane,etcd,master   4m36s   v1.20.0+k3s2
+ct-node-2   Ready    control-plane,etcd,master   40s     v1.20.0+k3s2
+ct-node-3   Ready    control-plane,etcd,master   19s     v1.20.0+k3s2
 calltelemetry@hp-k3s-1:~$
 ```
 
-# Install MetalLB, Scale DNS Pods, and Traefik Proxy (2 minutes)
+# Install MetalLB, Scale DNS Pods, and Traefik Proxy (5 minutes)
 Copy and Paste this block
 ```
 kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/v0.9.5/manifests/namespace.yaml
@@ -95,7 +94,7 @@ kubectl create secret generic -n metallb-system memberlist --from-literal=secret
 kubectl scale deployment.v1.apps/coredns --replicas=3 -n kube-system
 helm repo add traefik https://helm.traefik.io/traefik
 helm repo update
-helm install traefik traefik/traefik 
+helm install traefik traefik/traefik --set service.annotations."metallb\.universe\.tf\/address-pool"=default
 kubectl create namespace pgo
 kubectl apply -f https://raw.githubusercontent.com/CrunchyData/postgres-operator/v4.5.1/installers/kubectl/postgres-operator.yml
 curl https://raw.githubusercontent.com/CrunchyData/postgres-operator/v4.5.1/installers/kubectl/client-setup.sh > client-setup.sh
@@ -111,45 +110,29 @@ EOF
 source ~/.bashrc
 ```
 
-Wait for the operator to deploy.
-Pod will start in Creating status.
-
+In about 3-5 minutes, all pods in the cluster should be "Running"
 ```
-calltelemetry@hp-k3s-1:~$ kubectl get pods -n pgo
-NAME               READY   STATUS              RESTARTS   AGE
-pgo-deploy-fpcq2   0/1     ContainerCreating   0          14s
-calltelemetry@hp-k3s-1:~$
-```
-
-Then running
-
-```
-calltelemetry@hp-k3s-1:~$ kubectl get pods -n pgo
-NAME               READY   STATUS    RESTARTS   AGE
-pgo-deploy-fpcq2   1/1     Running   0          35s
-calltelemetry@hp-k3s-1:~$
-```
-
-Then you will see the operator creating
-
-```
-calltelemetry@hp-k3s-1:~$ kubectl get pods -n pgo
-NAME                                 READY   STATUS              RESTARTS   AGE
-pgo-deploy-fpcq2                     1/1     Running             0          77s
-postgres-operator-7b94775688-2sf4c   0/4     ContainerCreating   0          4s
-calltelemetry@hp-k3s-1:~$
-```
-Finally, in 2-4 minutes you will see the deploy complete, and the Operator running.
-
-```
-calltelemetry@hp-k3s-1:~$ kubectl get pods -n pgo
-NAME                                 READY   STATUS      RESTARTS   AGE
-pgo-deploy-fpcq2                     0/1     Completed   0          2m9s
-postgres-operator-7b94775688-2sf4c   4/4     Running     1          56s
-calltelemetry@hp-k3s-1:~$
+[calltelemetry@ct-node-1 ~]$ kubectl get pod -A
+NAMESPACE        NAME                                      READY   STATUS      RESTARTS   AGE
+default          traefik-99bfb8458-9wjnc                   1/1     Running     0          2m37s
+kube-system      coredns-854c77959c-6nf88                  1/1     Running     0          2m59s
+kube-system      coredns-854c77959c-cg9vg                  1/1     Running     0          8m10s
+kube-system      coredns-854c77959c-g9jbr                  1/1     Running     0          2m59s
+kube-system      local-path-provisioner-7c458769fb-hpk77   1/1     Running     0          8m10s
+kube-system      metrics-server-86cbb8457f-lfswr           1/1     Running     0          8m10s
+metallb-system   controller-65db86ddc6-fmnvv               1/1     Running     0          2m59s
+metallb-system   speaker-j4xj5                             1/1     Running     0          2m59s
+metallb-system   speaker-k84ln                             1/1     Running     0          2m59s
+metallb-system   speaker-lrmj9                             1/1     Running     0          2m59s
+pgo              pgo-deploy-clz5l                          0/1     Completed   0          2m36s
+pgo              postgres-operator-7b94775688-dv6nm        4/4     Running     1          83s
+[calltelemetry@ct-node-1 ~]$
 ```
 
-# Run SQL the Setup Script
+!!! warning "Wait for postgres-operator to be running before continue"
+
+# Deploy SQL HA with 2 Replicas - 5 minutes
+## Run SQL the Setup Script
 (Run this on Node 1) Leave this window open after running the port-forward.
 You will have 2 windows open to Node 1.
 ```
@@ -169,18 +152,19 @@ pgo create cluster -n pgo ctsql -d calltelemetry_prod --replica-count 2 --passwo
 Check the status of the deployment by watching the pods deploy.
 
 ```
-calltelemetry@hp-k3s-1:~$ kubectl get pods -n pgo
+kubectl get pods -n pgo
+
 NAME                                          READY   STATUS              RESTARTS   AGE
 ctsql-6895cd4bb-2f524                         0/1     ContainerCreating   0          21s
 ctsql-backrest-shared-repo-7d4648f796-wxrqh   1/1     Running             0          32s
 pgo-deploy-fpcq2                              0/1     Completed           0          3m27s
 postgres-operator-7b94775688-2sf4c            4/4     Running             1          2m14s
-calltelemetry@hp-k3s-1:~$
 ```
 You should see 3 ctsql instances complete. Let's confirm they are online
 
 ```
-alltelemetry@hp-k3s-1:~$ kubectl get pods -n pgo
+kubectl get pods -n pgo
+
 NAME                                          READY   STATUS      RESTARTS   AGE
 backrest-backup-ctsql-gnbvl                   0/1     Completed   0          57s
 ctsql-6895cd4bb-2f524                         1/1     Running     0          118s
@@ -190,7 +174,10 @@ ctsql-stanza-create-tkltr                     0/1     Completed   0          66s
 ctsql-yzgz-8689bb9998-c2mlf                   0/1     Running     0          49s
 pgo-deploy-fpcq2                              0/1     Completed   0          5m4s
 postgres-operator-7b94775688-2sf4c            4/4     Running     1          3m51s
-calltelemetry@hp-k3s-1:~$ pgo test ctsql
+
+# Check your Cluster
+
+pgo test ctsql
 
 cluster : ctsql
 	Services
@@ -203,25 +190,31 @@ cluster : ctsql
 calltelemetry@hp-k3s-1:~$
 ```
 
-## Deploy CallTelemetry with your postgres user password shown above
-Create a new file with parameters specific to your deployment like below
+# Deploy CallTelemetry - 2 minutes
+Copy and paste this into a text editor, edit it with your password if you changed it, and assign 2 static IPS for primary and secondary. Cluster IP start and end are not use for CallTelemetry, but helpful to be set.
 
+This step creates a ct_values.yaml file in the local folder. Edit it on the server or in notepad.
+Paste this directly into the shell.
 ```
+cat <<EOF > ct_values.yaml
 # ct_values.yaml
-db_hostname: ctsql.pgo.svc.cluster.local
-db_username: postgres
 db_password: calltelemetry
 primary_ip: 192.168.123.135
 secondary_ip: 192.168.123.136
 cluster_ip_start: 192.168.123.138
 cluster_ip_end: 192.168.123.140
+EOF
 ```
-Save it, we will use that to override defaults in the next step.
 
 ```
 helm repo add ct_charts https://storage.googleapis.com/ct_charts/
 helm repo update
-helm install calltelemetry ct_charts/calltelemetry ./ -f ct_values.yaml
+helm install calltelemetry ct_charts/calltelemetry -f ct_values.yaml
+```
+
+!!! note "If you need to re-deploy new values, it is an upgrade instead - like this"
+```
+helm upgrade calltelemetry -f ct_values.yaml
 ```
 
 Check the deployment - you should see 3 CallTelemetry-web servers running.
