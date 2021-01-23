@@ -1,11 +1,13 @@
 
 # Changelog
-<!-- ## 0.4.1 <small>-1/31/2021</small>
-* New Deployment: HA on K3s. 3+ Node resillient cluster.
-* Load testing for sizing - plan for 35/call requests per second per core.
-* Bug Fixes
+<!-- * Bug Fixes
 * UI updates
 * New App: TrueSpam Spam Lookup -->
+## January Updates <small>-1/2021</small>
+* HA Clustering available - Load Balancing and full failover - [here](http://docs.calltelemetry.com/deployment/k3s/)
+* OVA Builder scripting: OVAs are automatically built fresh every release.
+* Sizing Guide [here](http://docs.calltelemetry.com/deployment/choices/)
+* Load Testing instructions [here](http://docs.calltelemetry.com/deployment/load-testing)
 ## 0.4.0 <small>-12/2/2020</small>
 * New App: Send Message to Calling Number - for Post Call Surveys
 * New App: Webhooks (migrated from existing Webhook feature)

@@ -1,6 +1,6 @@
 Download the OVA and import to Vmware. 
 
-As built below, it's good for about 100/calls/second.
+As built below in the deafult template, it should service around 100/calls/second.
 
 Requirements:
 

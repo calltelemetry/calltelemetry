@@ -1,5 +1,5 @@
-## On-Premise Sizing
-0.4.0 can process about 35-50/new call requets per second PER CORE under 50ms. This depends on the hardware you provide the system.
+## Sizing Guide
+0.4.0 can process about 35-50/new call requets per second Per Core under 50ms. This depends on the physical hardware you provide the system.
 
 For example:
 

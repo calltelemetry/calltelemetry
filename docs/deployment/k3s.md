@@ -4,6 +4,10 @@ Although it is a long page, the entire deployment is only about 30 minutes.
 
 ## Architecture
 ![k3s](k3s-architecture.png)  
+
+## IP Addressing
+![k3s-ips](k3s-ips.png)  
+
 ## Deploy 3 or more CallTelemetry Cluster OVAs
 [Download CentOS 8.3 OVA File - 900MB](https://storage.googleapis.com/ct_ovas/CT-cluster-040-centos-8.3-x86_64.ova)
 
