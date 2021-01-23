@@ -1,7 +1,7 @@
 ## You can easily load test your own installation.
 Get the curri test request file
 ```
-wget https://raw.githubusercontent.com/calltelemetry/calltelemetry/docs/testing/curri.xml
+wget https://raw.githubusercontent.com/calltelemetry/calltelemetry/docs/tests/curri.xml
 ```
 
 Install Ali Testing per your OS (here)[https://github.com/nakabonne/ali]

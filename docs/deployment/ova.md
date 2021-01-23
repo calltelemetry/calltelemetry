@@ -26,3 +26,9 @@ Each user is assigned their own private Organizaiton by default. No data is shar
 Visit the [Organization Page](/features/organizations)  to learn more.
 ### Static IP
 Changing the IP is standard CentOS 8.0 processes. I've used the "nmtui" CLI utility in my lab testing to assign static IPs.
+
+### Change the OS Password
+Good practice, change the password, it's one command.
+```
+passwd
+```
