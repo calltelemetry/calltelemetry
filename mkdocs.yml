@@ -1,7 +1,6 @@
 site_name: CallTelemetry
 site_url: https://docs.calltelemetry.com
 nav:
-    - Home: index.md
     - Change Log: changelog.md
     - Licensing: licensing.md
     - Architecture: architecture.md

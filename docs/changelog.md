@@ -4,10 +4,12 @@
 * UI updates
 * New App: TrueSpam Spam Lookup -->
 ## January Updates <small>-1/2021</small>
-* HA Clustering available - Load Balancing and full failover - [here](http://docs.calltelemetry.com/deployment/k3s/)
-* OVA Builder scripting: OVAs are automatically built fresh every release.
-* Sizing Guide [here](http://docs.calltelemetry.com/deployment/choices/)
-* Load Testing instructions [here](http://docs.calltelemetry.com/deployment/load-testing)
+* HA Clustering available - Load Balancing and full failover - [here](deployment/k3s.md)
+* OVA Builder scripting: OVAs are automatically built fresh from CentOS 8.3 every release.
+* Uploaded new Docker-Compose OVA
+* Uploaded Cluster starter OVA
+* Sizing Guide [here](deployment/sizing.md)
+* Load Testing instructions [here](deployment/load-testing.md)
 ## 0.4.0 <small>-12/2/2020</small>
 * New App: Send Message to Calling Number - for Post Call Surveys
 * New App: Webhooks (migrated from existing Webhook feature)

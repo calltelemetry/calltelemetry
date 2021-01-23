@@ -1,6 +1,6 @@
-All licensing is  ** free ** and unlimited during Development Preview. 
+Development builds are free, and intended for trial purposes only
 
-I have prelimary pricing models I can share, please contact me for more details - jason@calltelemetry.com 
+Production licensing and support is available - email jason@calltelemetry.com for details.
 
 !!! warning "Development Version Expirations"
     0.3.9 will expire 12-31-2020.
