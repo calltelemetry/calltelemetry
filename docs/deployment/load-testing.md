@@ -4,7 +4,7 @@ Get the curri test request file
 wget https://raw.githubusercontent.com/calltelemetry/calltelemetry/docs/tests/curri.xml
 ```
 
-Install Ali Testing per your OS (here)[https://github.com/nakabonne/ali]
+Install Ali Testing per your OS [here](https://github.com/nakabonne/ali)
 
 Now get your CallTelemetry policy URL from the Web Portal, replace it here, and change --rps to increase the numer of requests per second. Hit Enter to run the test.
 ```

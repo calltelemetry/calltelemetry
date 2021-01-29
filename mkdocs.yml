@@ -3,33 +3,36 @@ site_url: https://docs.calltelemetry.com
 nav:
     - Change Log: changelog.md
     - Licensing: licensing.md
-    - Architecture: architecture.md
     - Cloud Demo: cloud.md
-    - Installing:
-      - "Platform Choices": deployment/choices.md
-      - "OVA Appliance": deployment/ova.md
-      # - "Docker": deployment/docker.md
-      - "Kubernetes": deployment/k3s.md
-    - User Guide:
+    - Installation Guide:
+      - Architecture: architecture.md
+      - Platform:
+        - "Platform Choices": deployment/choices.md
+        - "Sizing": deployment/sizing.md
+        - "OVA Appliance": deployment/ova.md
+        - "Kubernetes": deployment/k3s.md
+      - Integration to Callmanager:
+        - "Call Control": setup/curri.md
+        - "CDR": setup/cdr.md
+        - "MCID Spam Tags": setup/mcid.md
+    - Using CallTelemetry:
       - "Policies": features/policy.md
       - "MCID Blocking": features/mcid.md
-      - "Apps": features/apps.md
-      - "App - Webhook": features/webhooks.md
+      - "Whare are Apps?": features/apps.md
       - "Organizations": features/organizations.md
-    - Integration Guides:
-      - "Call Control": setup/curri.md
-      - "CDR": setup/cdr.md
-      - "MCID Spam Tags": setup/mcid.md
+    - App Catalog:
+        - "Catalog": apps/webhooks.md
+        # - "SMTP": apps/smtp.md
     - Troubleshooting:
       - "Logs": troubleshooting/logs.md
       - "CDR": troubleshooting/cdr.md
       # - "CURRI/ECC": troubleshooting/curri.md
-
+extra_css: [extra.css]
 theme: 
   name: material
   logo: assets/logo.png
-  # features:
-    # - navigation.tabs
+  features:
+    - navigation.tabs
   font:
     text: Roboto
     code: Roboto Mono
@@ -40,4 +43,4 @@ markdown_extensions:
   - pymdownx.superfences
   - pymdownx.details
   - pymdownx.tabbed
-copyright: Copyright &copy; 2020 CallTelemetry
+copyright: Copyright &copy; 2021 CallTelemetry
