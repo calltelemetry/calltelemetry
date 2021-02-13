@@ -1,31 +1,15 @@
 ## Sizing Guide
-CallTelemetry VMs are sized by cpu and call volume. 
 
-After much testing, 100 calls per CPU thread per second is a good guide for sizing. This varies based on the hardware you provide.
+General Sizing: 100 new call inspections per core *per second* in under 15ms. 
 
-The OVA as released, with 2 vCPU, should handle 200 calls/second in under 20ms 95th precentile on most any machine. If you double vCPUs, performance doubles.
+The OVA is 2 vCPU, and hits 200-300 new calls insepctions *per second* in under 15ms, constant load, 95th percentile.
 
-If you are only inspecting a translation pattern inbound and oubound, then 500-700 new call requests sustained per second is sufficient for most all customers.
-Concurrent calls do not matter, only new events.
+Scale the OVA to 8 vCPU and get 600+ call inspections *per second* in under 15ms.
 
-Stress testing on 0.4.1:
-## 2019 Macbook Pro - Vmware Fusion, 0.4.1 OVA.
-* 2 vCPU Threads - 200/calls/second - 21ms.
-* 4 vCPU threads - 400/calls/second - 21ms.
-* 6 vCPU threads - 550/calls/second - 21ms. 
-* 8 vCPU Threads - 600/calls/second - 21ms.
-* 10+ vCPU Threads - 700/calls/second. Virtualization operations slow down the maxium potential. Natively I can reach 1300/calls/second on the same system. Further optimization is being explored - the system can handle more in bursts, but this stress testing is purely a constant load test.
-* Average 100/calls/second per vCPU using OVA model.
-* Max 700/calls/second
+If you need to inspect more than 600 calls per second on a single box, let's talk - email jason@calltelemetry. Configurations can reach 3,000 per second sustained volume on 8 cores, but you are probably better suited for the Enterprise Cluster mode.
 
-## HP EliteDesk G2 Mini running ESXi 6.7
-* i5-6500T 4 core, 32GB DDR3, nvme drive.
-* Vmware ESXi 6.7SU1
-* 3 VMs in a Kubernetes Cluster - Each VM ran on 1 core.
-* Peak Load - 300/calls/second, 61ms 95th percentile. 3 Cores allocated to Call Processing.
-* 100/calls/second per vCPU even in Kuberentes model, on a modest consumer desktop.
-* Max 300/calls/second in this setup. I have more machines on order to test more nodes in the cluster.
+This sizing guide is sustained **NEW** events per second, not concurrent calls active in the system. If you have call requests spikes above this, they can be easily handled momentarily @ 200-300 calls per second at the cost of some latency.
 
-The above testing was on consumer grade hardware, enterprise grade hardware should perform even better. I will be gathering more information on server hardware in the future.
+In the event the system is overloaded, connections will be returned error with HTTP code 500, and calls will continue according to the ECCP profile setting default.
 
-If you need failover or scaling beyond cores in a single node, choose [Kubernetes](k8s.md)
+If you need failover or scaling beyond a single node, choose the Enterprise HA option[Kubernetes](k8s.md)
