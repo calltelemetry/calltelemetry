@@ -1,8 +1,20 @@
 
 # Changelog
-<!-- * Bug Fixes
-* UI updates
-* New App: TrueSpam Spam Lookup -->
+## 0.4.1 <small>-2/28/2021</small>
+* RegEx Patterns on Rules - Allowing more complex combinations.
+* Compliance Rules - Org Wide Priority Policies, with dynamic Spam Lookup support, before handing to the user policies.
+* New App: TrueSpam Spam Lookup - First Compliance Spam Lookup App - dynamically query Spam APIs to block smarter.
+* Optimization & Caching - 3x Performance! - 100 call inspections per core per second in under 15ms on the OVA. Profiled up to 700/calls/second running the OVA.
+* Enhancements to Live Logging details.
+* Policies now reflect the cause of the action taken.
+* Minor Bug Fixes
+* UI updates:
+* Admins Page
+* Licene Page
+* Org Drop Down Selection on sidebar
+* Password Reset Page
+* More detail on Rule Pages - drop down with Apps and Modifiers in the rule.
+* 0.4.1 expires 3-31-2021 without a permenant license.
 ## January Updates <small>-1/2021</small>
 * HA Clustering available - Load Balancing and full failover - [here](deployment/k3s.md)
 * OVA Builder scripting: OVAs are automatically built fresh from CentOS 8.3 every release.
