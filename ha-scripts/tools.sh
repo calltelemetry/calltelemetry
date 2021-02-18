@@ -1,6 +1,7 @@
 #!/bin/bash
 # Install Kubectl and Helm via SNAPS
-sudo yum install -y wget epel-release snapd
+sudo yum install -y wget epel-release 
+sudo yum install -y snapd
 sudo systemctl enable --now snapd.socket
 sudo ln -s /var/lib/snapd/snap /snap
 sudo snap wait system seed.loaded
