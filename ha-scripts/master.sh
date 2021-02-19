@@ -21,7 +21,7 @@ sudo cat /etc/rancher/k3s/k3s.yaml > ~/.kube/config
 # Install Traefik
 /snap/bin/helm repo add traefik https://helm.traefik.io/traefik
 /snap/bin/helm repo update
-/snap/bin/helm install traefik traefik/traefik --set service.annotations."metallb\.universe\.tf\/address-pool"="default"
+/snap/bin/helm install traefik traefik/traefik --set service.annotations."metallb\.universe\.tf\/address-pool"="default" --set deployment.replicas=3
 
 echo "Preparing to Install CrunchyData PostgreSQL Operator"
 /snap/bin/kubectl create namespace pgo
@@ -50,8 +50,8 @@ sleep 3
 echo "Installing Postgres Cluster + Replicas, will take a moment to complete"
 /usr/local/bin/pgo create cluster -n pgo ctsql -d calltelemetry_prod --password-superuser="calltelemetry"
 
-# echo "Scaling DNS in Kuberentes to match node count"
-# /snap/bin/kubectl scale deployment.v1.apps/coredns --replicas=$NODES -n kube-system
+echo "Scaling DNS in Kuberentes to match node count"
+/snap/bin/kubectl scale deployment.v1.apps/coredns --replicas=$NODES -n kube-system
 
 echo "Starting CallTelemetry deployment via Helm Chart"
 cat <<EOF > ./custom_values.yaml
