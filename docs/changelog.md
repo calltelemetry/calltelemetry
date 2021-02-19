@@ -4,8 +4,8 @@
 * RegEx Patterns on Rules - Allowing more complex combinations.
 * Compliance Rules - Org Wide Priority Policies, with dynamic Spam Lookup support, before handing to the user policies.
 * New App: TrueSpam Spam Lookup - First Compliance Spam Lookup App - dynamically query Spam APIs to block smarter.
-* Optimization & Caching - 3x Performance! - 100 call inspections per core per second in under 15ms on the OVA. Profiled up to 700/calls/second running the OVA.
-* Enhancements to Live Logging details.
+* Optimization & Caching - 3x Performance! - 100 call inspections per core per second in under 15ms on the OVA. Profiled 700+/calls/second running the OVA on 8 cores. Need more? Cluster them.
+* Enhancements to Live Logging process.
 * Policies now reflect the cause of the action taken.
 * Minor Bug Fixes
 * UI updates:
