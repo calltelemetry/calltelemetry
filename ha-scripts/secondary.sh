@@ -1,11 +1,7 @@
 #!/bin/bash
 # Edit this to be the primary node / any master node.
 export primary_ip="192.168.0.148"
-# You might need to change the internal cluster IPs so they don't conflict with your external resources. 
-export cluster_cidr="192.168.100.0/24"
-export service_cidr="192.168.101.0/24"
-export dns_service="192.168.101.10"
-# Note: This token is a preshared-key shared between the cluster. It should be changed for production use.
+#his token is a preshared-key shared between the cluster. It should be changed for production use.
 export K3S_TOKEN="calltelemetry"
 
 # Nothing below this needs to be edited
@@ -23,7 +19,7 @@ export PGO_CA_CERT="${HOME?}/.pgo/pgo/client.crt"
 export PGO_CLIENT_CERT="${HOME?}/.pgo/pgo/client.crt"
 export PGO_CLIENT_KEY="${HOME?}/.pgo/pgo/client.key"
 export PGO_APISERVER_URL='https://127.0.0.1:8443'
-export PGO_NAMESPACE=pg
+export PGO_NAMESPACE=pgo
 
 echo "Installing CrunchData PGO Client"
 # wget https://raw.githubusercontent.com/CrunchyData/postgres-operator/v4.5.1/installers/kubectl/client-setup.sh
