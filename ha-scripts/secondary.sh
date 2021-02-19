@@ -30,6 +30,6 @@ ls -la ~/.pgo/pgo
 # ls -la /home/calltelemetry/.pgo/pgo
 sudo cp ~/.pgo/pgo/pgo /usr/local/bin
 /snap/bin/kubectl port-forward -n pgo svc/postgres-operator 8443:8443 &
-
+sleep 3
 echo "Scaling SQL Replica to this node"
 /usr/local/bin/pgo scale -n pgo ctsql --no-prompt
