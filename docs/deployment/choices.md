@@ -8,7 +8,7 @@ An example PostgreSQL backup script is included in the folder.
 
 ## Multi Node HA
 If you need to scale to multiple vCPU VMs for load balancing, or capacity, or failover - choose this.
-You will get 2 Virtual IPs floating among 3+ nodes, with PostgreSQL replicas on each node. 
+You will get 3 Virtual IPs floating among 3+ nodes, with PostgreSQL replicas on each node. 
 The CrunchyData PostgreSQL operator has a built in backup scheduler you can use for backups.
 
 * [Cluster - Kubernetes](k3s.md)

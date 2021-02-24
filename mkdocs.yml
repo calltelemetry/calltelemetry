@@ -8,9 +8,10 @@ nav:
       - Architecture: architecture.md
       - Platform:
         - "Platform Choices": deployment/choices.md
-        - "Sizing": deployment/sizing.md
         - "OVA Appliance": deployment/ova.md
         - "Kubernetes": deployment/k3s.md
+        - "Sizing": deployment/sizing.md
+        - "Load Testing": deployment/load-testing.md
       - Integration to Callmanager:
         - "Call Control": setup/curri.md
         - "CDR": setup/cdr.md

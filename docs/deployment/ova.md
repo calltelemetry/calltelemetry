@@ -1,6 +1,8 @@
 Download the OVA and import to Vmware. You are running the entire CallTelemetry platform on-premise.
 
-As built below in the deafult template, it should service around 100/calls/second.
+As built below in the deafult template, it should service around 200/calls/second.
+
+!!! note "Need more? Give it 8 cores to hit 700/calls/second. More than that? See the Enterprise HA Clustering."
 
 Requirements:
 

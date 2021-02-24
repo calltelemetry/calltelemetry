@@ -1,5 +1,6 @@
 ## You can easily load test your own installation.
-Get the curri test request file
+Get the curri test request file. this is the same data CUCM submits to the API.
+
 ```
 wget https://raw.githubusercontent.com/calltelemetry/calltelemetry/docs/tests/curri.xml
 ```

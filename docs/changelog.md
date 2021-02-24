@@ -1,6 +1,7 @@
 
 # Changelog
-## 0.4.1 <small>-2/28/2021</small>
+## 0.4.1 Pending Final Release! <small>-2/28/2021</small>
+* Lots of improvements to the HA Clustering from production use.
 * RegEx Patterns on Rules - Allowing more complex combinations.
 * Compliance Rules - Org Wide Priority Policies, with dynamic Spam Lookup support, before handing to the user policies.
 * New App: TrueSpam Spam Lookup - First Compliance Spam Lookup App - dynamically query Spam APIs to block smarter.
