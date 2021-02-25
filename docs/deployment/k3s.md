@@ -1,9 +1,8 @@
-# K3S Cluster Guide
+# Enterprise HA Cluster Guide
 
-# Professional Installation support is available.
-!!! note "This area is new and under development, this is intended to be a guide, but not self installed. Please contact me if you think this deployment fits your need.
+## Professional Installation support is available for clustered installs.
 
-Once you have 3 machines ready, the entire cluster install to login is about 30 minutes.
+!!! note "This area is new and under development, this is intended to be a guide, but not self installed. Please contact me if you think this deployment fits your need. Once you have 3 machines ready, the entire cluster install can be done in under 30 minutes."
 ## Architecture
 ![k3s](k3s-architecture.png)  
 

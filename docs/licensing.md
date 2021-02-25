@@ -1,11 +1,12 @@
-Development builds are free, and intended for trial purposes only
+0.4.0 is stable and well tested.
 
-Production licensing and support is available - email jason@calltelemetry.com for details.
+0.4.1 is pending release.
 
-!!! warning "Development Version Expirations"
-    0.3.9 will expire 12-31-2020.
+Production licensing and support is available.
 
+[CallTelemetry Pricing](https://www.calltelemetry.com/pricing)
+
+!!! warning "Development Build Expirations"
     0.4.0 will expire 3-31-2021. 
-    
     0.4.1 will expire 5-31-2021.
 

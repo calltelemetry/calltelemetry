@@ -1,25 +1,29 @@
-site_name: CallTelemetry
+site_name: CallTelemetry Documentation
 site_url: https://docs.calltelemetry.com
 nav:
     - Change Log: changelog.md
     - Licensing: licensing.md
     - Cloud Demo: cloud.md
     - Installation Guide:
-      - Architecture: architecture.md
-      - Platform:
-        - "Platform Choices": deployment/choices.md
+      - Design: 
+        - "Architecture": architecture.md
+        # - "Sizing": deployment/sizing.md
+        - "Single OVA or Cluster": deployment/choices.md
+      # - Platform:
+      #   - "Load Testing": deployment/load-testing.md
+      - Installing:
         - "OVA Appliance": deployment/ova.md
-        - "Kubernetes": deployment/k3s.md
-        - "Sizing": deployment/sizing.md
-        - "Load Testing": deployment/load-testing.md
+        - "HA Cluster": deployment/k3s.md
       - Integration to Callmanager:
-        - "Call Control": setup/curri.md
-        - "CDR": setup/cdr.md
-        - "MCID Spam Tags": setup/mcid.md
-    - Using CallTelemetry:
-      - "Policies": features/policy.md
+        - "Add a Call Control Profile": setup/curri.md
+        - "Policy Deployment Guide": setup/policy-assignment.md
+        - "Add CDR Events": setup/cdr.md
+        - "Processing MCID Spam Tags": setup/mcid.md
+    - Using Policies:
+      - "Policy Flow": setup/policy-flow.md
+      - "Rule Features": features/policy.md
       - "MCID Blocking": features/mcid.md
-      - "Whare are Apps?": features/apps.md
+      - "Apps": features/apps.md
       - "Organizations": features/organizations.md
     - App Catalog:
         - "Catalog": apps/webhooks.md

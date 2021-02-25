@@ -1,8 +1,8 @@
-Download the OVA and import to Vmware. You are running the entire CallTelemetry platform on-premise.
+Download the OVA and import to Vmware. This is entire CallTelemetry platform on-premise.
 
-As built below in the deafult template, it should service around 200/calls/second.
+As built below in the deafult template, it will process around 200 new calls/second.
 
-!!! note "Need more? Give it 8 cores to hit 700/calls/second. More than that? See the Enterprise HA Clustering."
+!!! note "Need more? Allocate 8 cores to hit 700/calls/second. More than that? See the Enterprise HA Clustering."
 
 Requirements:
 
@@ -30,7 +30,7 @@ Visit the [Organization Page](/features/organizations)  to learn more.
 Changing the IP is standard CentOS 8.0 processes. I've used the "nmtui" CLI utility in my lab testing to assign static IPs.
 
 ### Change the OS Password
-Good practice, change the password, it's one command.
+Good practice, change the OS password for calltelemetry - it's just one command.
 ```
 passwd
 ```

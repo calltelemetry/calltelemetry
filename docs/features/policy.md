@@ -1,7 +1,7 @@
 
 # Rules:
 
-
+## Choose section, Triggers, Greetings, Modifiers, Webhooks or Apps
 
 === "Triggers"
     ### Block or Permit

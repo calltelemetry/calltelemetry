@@ -1,6 +1,6 @@
 
 # Changelog
-## 0.4.1 Pending Final Release! <small>-2/28/2021</small>
+## 0.4.1 Pending Release <small>-2/28/2021</small>
 * Lots of improvements to the HA Clustering from production use.
 * RegEx Patterns on Rules - Allowing more complex combinations.
 * Compliance Rules - Org Wide Priority Policies, with dynamic Spam Lookup support, before handing to the user policies.
@@ -8,10 +8,11 @@
 * Optimization & Caching - 3x Performance! - 100 call inspections per core per second in under 15ms on the OVA. Profiled 700+/calls/second running the OVA on 8 cores. Need more? Cluster them.
 * Enhancements to Live Logging process.
 * Policies now reflect the cause of the action taken.
+* Pricing Page added
 * Minor Bug Fixes
 * UI updates:
 * Admins Page
-* Licene Page
+* License Page
 * Org Drop Down Selection on sidebar
 * Password Reset Page
 * More detail on Rule Pages - drop down with Apps and Modifiers in the rule.
