@@ -3,7 +3,7 @@
 ---
 Features:
 
-* OVA Appliance or Kuberentes HA Cluster on-premise
+* OVA Appliance or Kuberentes HA Cluster (on-premise / cloud)
 * Apps & Webhooks from realtime call data
 * CDR Anlytics of spam robo callers (using Cisco MCID Tagging users submissions)
 * Central Policy API across unlimited clusters.
@@ -18,6 +18,7 @@ Features:
 ---
 
 Change log:
+* 2-28-2021 - 0.4.1 - Compliance Rule Type, RegEx patterns, Dynamic Spam Lookups via Twilio.
 * 12-02-2020 - 0.4.0 - Send Message to Caller, Bulk Import/Export, IOS Reject Rule Import, Organizations
 * 11-07-2020 - 0.3.9 - Customizable Apps, Native Webex Teams, SMS, and Email Apps
 * 09-25-2020 - 0.3.8 - WebHooks, OVA Appliance, lots of User Interface work!
