@@ -1,11 +1,11 @@
 
 # Changelog
-## 0.4.1 Pending Release <small>-2/28/2021</small>
-* Lots of improvements to the HA Clustering from production use.
+## 0.4.1 <small>-2/28/2021</small>
+* Lots of improvements to the HA Clustering from production deployments.
 * RegEx Patterns on Rules - Allowing more complex combinations.
-* Compliance Rules - Org Wide Priority Policies, with dynamic Spam Lookup support, before handing to the user policies.
+* Compliance Rules - Org Wide Priority Policies, with dynamic Spam Lookup support, before handing the call to the user policies.
 * New App: TrueSpam Spam Lookup - First Compliance Spam Lookup App - dynamically query Spam APIs to block smarter.
-* Optimization & Caching - 3x Performance! - 100 call inspections per core per second in under 15ms on the OVA. Profiled 700+/calls/second running the OVA on 8 cores. Need more? Cluster them.
+* Optimization & Caching - 3x Performance! - 100 call inspections per core per second in under 15ms on the OVA. Profiled 700/call inspections/second running the OVA on 8 cores. Need more? See HA Clustering.
 * Enhancements to Live Logging process.
 * Policies now reflect the cause of the action taken.
 * Pricing Page added

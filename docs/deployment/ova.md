@@ -1,6 +1,11 @@
-Download the OVA and import to Vmware. This is entire CallTelemetry platform on-premise.
+# Download Links
+<a href="https://storage.googleapis.com/ct_ovas/CallTelemetry-stable.ova">Download 0.4.0 Stable OVA Appliance (1.1Gb)</a>
 
-As built below in the deafult template, it will process around 200 new calls/second.
+<a href="https://storage.googleapis.com/ct_ovas/CallTelemetry-041.ova">Download 0.4.1 Testing OVA Appliance (1.1GB)</a>
+
+Download the OVA and import to Vmware. 
+
+The default import template of 2 vCPUS will process 200 new call inspections/second.
 
 !!! note "Need more? Allocate 8 cores to hit 700/calls/second. More than that? See the Enterprise HA Clustering."
 
@@ -9,8 +14,6 @@ Requirements:
 * 2 vCPU 
 * 4GB RAM  
 * 60GB Disk Space
-
-<a href="https://storage.googleapis.com/ct_ovas/CallTelemetry-stable.ova">Download Latest OVA Appliance (1.12Gb)</a>
 
 OS Details
 ```
@@ -21,7 +24,7 @@ Password: calltelemetry
 ```
 
 ### First Login
-It will bootup and grab a DHCP address, and print that on the console.
+It will bootup and grab a DHCP address, and display that on the console.
 Just open a web browser to http://IPADDRESS and create a new login(signup).
 
 Each user is assigned their own private Organizaiton by default. No data is shared between users unless the user is invited to the Organization.
