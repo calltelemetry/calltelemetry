@@ -6,6 +6,8 @@
 * Compliance Rules - Org Wide Priority Policies, with dynamic Spam Lookup support, before handing the call to the user policies.
 * New App: TrueSpam Spam Lookup - First Compliance Spam Lookup App - dynamically query Spam APIs to block smarter.
 * Optimization & Caching - 3x Performance! - 100 call inspections per core per second in under 15ms on the OVA. Profiled 700/call inspections/second running the OVA on 8 cores. Need more? See HA Clustering.
+* Webex Teams App supports Markdown
+* More Data Fields available in Apps
 * Enhancements to Live Logging process.
 * Policies now reflect the cause of the action taken.
 * Pricing Page added
