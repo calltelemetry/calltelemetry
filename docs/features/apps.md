@@ -1,10 +1,10 @@
 # Apps
 [Latest App Catalog](https://www.calltelemetry.com/features/apps)  
-Apps are a modular services that can trigger on any rule event. 
+Apps are a modular services that can trigger on any rule event, and even change the callflow.
 
 ## What can apps do?
 ### Alerts
-You can receive "alert" via Webex Teams, Email, Twilio, and more.
+You can trigger actions, sometimes we woudl call these "alerts" via Webex Teams, Email, Twilio, and more.
 
 ### Modifying call flow
-No apps do this today, but in the future, some apps will perform native actions - like blocking or redirecting a call. For example, to authenticate the caller, the service might redirect the call to an IVR to enter a code, then on the second time hitting the App let the caller through the system.
+Some apps change the callflow. For example, a new app TrueSpam does a lookup to Twilio, and evalulates if the caller has a known spam score. If the score is higher than your threshold, the call is blocked.

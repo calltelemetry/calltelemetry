@@ -16,6 +16,7 @@ nav:
         - "HA Cluster": deployment/k3s.md
       - Integration to Callmanager:
         - "Add a Call Control Profile": setup/curri.md
+        - "Add a CUBE": setup/cube.md
         - "Policy Deployment Guide": setup/policy-assignment.md
         - "Add CDR Events": setup/cdr.md
         - "Processing MCID Spam Tags": setup/mcid.md

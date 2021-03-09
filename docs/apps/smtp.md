@@ -11,3 +11,6 @@ Requires SMTP credentials for your server.
 ## Send a Message via Twilio to Caller
 Sends a message back to the caller to engage in a new channel. For example - Post Call Surveying, or engaging with Agents via Chat during vs holding.
 Requires Twilio API keys and phone number
+
+# TrueSpam Lookup - 
+This app does a lookup to Twilio, and evalulates if the caller has a known spam score. If the score is higher than your threshold configured on the App Settings, the call is blocked.

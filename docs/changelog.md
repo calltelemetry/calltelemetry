@@ -1,5 +1,8 @@
 
 # Changelog
+## 0.4.2 Pending Release <small>-3-?-2021</small>
+* CUBE Integration - CUBEs are now supported through native Cisco APIs. You can add a CUBE, and link each to any policy. The CUBE page provides the 4-5 lines of CLI to link your CUBEs to Call Telemetry. 
+
 ## 0.4.1 <small>-2/28/2021</small>
 * Lots of improvements to the HA Clustering from production deployments.
 * RegEx Patterns on Rules - Allowing more complex combinations.

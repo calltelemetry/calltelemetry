@@ -1,4 +1,4 @@
-This is a general guide. If you have any questions, please contact jason@calltelemetry.com.
+If you have any questions, please contact jason@calltelemetry.com.
 ## Single Node - 
 Easiset to deploy. Boots up, grabs DHCP, and hit the HTTP login screen. 
 Production ready, it will automatically start up all service on reboot.
