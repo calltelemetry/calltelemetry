@@ -1,4 +1,4 @@
-# Call Policy API Cisco Callmanager / Communications Manager
+# Call Policy API for Cisco Callmanager / Communications Manager and IOS CUBE
 
 ---
 Features:
@@ -6,7 +6,7 @@ Features:
 * OVA Appliance or Kuberentes HA Cluster (on-premise / cloud)
 * Apps & Webhooks from realtime call data
 * CDR Anlytics of spam robo callers (using Cisco MCID Tagging users submissions)
-* Central Policy API across unlimited clusters.
+* Central Policy API across unlimited clusters and CUBEs.
 * Inbound & Outbound call block rules to block harassing callers or spam.
 * Greeting Injection on any call
 * Redirect calls via policy
@@ -18,6 +18,7 @@ Features:
 ---
 
 Change log:
+* 3-10-2021 - 0.4.2 - CUBE Integration - inbound and outbound policy support
 * 2-28-2021 - 0.4.1 - Compliance Rule Type, RegEx patterns, Dynamic Spam Lookups via Twilio.
 * 12-02-2020 - 0.4.0 - Send Message to Caller, Bulk Import/Export, IOS Reject Rule Import, Organizations
 * 11-07-2020 - 0.3.9 - Customizable Apps, Native Webex Teams, SMS, and Email Apps
