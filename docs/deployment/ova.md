@@ -1,7 +1,9 @@
 # Download Links
-<a href="https://storage.googleapis.com/ct_ovas/CallTelemetry-stable.ova">Download 0.4.0 Stable OVA Appliance (1.1Gb)</a>
+<a href="https://storage.googleapis.com/ct_ovas/CallTelemetry-stable.ova">Download 0.4.0 ("stable") OVA Appliance (1.1Gb)</a>
 
-<a href="https://storage.googleapis.com/ct_ovas/CallTelemetry-041.ova">Download 0.4.1 Testing OVA Appliance (1.1GB)</a>
+<a href="https://storage.googleapis.com/ct_ovas/CallTelemetry-041.ova">Download 0.4.1 ("beta") OVA Appliance (1.1GB)</a>
+
+<a href="https://storage.googleapis.com/ct_ovas/CallTelemetry-042.ova">Download 0.4.2 ("beta" OVA Appliance (900MB)</a>
 
 Download the OVA and import to Vmware. 
 
