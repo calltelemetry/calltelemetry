@@ -2,7 +2,7 @@ site_name: CallTelemetry Documentation
 site_url: https://docs.calltelemetry.com
 nav:
     - Change Log: changelog.md
-    - Licensing: licensing.md
+    # - Licensing: licensing.md
     - Cloud Demo: cloud.md
     - Installation Guide:
       - Design: 

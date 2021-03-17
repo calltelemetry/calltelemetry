@@ -1,15 +1,11 @@
 # Download Links
-<a href="https://storage.googleapis.com/ct_ovas/CallTelemetry-stable.ova">Download 0.4.0 ("stable") OVA Appliance (1.1Gb)</a>
-
-<a href="https://storage.googleapis.com/ct_ovas/CallTelemetry-041.ova">Download 0.4.1 ("beta") OVA Appliance (1.1GB)</a>
-
-<a href="https://storage.googleapis.com/ct_ovas/CallTelemetry-042.ova">Download 0.4.2 ("beta" OVA Appliance (900MB)</a>
+<a href="https://storage.googleapis.com/ct_ovas/CallTelemetry-042.ova">Download 0.4.2 (OVA Appliance (900MB)</a>
 
 Download the OVA and import to Vmware. 
 
 The default import template of 2 vCPUS will process 200 new call inspections/second.
 
-!!! note "Need more? Allocate 8 cores to hit 700/calls/second. More than that? See the Enterprise HA Clustering."
+!!! note "Need more? Allocate 8 cores to hit 700/calls/second. More than that? See the Enterprise Plan for HA Clustering."
 
 Requirements:
 
