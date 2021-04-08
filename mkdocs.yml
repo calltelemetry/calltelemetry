@@ -35,7 +35,7 @@ nav:
       # - "CURRI/ECC": troubleshooting/curri.md
 extra_css: [extra.css]
 theme: 
-  name: material
+  name: mkdocs
   logo: assets/logo.png
   features:
     - navigation.tabs
@@ -46,7 +46,7 @@ google_analytics: ['UA-153385083-2', 'mkdocs.org']
 markdown_extensions:
   - attr_list
   - admonition
-  - pymdownx.superfences
+  # - pymdownx.superfences
   - pymdownx.details
   - pymdownx.tabbed
 copyright: Copyright &copy; 2021 CallTelemetry
