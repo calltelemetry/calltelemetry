@@ -19,7 +19,7 @@ services:
       - DB_PASSWORD=postgres
       - DB_HOSTNAME=db
       - DB_NAME=calltelemetry_prod
-      - DB_PORT="5432"
+      - DB_PORT=5432
       - INTERNAL_PORT=4000
       - EXTERNAL_PORT=80
       - HOSTNAME=$DEFAULT_IPV4
