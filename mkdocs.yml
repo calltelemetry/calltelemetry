@@ -1,25 +1,23 @@
-site_name: CallTelemetry Documentation
+site_name: Call Telemetry Docs
 site_url: https://docs.calltelemetry.com
 nav:
     - Change Log: changelog.md
-    # - Licensing: licensing.md
     - Cloud Demo: cloud.md
-    - Installation Guide:
-      - Design: 
-        - "Architecture": architecture.md
-        # - "Sizing": deployment/sizing.md
-        - "Single OVA or Cluster": deployment/choices.md
-      # - Platform:
-      #   - "Load Testing": deployment/load-testing.md
-      - Installing:
-        - "OVA Appliance": deployment/ova.md
-        - "HA Cluster": deployment/k3s.md
-      - Integration to Callmanager:
-        - "Add a Call Control Profile": setup/curri.md
-        - "Add a CUBE": setup/cube.md
-        - "Policy Deployment Guide": setup/policy-assignment.md
-        - "Add CDR Events": setup/cdr.md
-        - "Processing MCID Spam Tags": setup/mcid.md
+    - Design: 
+      - "Architecture": architecture.md
+      # - "Sizing": deployment/sizing.md
+      - "Single OVA or Cluster": deployment/choices.md
+    # - Platform:
+    #   - "Load Testing": deployment/load-testing.md
+    - Installing:
+      - "OVA Appliance": deployment/ova.md
+      - "HA Cluster": deployment/k3s.md
+    - Integration to Callmanager:
+      - "Add a Call Control Profile": setup/curri.md
+      - "Add a CUBE": setup/cube.md
+      - "Policy Deployment Guide": setup/policy-assignment.md
+      - "Add CDR Events": setup/cdr.md
+      - "Processing MCID Spam Tags": setup/mcid.md
     - Using Policies:
       - "Policy Flow": setup/policy-flow.md
       - "Rule Features": features/policy.md
@@ -35,10 +33,10 @@ nav:
       # - "CURRI/ECC": troubleshooting/curri.md
 extra_css: [extra.css]
 theme: 
-  name: material
+  name: readthedocs
   logo: assets/logo.png
-  features:
-    - navigation.tabs
+  # features:
+    # - navigation.tabs
   font:
     text: Roboto
     code: Roboto Mono
@@ -46,7 +44,7 @@ google_analytics: ['UA-153385083-2', 'mkdocs.org']
 markdown_extensions:
   - attr_list
   - admonition
-  - pymdownx.superfences
+  # - pymdownx.superfences
   - pymdownx.details
   - pymdownx.tabbed
-copyright: Copyright &copy; 2021 CallTelemetry
+copyright: Copyright &copy; 2021 Call Telemetry

@@ -1,5 +1,0 @@
-apiVersion: v1
-name: calltelemetry
-version: 0.4.0
-appVersion: 0.4.0
-home: https://www.calltelemetry.com/
