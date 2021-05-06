@@ -1,31 +1,39 @@
-site_name: CallTelemetry
+site_name: CallTelemetry Documentation
 site_url: https://docs.calltelemetry.com
 nav:
-    - Home: index.md
-    - Architecture: architecture.md
-    - Licensing: licensing.md
     - Change Log: changelog.md
+    # - Licensing: licensing.md
     - Cloud Demo: cloud.md
-    - Installing:
-      # - "Platform Choices": deployment/choices.md
-      - "OVA Appliance": deployment/ova.md
-      - "Docker": deployment/docker.md
-      - "Kubernetes": deployment/k8s.md
-    - User Guide:
-      - "Policies": features/policy.md
+    - Installation Guide:
+      - Design: 
+        - "Architecture": architecture.md
+        # - "Sizing": deployment/sizing.md
+        - "Single OVA or Cluster": deployment/choices.md
+      # - Platform:
+      #   - "Load Testing": deployment/load-testing.md
+      - Installing:
+        - "OVA Appliance": deployment/ova.md
+        - "HA Cluster": deployment/k3s.md
+      - Integration to Callmanager:
+        - "Add a Call Control Profile": setup/curri.md
+        - "Add a CUBE": setup/cube.md
+        - "Policy Deployment Guide": setup/policy-assignment.md
+        - "Add CDR Events": setup/cdr.md
+        - "Processing MCID Spam Tags": setup/mcid.md
+    - Using Policies:
+      - "Policy Flow": setup/policy-flow.md
+      - "Rule Features": features/policy.md
       - "MCID Blocking": features/mcid.md
       - "Apps": features/apps.md
-      - "App - Webhook": features/webhooks.md
       - "Organizations": features/organizations.md
-    - Integration Guides:
-      - "Call Control": setup/curri.md
-      - "CDR": setup/cdr.md
-      - "MCID Spam Tags": setup/mcid.md
+    - App Catalog:
+        - "Catalog": apps/webhooks.md
+        # - "SMTP": apps/smtp.md
     - Troubleshooting:
       - "Logs": troubleshooting/logs.md
       - "CDR": troubleshooting/cdr.md
       # - "CURRI/ECC": troubleshooting/curri.md
-
+extra_css: [extra.css]
 theme: 
   name: material
   logo: assets/logo.png
@@ -41,4 +49,4 @@ markdown_extensions:
   - pymdownx.superfences
   - pymdownx.details
   - pymdownx.tabbed
-copyright: Copyright &copy; 2020 CallTelemetry
+copyright: Copyright &copy; 2021 CallTelemetry

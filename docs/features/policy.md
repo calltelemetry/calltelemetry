@@ -1,8 +1,20 @@
 
 # Rules:
+
+## Choose section, Triggers, Greetings, Modifiers, Webhooks or Apps
+
 === "Triggers"
-    !!! note "A blank field will match "any""
     ### Block or Permit
+    
+    Starting in 0.4.1, matches support Regex, in addition to simple text.
+    
+    Rules are in RegEx Format:
+
+    * 911 (matches only 911)
+    * .* (match all)
+    * ^\d{4}$/ (matches 4 digit calls)
+    * ^[1-9]\d{9}$ ( Match 10 digit calls, starting with 1-9)
+
     You can block or permit the call. If you block, the Caller will hear a fast busy tone, as the call is rejected.
     ![rule_match](rule-match.png)
 
