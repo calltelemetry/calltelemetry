@@ -1,4 +1,4 @@
-The [Cloud Demo](www.calltelemetry.com) Environment is ** free ** and unlimited as a trial period.
+The [Cloud Demo](app.calltelemetry.com) Environment is available as a rate-limited sandbox testing.
 
-!!! note "CDR Processing is not offered on the Cloud Demo. CDR processing takes up a lot of bandwidth and CPU."
-
+You can attach your CUCM to it, even push CDR records via your unique login. If your CUBE is exposed to the internet, you could even attach CUBE policies also.
+The CUBE Integration requires direct public access, it cannot be behind a NAT.

@@ -28,7 +28,7 @@ Password: calltelemetry
 It will bootup and grab a DHCP address, and display that on the console.
 Just open a web browser to http://IPADDRESS and create a new login(signup).
 
-If you don't see a Web Page, try visitng the [Troubleshooting Page](/troubleshooting).
+If you don't see a Web Page, try visitng the [Troubleshooting Page](/troubleshooting/logs).
 
 Each user is assigned their own private Organizaiton by default. No data is shared between users unless the user is invited to the Organization.
 Visit the [Organization Page](/features/organizations) to learn more.
