@@ -33,7 +33,7 @@ nav:
       # - "CURRI/ECC": troubleshooting/curri.md
 extra_css: [extra.css]
 theme: 
-  name: readthedocs
+  name: material
   logo: assets/logo.png
   # features:
     # - navigation.tabs
@@ -42,9 +42,15 @@ theme:
     code: Roboto Mono
 google_analytics: ['UA-153385083-2', 'mkdocs.org']
 markdown_extensions:
+  - toc:
+      permalink: "#"
   - attr_list
   - admonition
-  # - pymdownx.superfences
+  - pymdownx.superfences
   - pymdownx.details
   - pymdownx.tabbed
+  - pymdownx.betterem:
+      smart_enable: all
+  # - fontawesome_markdown
+
 copyright: Copyright &copy; 2021 Call Telemetry

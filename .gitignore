@@ -1,2 +1,5 @@
 postgres-data/
 .ssh/
+.gitignore
+.gitattributes
+site/
