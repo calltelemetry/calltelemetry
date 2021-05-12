@@ -2,9 +2,7 @@
 
 ### OVAs are approximately 1GB
 
-<a href="https://storage.googleapis.com/ct_ovas/CallTelemetry-042es1.ova">Download 0.4.2 Stable Release</a>
-
-<a href="https://storage.googleapis.com/ct_ovas/CallTelemetry-043.ova">Download 0.4.3 Latest Release</a>
+<a href="https://storage.googleapis.com/ct_ovas/CallTelemetry-043.ova">Download Latest Release</a>
 
 Download the OVA and import to Vmware.
 
