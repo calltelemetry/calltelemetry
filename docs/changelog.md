@@ -2,9 +2,10 @@
 
 ## 0.4.3 <small>-5-5-2021</small>
 
+- Spam Investgiation Dashboard - Explore calls that your users might not report. Look for trends in recent CDR calls based on duration and frequency to identify spam callers. More to come here.
+- Live CDR Logs - you can now view CDR processing in realtime without going to the console logs.
 - New Marketing Web Page launched in April.
 - Transition from perpetual development builds to license keys.
-- Spam Investgiation Dashboard - Explore calls that your users might not report. Look for trends in recent CDR calls based on duration and frequency to identify spam callers. If you like this feature, I can add more investigation tools - let me know.
 
 ## 0.4.2 <small>-3-10-2021</small>
 
