@@ -1,0 +1,15 @@
+.md-header-nav__button.md-logo img, .md-header-nav__button.md-logo svg
+{
+  height: 2rem;
+  width: 2rem;
+}
+
+a.md-tabs__link
+{
+  font-size: large;
+}
+
+span.md-ellipsis
+{
+  font-size: larger;
+}
