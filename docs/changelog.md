@@ -1,8 +1,15 @@
 # Changelog
 
+## 0.4.4 <small>7-15-2021</small>
+
+- CDR Missed Call Alerts - Toggle per user, emails the user of the missed call.
+- Callmanager User Sync - Automatically syncs User data (Name, Email, Extension) with one or more Callmanagers every 15 minutes.
+- Org wide defaults for SMTP, Webex, and Twilio, along with Test options on WebexTeams and SMTP.
+- New UI Framework - CDR Events, MCID, CDR Call History, Policy History, End Users (AXL Sync), and Settings have a nice new user interface - completely rebuilt!
+
 ## 0.4.3 <small>-5-5-2021</small>
 
-- Spam Investgiation Dashboard - Explore calls that your users might not report. Look for trends in recent CDR calls based on duration and frequency to identify spam callers. More to come here.
+- Spam Investgiation Dashboard - Explore short duration calls that your users might not report. Look for trends in recent CDR calls based on duration and frequency to identify spam callers. More to come here.
 - Live CDR Logs - you can now view CDR processing in realtime without going to the console logs.
 - New Marketing Web Page launched in April.
 - Transition from perpetual development builds to license keys.
