@@ -19,6 +19,7 @@ Features:
 
 Change log:
 
+- 7-15-2021 - 0.4.4 - Missed Call Alerts via email, AXL Directory Support, rebuilt many UI screens with better tables and searching.
 - 5-5-2021 - 0.4.3 - Spam Investigation Dashboard
 - 3-10-2021 - 0.4.2 - CUBE Integration - inbound and outbound policy support
 - 2-28-2021 - 0.4.1 - Compliance Rule Type, RegEx patterns, Dynamic Spam Lookups via Twilio.
