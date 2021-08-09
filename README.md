@@ -1,4 +1,4 @@
-# Call Policy API for Cisco Callmanager / Communications Manager and IOS CUBE
+# Call Policy API and Toolkit for Cisco Callmanager / Communications Manager and IOS CUBE
 
 ---
 
@@ -13,12 +13,16 @@ Features:
 - Redirect calls via policy
 - Change Calling / Called Names and Numbers
 - Email, SMS, Webex Teams Alerts - real-time instant notifications, even 911 notifications
+- Reports showing all details, serial, and CDP LLDP Neighbor and port for every phone
+- Remote Control with Live Screen View (streaming screenshots) of any phone
+- Bulk ITL Resets of all phones
 - Contact me if you have a use case involving realtime calls.
 
 ---
 
 Change log:
 
+- 8-8-2021 - 0.4.5 - Live Phone Data available in Apps, Webhooks, and Alerts. Inventory report with Serials, Subnets, and CDP Neighbors of all phones. Remotely Control of any phone (live streaming Screenshot and keypad), Bulk ITL Reset.
 - 7-15-2021 - 0.4.4 - Missed Call Alerts via email, AXL Directory Support, rebuilt many UI screens with better tables and searching.
 - 5-5-2021 - 0.4.3 - Spam Investigation Dashboard
 - 3-10-2021 - 0.4.2 - CUBE Integration - inbound and outbound policy support
