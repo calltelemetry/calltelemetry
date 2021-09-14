@@ -2,6 +2,8 @@
 
 ---
 
+## Check out the Free Community Edition!
+
 Features:
 
 - E911 Alert Tool + Location Manager
@@ -22,10 +24,9 @@ Features:
 
 ---
 
-Visit (CallTelemetry)[www.calltelemetry.com] for the latest information.
+Visit [CallTelemetry](https://www.calltelemetry.com) for the latest information.
 
-Change log:
-Visit the (Change log)[https://docs.calltelemetry.com/changelog/] full release notes.
+Visit the official [Change log](https://docs.calltelemetry.com/changelog/) full release notes.
 
 - 9-13-2021 - 0.4.6 - E911 Location Manager, E911 QR Code Survey, Jabber Custom Tabs for blocking, RIS capacity and AXL capacity optimization, CDR upload for multiple files.
 - 8-8-2021 - 0.4.5 - Live Phone Data available in Apps, Webhooks, and Alerts. Inventory report with Serials, Subnets, and CDP Neighbors of all phones. Remotely Control of any phone (live streaming Screenshot and keypad), Bulk ITL Reset.
