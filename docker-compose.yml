@@ -11,9 +11,9 @@ services:
     volumes:
       - ./postgres-data:/var/lib/postgresql/data
   web:
-    image: "calltelemetry/web:0.4.6"
+    image: "calltelemetry/web:0.4.7"
     restart: "always"
-    ports: ["80:4000", "22:3022"]
+    ports: ["80:4000", "2222:3022", "5900:5900"]
     environment:
       - DB_USER=calltelemetry
       - DB_PASSWORD=postgres
@@ -27,6 +27,9 @@ services:
       - SECRET_KEY_BASE=wu3JgPq0IMvIMsJJZ940biL7jVkhLvHJ9I6aqlvhgonVA2eMdOgmdEjWMFAjRKSr
       - SIGNING_SALT=7HekGYwxATz33gM/rH9q2mV+uKJq5/H
       - CDR_ROOT_PATH=/sftp
-      - LOGGING_LEVEL=info
+      - LOGGING_LEVEL=debug
+      # - MAILGUN_API=""
+      # - MAILCHIMP_API=""
     volumes:
       - ./sftp:/sftp
+      - ./ctconfig:/home/app/ctconfig
