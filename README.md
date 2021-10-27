@@ -29,6 +29,7 @@ Features:
 
 Visit the official [Change log](https://docs.calltelemetry.com/changelog/) full release notes.
 
+- 10-26-2021 - 0.4.8 - Text to Speech announcement work, logging work, and minor bug fixes.
 - 9-30-2021 - 0.4.7 - 911 Switch Port Page, Google Text to Speech integration for announcements.
 - 9-13-2021 - 0.4.6 - 911 Location Manager, E911 QR Code Survey, Jabber Custom Tabs for blocking, RIS capacity and AXL capacity optimization, CDR upload for multiple files.
 - 8-8-2021 - 0.4.5 - Live Phone Data available in Apps, Webhooks, and Alerts. Inventory report with Serials, Subnets, and CDP Neighbors of all phones. Remotely Control of any phone (live streaming Screenshot and keypad), Bulk ITL Reset.
