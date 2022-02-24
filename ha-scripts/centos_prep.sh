@@ -3,6 +3,7 @@
 sudo systemctl stop firewalld
 sudo systemctl disable firewalld
 sudo setenforce permissive
+sudo systemctl disable rpcbind
 
 # Install Kubectl and Helm via SNAPS
 sudo yum install -y wget epel-release 
@@ -16,7 +17,7 @@ sudo snap install helm --classic
 
 # Install K9s Kubernetes Management tool
 echo "Installing k9s toolkit - https://github.com/derailed/k9s/"
-wget https://github.com/derailed/k9s/releases/download/v0.24.2/k9s_Linux_x86_64.tar.gz
+wget https://github.com/derailed/k9s/releases/download/v0.25.18/k9s_Linux_x86_64.tar.gz
 tar -xzf k9s_Linux_x86_64.tar.gz
 sudo mv k9s /usr/local/bin
 mkdir ~/.k9s

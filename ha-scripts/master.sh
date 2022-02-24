@@ -2,16 +2,18 @@
 export NODES=3
 export cpus_per_api=1
 # These are the two primary Virtual IPs for the CURRI API
-export primary_ip="192.168.0.235"
-export secondary_ip="192.168.0.236"
+export primary_ip="192.168.0.100"
+export secondary_ip="192.168.0.101"
 # This is a pool of IPs for Traefik Controller
-export cluster_ip="192.168.0.237"
+export cluster_ip="192.168.0.102"
 # Note: This sets the PostreSQL master user. It should be changed for production use.
 export DB_PASSWORD="calltelemetry"
 export INSTALL_K3S_CHANNEL=stable
 export K3S_KUBECONFIG_MODE="0644"
 # Note: This token is a preshared-key shared between the cluster. It should be changed for production use.
 export K3S_TOKEN="calltelemetry"
+export INSTALL_K3S_VERSION="v1.20.2+k3s1"
+
 
 # Nothing below this needs to be edited
 curl -sfL https://get.k3s.io | sh -s server --cluster-init --no-deploy traefik --disable servicelb
@@ -23,9 +25,18 @@ sudo cat /etc/rancher/k3s/k3s.yaml > ~/.kube/config
 /snap/bin/helm repo update
 /snap/bin/helm install traefik traefik/traefik --set service.annotations."metallb\.universe\.tf\/address-pool"="default" --set deployment.replicas=3
 
+# Install Cert Manager
+/snap/bin/helm repo add jetstack https://charts.jetstack.io
+/snap/bin/helm install \
+  cert-manager jetstack/cert-manager \
+  --namespace cert-manager \
+  --create-namespace \
+  --version v1.7.1 \
+   --set installCRDs=true
+
 echo "Preparing to Install CrunchyData PostgreSQL Operator"
 /snap/bin/kubectl create namespace pgo
-/snap/bin/kubectl apply -f https://raw.githubusercontent.com/CrunchyData/postgres-operator/v4.5.1/installers/kubectl/postgres-operator.yml
+/snap/bin/kubectl apply -f https://raw.githubusercontent.com/CrunchyData/postgres-operator/v4.6.5/installers/kubectl/postgres-operator.yml
 cat <<EOF > ~/.bashrc
 export PGOUSER="${HOME?}/.pgo/pgo/pgouser"
 export PGO_CA_CERT="${HOME?}/.pgo/pgo/client.crt"
@@ -40,8 +51,8 @@ echo "Installing PGO Operator - Wait for approximately 3 minutes for it to compl
 sleep 180
 
 echo "Installing CrunchData PGO Client"
-curl -s https://raw.githubusercontent.com/CrunchyData/postgres-operator/v4.5.1/installers/kubectl/client-setup.sh > ./client-setup.sh
-chmod +x ./client-setup.sh
+curl https://raw.githubusercontent.com/CrunchyData/postgres-operator/v4.6.5/installers/kubectl/client-setup.sh > client-setup.sh
+chmod +x client-setup.sh
 ./client-setup.sh
 ls -la ~/.pgo/pgo
 sudo cp ~/.pgo/pgo/pgo /usr/local/bin
