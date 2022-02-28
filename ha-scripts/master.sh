@@ -2,10 +2,10 @@
 export NODES=3
 export cpus_per_api=1
 # These are the two primary Virtual IPs for the CURRI API
-export primary_ip="192.168.0.100"
-export secondary_ip="192.168.0.101"
+export primary_ip="192.168.123.235"
+export secondary_ip="192.168.123.236"
 # This is a pool of IPs for Traefik Controller
-export cluster_ip="192.168.0.102"
+export cluster_ip="192.168.123.237"
 # Note: This sets the PostreSQL master user. It should be changed for production use.
 export DB_PASSWORD="calltelemetry"
 export INSTALL_K3S_CHANNEL=stable
@@ -25,14 +25,14 @@ sudo cat /etc/rancher/k3s/k3s.yaml > ~/.kube/config
 /snap/bin/helm repo update
 /snap/bin/helm install traefik traefik/traefik --set service.annotations."metallb\.universe\.tf\/address-pool"="default" --set deployment.replicas=3
 
-# Install Cert Manager
-/snap/bin/helm repo add jetstack https://charts.jetstack.io
-/snap/bin/helm install \
-  cert-manager jetstack/cert-manager \
-  --namespace cert-manager \
-  --create-namespace \
-  --version v1.7.1 \
-   --set installCRDs=true
+# # Install Cert Manager
+# /snap/bin/helm repo add jetstack https://charts.jetstack.io
+# /snap/bin/helm install \
+#   cert-manager jetstack/cert-manager \
+#   --namespace cert-manager \
+#   --create-namespace \
+#   --version v1.7.1 \
+#    --set installCRDs=true
 
 echo "Preparing to Install CrunchyData PostgreSQL Operator"
 /snap/bin/kubectl create namespace pgo
