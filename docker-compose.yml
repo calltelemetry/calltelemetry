@@ -11,9 +11,9 @@ services:
     volumes:
       - ./postgres-data:/var/lib/postgresql/data
   web:
-    image: "calltelemetry/web:0.5.0"
+    image: "calltelemetry/web:0.5.3"
     restart: "always"
-    ports: ["80:4000", "2222:3022", "5900:5900"]
+    ports: ["80:4000", "443:4001", "2222:3022", "5900:5900"]
     environment:
       - DB_USER=calltelemetry
       - DB_PASSWORD=postgres
@@ -24,8 +24,6 @@ services:
       - EXTERNAL_PORT=80
       - HOSTNAME=$DEFAULT_IPV4
       - EXTERNAL_IP=$DEFAULT_IPV4
-      - SECRET_KEY_BASE=wu3JgPq0IMvIMsJJZ940biL7jVkhLvHJ9I6aqlvhgonVA2eMdOgmdEjWMFAjRKSr
-      - SIGNING_SALT=7HekGYwxATz33gM/rH9q2mV+uKJq5/H
       - CDR_ROOT_PATH=/sftp
       - LOGGING_LEVEL=debug
       # - MAILGUN_API=""
