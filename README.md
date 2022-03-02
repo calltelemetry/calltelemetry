@@ -2,7 +2,7 @@
 
 ---
 
-## Check out the Free Community Edition!
+## Free Community Edition!
 
 Visit [CallTelemetry](https://www.calltelemetry.com) for more information.
 
@@ -10,6 +10,7 @@ Features:
 
 - 911 Alert Tool + Location Manager
 - Email, SMS, Webex Teams Alerts - real-time instant notifications, including 911 notifications
+- Instant real-time discovery of phones on an alert trigger (get subnet + CDP info), not a synchronization job.
 - 911 Meraki Location Sync for CDP neighbors - pulls switch physical address and notes)
 - 911 QR Code Location Tool - Users can confirm or submit their 911 location via QR Code.
 - Use Google Text to Speech to generate announcements and upload automatically across all CUCM Clusters.
@@ -29,6 +30,11 @@ Features:
 
 Visit the official [Change log](https://docs.calltelemetry.com/changelog/) full release notes.
 
+- 3-01-2022 0.5.3 - Disabling email activation on registration, all credentials are encrypted, add more SMTP logging details. 
+- 2-27-2022 0.5.2 - Improved handling of real-time discovery. Enable SSL, disable all analytics and chat, box is air-gapped. 
+- 2-24-2022 0.5.1 - Minor bug fixes
+- 2-16-2022 0.5.0 - Real-time discovery (not sync!) of phones for alerts. Better logging - all alert actions, text, and variables are logged.
+- 2-4-2022 - 0.4.9 - Call simulator, Online/offline alerts
 - 10-26-2021 - 0.4.8 - Text to Speech announcement work, logging work, and minor bug fixes.
 - 9-30-2021 - 0.4.7 - 911 Switch Port Page, Google Text to Speech integration for announcements.
 - 9-13-2021 - 0.4.6 - 911 Location Manager, E911 QR Code Survey, Jabber Custom Tabs for blocking, RIS capacity and AXL capacity optimization, CDR upload for multiple files.
