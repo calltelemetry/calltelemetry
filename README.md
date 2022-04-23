@@ -1,37 +1,102 @@
-# Call Policy API, E911 Location Manager for Cisco Callmanager
+# Call Policy and 911 Location Discovery for Cisco Callmanager
 
 ---
 
-## Free Community Edition!
+## Free Community Edition OVA with advanced features in paid editions.
 
-Visit [CallTelemetry](https://www.calltelemetry.com) for more information.
+Visit [Call Telemetry](https://calltelemetry.com) for more information.
 
 Features:
 
-- 911 Alert Tool + Location Manager
-- Email, SMS, Webex Teams Alerts - real-time instant notifications, including 911 notifications
-- Instant real-time discovery of phones on an alert trigger (get subnet + CDP info), not a synchronization job.
-- 911 Meraki Location Sync for CDP neighbors - pulls switch physical address and notes)
-- 911 QR Code Location Tool - Users can confirm or submit their 911 location via QR Code.
-- Use Google Text to Speech to generate announcements and upload automatically across all CUCM Clusters.
+# Realtime Call Policy Engine
+
+## Alerts
+
+- Instant 911 Alerts
+- Alerts can include realtime CDP neighbor, subnet, and CUCM fields.
+- Email, SMS, Webex Teams Integration
+- Creates a Webex Teams Space for each rule alert, invites others, and allows you to collaborate as a team in the space for situational awareness of the call.
+
+## Location Tools
+
+- Real-time discovery of CDP Neighbor, Subnet (as the call is ringing!).
+- 911 Location Manager: Subnet, Switch, Port, and Phone level.
+- Realtime data is correlated with Location data in Call Telemetry Sever.
+- APIs can query any other API you have, to correlate caller location.
+- Meraki Location Sync for CDP neighbors and pulls switch physical address and notes.
+- 911 QR Code Location Tool for easy location updating
+
+## API Integrations
+
+- Trigger webhooks to push realtime data to third party services.
+- Want to share realtime data to your CRM platform - easy.
+
+## Call Policy Engine
+
 - Inbound & Outbound call block rules to block harassing callers or spam.
-- Apps & Webhooks from realtime call data
-- OVA Appliance or Kuberentes HA Cluster (on-premise / cloud)
-- Central Policy API across unlimited clusters and CUBEs.
-- Greeting Injection on any call
-- Remote Control with Live Screen View (streaming screenshots) of any phone
-- Reports showing all details, serial, and CDP LLDP Neighbor and port for every phone
-- Bulk ITL Resets of all phones
-- CDR Anlytics of spam robo callers (using Cisco MCID or Jabber user submissions)
-- Redirect calls via policy or webhook response
+- Processed MCID triggers so that users press one button to block calls.
+- Add "Apps" and Webhooks to any call event.
+- Self Service Blocking via Jabber custom tab
+- Access Phone details, CDP neighbor data, and Subnet in your alerts/webhooks.
+- Use Google Text to Speech to generate announcements and upload automatically across all CUCM Clusters (beta)
 - Change Calling / Called Names and Numbers
+- Central Policy API across all CUCMs in your environment.
+
+## Apps
+
+- Postgres Lookup of Caller ID
+- Post call data to any Webex Teams Space, Email or SMS.
+- Share realtime data via webhook to any third party API.
+
+## Greeting Injection
+
+- Greeting Injection on permit or blocked calls.
+- Greeting Injection does not require Unity or UCCX.
+- Injecting greeting does not change your callflow, even the CDR stays the same.
+
+# Self Hosted any way you choose
+
+- Vmware OVA Appliance
+- Docker
+- Kubernetes Manifests
+- Multinode HA failover
+
+# 100% Private
+
+- On-premise or your cloud.
+- No tracking, analytics, or call home features.
+
+# More Tools
+
+## Remote Control IP Phones
+
+- Remote Control with Live Screen View of any phone
+
+## Phone Inventory Reports
+
+- Reports showing all details, serial, and CDP LLDP Neighbor and port for every phone
+
+## Bulk ITL Resets
+
+- Bulk ITL Resets (beta)
+
+## CDR Troubleshooting
+
+- Built in SFTP server for CDR processing
+- Decodes all CDR fields
+- Simple reports for quick troubleshooting.
+- CDR Anlytics to find spam robo callers
 
 ---
 
-Visit the official [Change log](https://docs.calltelemetry.com/changelog/) full release notes.
+Visit the official [Release Notes](https://docs.calltelemetry.com/changelog/) full release notes.
 
-- 3-01-2022 0.5.3 - Disabling email activation on registration, all credentials are encrypted, add more SMTP logging details. 
-- 2-27-2022 0.5.2 - Improved handling of real-time discovery. Enable SSL, disable all analytics and chat, box is air-gapped. 
+- 4-22-2022 0.5.7 - App Data now shared further down the pipeline. New Postgres Caller ID App - you can lookup caller id and replace it in realtime.
+- 3-23-2022 0.5.6 - Usability and Logging Enhancements.
+- 3-15-2022 0.5.5 - Bug fix with CURRI from security hardening. Port 80 is now only for unsecure api, you cannot pass sensitive credentials on it.
+- 3-10-2022 0.5.4 - Add AXL and RIS Lookups into Policy event log. We now do CI/CD vulnerability scanning, and have public vulnerability ratings for our containers on Dockerhub.
+- 3-01-2022 0.5.3 - Disabling email activation on registration, all credentials are encrypted, add more SMTP logging details.
+- 2-27-2022 0.5.2 - Improved handling of real-time discovery. Enable SSL, disable all analytics and chat, box is air-gapped.
 - 2-24-2022 0.5.1 - Minor bug fixes
 - 2-16-2022 0.5.0 - Real-time discovery (not sync!) of phones for alerts. Better logging - all alert actions, text, and variables are logged.
 - 2-4-2022 - 0.4.9 - Call simulator, Online/offline alerts

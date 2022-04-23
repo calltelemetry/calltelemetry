@@ -1,7 +1,8 @@
 version: "3"
 services:
   db:
-    image: "bitnami/postgresql"
+    image: "bitnami/postgresql:latest"
+    user: root
     restart: "always"
     environment:
       - POSTGRES_USER=calltelemetry
@@ -9,25 +10,26 @@ services:
       - POSTGRES_DB=calltelemetry_prod
     expose: [5432]
     volumes:
-      - ./postgres-data:/var/lib/postgresql/data
+      - ./postgres-data:/bitnami/postgresql
   web:
-    image: "calltelemetry/web:0.5.3"
+    image: "calltelemetry/web:0.5.8"
     restart: "always"
-    ports: ["80:4000", "443:4001", "2222:3022", "5900:5900"]
+    ports: ["80:4080", "443:4001", "22:3022"]
     environment:
       - DB_USER=calltelemetry
       - DB_PASSWORD=postgres
       - DB_HOSTNAME=db
       - DB_NAME=calltelemetry_prod
       - DB_PORT=5432
-      - INTERNAL_PORT=4000
       - EXTERNAL_PORT=80
       - HOSTNAME=$DEFAULT_IPV4
       - EXTERNAL_IP=$DEFAULT_IPV4
+      - LANG=en_US.UTF-8
+      - LANGUAGE=en_US:en
+      - LC_ALL=en_US.UTF-8
+      # - EXTERNAL_IP=localhost
       - CDR_ROOT_PATH=/sftp
       - LOGGING_LEVEL=debug
-      # - MAILGUN_API=""
-      # - MAILCHIMP_API=""
     volumes:
       - ./sftp:/sftp
       - ./ctconfig:/home/app/ctconfig
