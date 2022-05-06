@@ -12,7 +12,7 @@ export INSTALL_K3S_CHANNEL=stable
 export K3S_KUBECONFIG_MODE="0644"
 # Note: This token is a preshared-key shared between the cluster. It should be changed for production use.
 export K3S_TOKEN="calltelemetry"
-export INSTALL_K3S_VERSION="v1.20.2+k3s1"
+# export INSTALL_K3S_VERSION="v1.20.2+k3s1"
 
 
 # Nothing below this needs to be edited

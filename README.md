@@ -2,9 +2,11 @@
 
 ---
 
-## Free Community Edition OVA with advanced features in paid editions.
+## Free Community Edition with advanced features in paid editions.
 
-Visit [Call Telemetry](https://calltelemetry.com) for more information.
+Looking for the OVA download? [Get Started](https://calltelemetry.com/getting-started)
+Visit [Call Telemetry](https://calltelemetry.com) for features.
+Visit [Docs](https://docs.calltelemetry.com) for installation instructions
 
 Features:
 
@@ -42,24 +44,25 @@ Features:
 - Change Calling / Called Names and Numbers
 - Central Policy API across all CUCMs in your environment.
 
-## Apps
+## Call Apps
 
 - Postgres Lookup of Caller ID
-- Post call data to any Webex Teams Space, Email or SMS.
+- Webex Teams Space interactions with live data
+- Send data via Email or SMS to any destination
 - Share realtime data via webhook to any third party API.
 
 ## Greeting Injection
 
 - Greeting Injection on permit or blocked calls.
 - Greeting Injection does not require Unity or UCCX.
-- Injecting greeting does not change your callflow, even the CDR stays the same.
+- Greeting Injection does not change your callflow, even the CDR stays the same.
 
 # Self Hosted any way you choose
 
-- Vmware OVA Appliance
-- Docker
-- Kubernetes Manifests
-- Multinode HA failover
+- [Vmware OVA Appliance](https://docs.calltelemetry.com/deployment/ova.html)
+- [Docker](https://hub.docker.com/r/calltelemetry/web)
+- [Kubernetes](https://docs.calltelemetry.com/deployment/k3s.html)
+- [Multinode HA Kubenretes failover](https://docs.calltelemetry.com/deployment/k3s.html)
 
 # 100% Private
 
@@ -91,6 +94,7 @@ Features:
 
 Visit the official [Release Notes](https://docs.calltelemetry.com/changelog/) full release notes.
 
+- 5-2-2022 0.5.8 - Call Simulator tab on the rule and bug fixes.
 - 4-22-2022 0.5.7 - App Data now shared further down the pipeline. New Postgres Caller ID App - you can lookup caller id and replace it in realtime.
 - 3-23-2022 0.5.6 - Usability and Logging Enhancements.
 - 3-15-2022 0.5.5 - Bug fix with CURRI from security hardening. Port 80 is now only for unsecure api, you cannot pass sensitive credentials on it.
