@@ -94,6 +94,7 @@ Features:
 
 Visit the official [Release Notes](https://docs.calltelemetry.com/changelog/) full release notes.
 
+- 5-17-2022 0.5.9 - New app: CSV Subnet lookup
 - 5-2-2022 0.5.8 - Call Simulator tab on the rule and bug fixes.
 - 4-22-2022 0.5.7 - App Data now shared further down the pipeline. New Postgres Caller ID App - you can lookup caller id and replace it in realtime.
 - 3-23-2022 0.5.6 - Usability and Logging Enhancements.
