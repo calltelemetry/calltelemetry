@@ -44,10 +44,12 @@ Features:
 - Change Calling / Called Names and Numbers
 - Central Policy API across all CUCMs in your environment.
 
-## Call Apps
+## Integration Apps
 
 - Postgres Lookup of Caller ID
-- Webex Teams Space interactions with live data
+- Webex Teams Space with live call data
+- CSV Lookup to locate subnets for location data
+- ICMP Traceroute to locate the last hop for location data
 - Send data via Email or SMS to any destination
 - Share realtime data via webhook to any third party API.
 
@@ -94,7 +96,8 @@ Features:
 
 Visit the official [Release Notes](https://docs.calltelemetry.com/changelog/) full release notes.
 
-- 5-17-2022 0.5.9 - New app: CSV Subnet lookup
+- 5-27-2022 0.6.0 - New app: ICMP Traceroute to CMDB - Lookup last hop for location alert data
+- 5-17-2022 0.5.9 - New app: CSV Subnet lookup - lookup subnet for location alert data
 - 5-2-2022 0.5.8 - Call Simulator tab on the rule and bug fixes.
 - 4-22-2022 0.5.7 - App Data now shared further down the pipeline. New Postgres Caller ID App - you can lookup caller id and replace it in realtime.
 - 3-23-2022 0.5.6 - Usability and Logging Enhancements.
