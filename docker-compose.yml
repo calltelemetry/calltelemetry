@@ -12,7 +12,7 @@ services:
     volumes:
       - ./postgres-data:/bitnami/postgresql
   web:
-    image: "calltelemetry/web:0.5.9"
+    image: "calltelemetry/web:0.6.0"
     restart: "always"
     ports: ["80:4080", "443:4001", "22:3022"]
     environment:
