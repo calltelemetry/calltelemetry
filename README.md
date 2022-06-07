@@ -96,6 +96,8 @@ Features:
 
 Visit the official [Release Notes](https://docs.calltelemetry.com/changelog/) full release notes.
 
+- 6-6-2022 0.6.2 - Inventory and CDR Enhancements
+- 6-2-2022 0.6.1 - Small fixes and RIS batching feature
 - 5-27-2022 0.6.0 - New app: ICMP Traceroute to CMDB - Lookup last hop for location alert data
 - 5-17-2022 0.5.9 - New app: CSV Subnet lookup - lookup subnet for location alert data
 - 5-2-2022 0.5.8 - Call Simulator tab on the rule and bug fixes.
