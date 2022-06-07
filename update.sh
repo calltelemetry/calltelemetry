@@ -1,6 +1,6 @@
 #! /bin/bash
 rm docker-compose.yml
-wget https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/docker-compose.yml
-sudo docker-compose downw
-sudo docker-compose pull
-sudo docker-compose up -d
+wget https://storage.googleapis.com/ct_ovas/docker-compose.yml
+systemctl stop docker-compose-app.service
+docker-compose pull
+systemctl start docker-compose-app.service

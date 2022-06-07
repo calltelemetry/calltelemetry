@@ -1,5 +1,10 @@
 version: "3"
 services:
+  tracer:
+    image: "calltelemetry/tracer:0.6.2"
+    user: root
+    expose: [4100]
+    ports: ["4100:4100"]
   db:
     image: "bitnami/postgresql:latest"
     user: root
@@ -12,7 +17,7 @@ services:
     volumes:
       - ./postgres-data:/bitnami/postgresql
   web:
-    image: "calltelemetry/web:0.6.0"
+    image: "calltelemetry/web:0.6.2"
     restart: "always"
     ports: ["80:4080", "443:4001", "22:3022"]
     environment:
