@@ -51,6 +51,7 @@ Features:
 - CSV Lookup to locate subnets for location data
 - ICMP Traceroute to locate the last hop for location data
 - Send data via Email or SMS to any destination
+- XML SOAP web lookup
 - Share realtime data via webhook to any third party API.
 
 ## Greeting Injection
@@ -59,6 +60,9 @@ Features:
 - Greeting Injection does not require Unity or UCCX.
 - Greeting Injection does not change your callflow, even the CDR stays the same.
 
+## Missed Call Alerts
+- Missed call alerts to email
+- Bulk import of users
 # Self Hosted any way you choose
 
 - [Vmware OVA Appliance](https://docs.calltelemetry.com/deployment/ova.html)
@@ -80,6 +84,8 @@ Features:
 ## Phone Inventory Reports
 
 - Reports showing all details, serial, and CDP LLDP Neighbor and port for every phone
+- Search across any phone field
+- Export all or selected phone data
 
 ## Bulk ITL Resets
 
@@ -95,7 +101,7 @@ Features:
 ---
 
 Visit the official [Release Notes](https://docs.calltelemetry.com/changelog/) full release notes.
-
+- 6-20-2022 0.6.3 - XML SOAP App, Call Simulator page, Bulk import of users
 - 6-6-2022 0.6.2 - Inventory and CDR Enhancements
 - 6-2-2022 0.6.1 - Small fixes and RIS batching feature
 - 5-27-2022 0.6.0 - New app: ICMP Traceroute to CMDB - Lookup last hop for location alert data
