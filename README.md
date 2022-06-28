@@ -52,6 +52,7 @@ Features:
 - ICMP Traceroute to locate the last hop for location data
 - Send data via Email or SMS to any destination
 - XML SOAP web lookup
+- Compare the IP of the phone to a list of MRA and VPN Subnets to determine if the phone is local or remote.
 - Share realtime data via webhook to any third party API.
 
 ## Greeting Injection
@@ -101,6 +102,7 @@ Features:
 ---
 
 Visit the official [Release Notes](https://docs.calltelemetry.com/changelog/) full release notes.
+- 6-28-2022 0.6.4 - VPN and MRA App, App Simulator page, Sync AXL Users automatically.
 - 6-20-2022 0.6.3 - XML SOAP App, Call Simulator page, Bulk import of users
 - 6-6-2022 0.6.2 - Inventory and CDR Enhancements
 - 6-2-2022 0.6.1 - Small fixes and RIS batching feature
