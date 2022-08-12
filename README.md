@@ -58,8 +58,9 @@ Features:
 ## Greeting Injection
 
 - Greeting Injection on permit or blocked calls.
-- Greeting Injection does not require Unity or UCCX.
-- Greeting Injection does not change your callflow, even the CDR stays the same.
+- Works on Internal or External calls.
+- Injecting Announcements does not require Unity Connections or UCCX.
+- Greeting Injection does not change your intended callflow, even the CDR stays the same!
 
 ## Missed Call Alerts
 - Missed call alerts to email
@@ -102,6 +103,8 @@ Features:
 ---
 
 Visit the official [Release Notes](https://docs.calltelemetry.com/changelog/) full release notes.
+- 8-11-2022 0.6.6 - Duplicate call filtering (for HA configurations), CDR troubleshooting enhancements
+- 7-29-2022 0.6.5 - Internal Caller ID on Missed Calls
 - 6-28-2022 0.6.4 - VPN and MRA App, App Simulator page, Sync AXL Users automatically.
 - 6-20-2022 0.6.3 - XML SOAP App, Call Simulator page, Bulk import of users
 - 6-6-2022 0.6.2 - Inventory and CDR Enhancements
