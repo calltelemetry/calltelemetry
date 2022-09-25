@@ -23,7 +23,7 @@ Features:
 
 - Real-time discovery of CDP Neighbor, Subnet (as the call is ringing!).
 - 911 Location Manager: Subnet, Switch, Port, and Phone level.
-- Realtime data is correlated with Location data in Call Telemetry Sever.
+- Realtime data is correlated with Location data in Call Telemetry.
 - APIs can query any other API you have, to correlate caller location.
 - Meraki Location Sync for CDP neighbors and pulls switch physical address and notes.
 - 911 QR Code Location Tool for easy location updating
@@ -36,6 +36,7 @@ Features:
 ## Call Policy Engine
 
 - Inbound & Outbound call block rules to block harassing callers or spam.
+- Realtime Robocall Spam protection via Twilio + TrueSpam
 - Processed MCID triggers so that users press one button to block calls.
 - Add "Apps" and Webhooks to any call event.
 - Self Service Blocking via Jabber custom tab
@@ -51,7 +52,7 @@ Features:
 - CSV Lookup to locate subnets for location data
 - ICMP Traceroute to locate the last hop for location data
 - Send data via Email or SMS to any destination
-- XML SOAP web lookup
+- XML SOAP web lookup App for querying APIs
 - Compare the IP of the phone to a list of MRA and VPN Subnets to determine if the phone is local or remote.
 - Share realtime data via webhook to any third party API.
 
@@ -64,7 +65,10 @@ Features:
 
 ## Missed Call Alerts
 - Missed call alerts to email
-- Bulk import of users
+- Auto synchronization of all AXL users (add/update/delete)
+- Add prefix to calling party
+- Lookup name and match to internal callers
+- Bulk import of users if you don't want to automatically sync.
 # Self Hosted any way you choose
 
 - [Vmware OVA Appliance](https://docs.calltelemetry.com/deployment/ova.html)
@@ -81,7 +85,8 @@ Features:
 
 ## Remote Control IP Phones
 
-- Remote Control with Live Screen View of any phone
+- Remote Control with Live Streaming Screen View of any phone
+- ITL Reset
 
 ## Phone Inventory Reports
 
@@ -89,20 +94,17 @@ Features:
 - Search across any phone field
 - Export all or selected phone data
 
-## Bulk ITL Resets
-
-- Bulk ITL Resets (beta)
-
 ## CDR Troubleshooting
 
 - Built in SFTP server for CDR processing
 - Decodes all CDR fields
 - Simple reports for quick troubleshooting.
-- CDR Anlytics to find spam robo callers
+- CDR Anlaytics to find spam robocallers
 
 ---
 
 Visit the official [Release Notes](https://docs.calltelemetry.com/changelog/) full release notes.
+- 9-12-2022 0.6.7 - Robocall filtering and many other enhancements.
 - 8-11-2022 0.6.6 - Duplicate call filtering (for HA configurations), CDR troubleshooting enhancements
 - 7-29-2022 0.6.5 - Internal Caller ID on Missed Calls
 - 6-28-2022 0.6.4 - VPN and MRA App, App Simulator page, Sync AXL Users automatically.
