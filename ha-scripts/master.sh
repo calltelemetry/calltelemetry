@@ -1,84 +1,124 @@
 #!/bin/bash
+
 export NODES=3
-export cpus_per_api=1
-# These are the two primary Virtual IPs for the CURRI API
-export primary_ip="192.168.123.235"
-export secondary_ip="192.168.123.236"
-# This is a pool of IPs for Traefik Controller
-export cluster_ip="192.168.123.237"
-# Note: This sets the PostreSQL master user. It should be changed for production use.
-export DB_PASSWORD="calltelemetry"
-export INSTALL_K3S_CHANNEL=stable
-export K3S_KUBECONFIG_MODE="0644"
-# Note: This token is a preshared-key shared between the cluster. It should be changed for production use.
-export K3S_TOKEN="calltelemetry"
-# export INSTALL_K3S_VERSION="v1.20.2+k3s1"
+# These are the two primary Virtual IPs for the CURRI API, and Admin IP
+export primary_ip="192.168.123.231"
+export secondary_ip="192.168.123.232"
+export admin_ip="192.168.123.233"
 
+# uninstall:
+# /usr/local/bin/k3s-uninstall.sh
 
-# Nothing below this needs to be edited
-curl -sfL https://get.k3s.io | sh -s server --cluster-init --no-deploy traefik --disable servicelb
+# Install K3s on the master
+# cluster-init means master
+# token is a preshared key among the k3s nodes for HA
+curl -sfL https://get.k3s.io | K3S_KUBECONFIG_MODE=0644 K3S_TOKEN=calltelemetry sh -s server --cluster-init --disable traefik --disable servicelb
 mkdir -p ~/.kube
 sudo cat /etc/rancher/k3s/k3s.yaml > ~/.kube/config
 
-# Install Traefik
-/snap/bin/helm repo add traefik https://helm.traefik.io/traefik
-/snap/bin/helm repo update
-/snap/bin/helm install traefik traefik/traefik --set service.annotations."metallb\.universe\.tf\/address-pool"="default" --set deployment.replicas=3
-
-# # Install Cert Manager
-# /snap/bin/helm repo add jetstack https://charts.jetstack.io
-# /snap/bin/helm install \
-#   cert-manager jetstack/cert-manager \
-#   --namespace cert-manager \
-#   --create-namespace \
-#   --version v1.7.1 \
-#    --set installCRDs=true
-
 echo "Preparing to Install CrunchyData PostgreSQL Operator"
-/snap/bin/kubectl create namespace pgo
-/snap/bin/kubectl apply -f https://raw.githubusercontent.com/CrunchyData/postgres-operator/v4.6.5/installers/kubectl/postgres-operator.yml
-cat <<EOF > ~/.bashrc
-export PGOUSER="${HOME?}/.pgo/pgo/pgouser"
-export PGO_CA_CERT="${HOME?}/.pgo/pgo/client.crt"
-export PGO_CLIENT_CERT="${HOME?}/.pgo/pgo/client.crt"
-export PGO_CLIENT_KEY="${HOME?}/.pgo/pgo/client.key"
-export PGO_APISERVER_URL='https://127.0.0.1:8443'
-export PGO_NAMESPACE=pgo
+# Reference:
+# https://access.crunchydata.com/documentation/postgres-operator/v5/tutorial/high-availability/
+git clone https://github.com/CrunchyData/postgres-operator-examples.git
+# Explore sample config from call telemetry repo /ha-scripts
+
+# Install the Crunchy Postgres K8s Operator
+kubectl apply -k postgres-operator-examples/kustomize/install/namespace
+kubectl apply --server-side -k postgres-operator-examples/kustomize/install/default
+# Create the Postgres database
+# kubectl apply -k postgres-operator-examples/kustomize/postgres
+
+# This file will create a database with 3 replicas.
+
+cat << EOF > ./postgres-operator-examples/kustomize/postgres/postgres.yaml
+apiVersion: postgres-operator.crunchydata.com/v1beta1
+kind: PostgresCluster
+metadata:
+  name: hippo
+spec:
+  users:
+    - name: calltelemetry
+      databases:
+        - calltelemetry_prod
+      options: "SUPERUSER"
+  image: registry.developers.crunchydata.com/crunchydata/crunchy-postgres:ubi8-14.5-0
+  postgresVersion: 14
+  instances:
+    - name: instance1
+      replicas: 3
+      dataVolumeClaimSpec:
+        accessModes:
+        - "ReadWriteOnce"
+        resources:
+          requests:
+            storage: 1Gi
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - topologyKey: kubernetes.io/hostname
+            labelSelector:
+              matchLabels:
+                postgres-operator.crunchydata.com/cluster: hippo
+                postgres-operator.crunchydata.com/instance-set: instance1
+  backups:
+    pgbackrest:
+      image: registry.developers.crunchydata.com/crunchydata/crunchy-pgbackrest:ubi8-2.40-0
+      repos:
+      - name: repo1
+        volume:
+          volumeClaimSpec:
+            accessModes:
+            - "ReadWriteOnce"
+            resources:
+              requests:
+                storage: 1Gi
 EOF
-source ~/.bashrc
 
-echo "Installing PGO Operator - Wait for approximately 3 minutes for it to complete"
-sleep 180
+kubectl apply -k postgres-operator-examples/kustomize/postgres
 
-echo "Installing CrunchData PGO Client"
-curl https://raw.githubusercontent.com/CrunchyData/postgres-operator/v4.6.5/installers/kubectl/client-setup.sh > client-setup.sh
-chmod +x client-setup.sh
-./client-setup.sh
-ls -la ~/.pgo/pgo
-sudo cp ~/.pgo/pgo/pgo /usr/local/bin
-/snap/bin/kubectl port-forward -n pgo svc/postgres-operator 8443:8443 &
-sleep 3
-echo "Installing Postgres Cluster + Replicas, will take a moment to complete"
-/usr/local/bin/pgo create cluster -n pgo ctsql -d calltelemetry_prod --password-superuser="calltelemetry"
+# Add replcias to kustomize/postgres/yaml if desired, re-run kustomize.
+
+# Create pgo user
+# add spec in kustomize file
+# vi kustomize/postgres/postgres.yaml
+# specs:
+#   users:
+#     - name: calltelemetry
+#       databases:
+#         - calltelemetry_prod
+#       options: "SUPERUSER"
+# kubectl apply -f kustomize/postgres/postgres.yaml
+# clone secret to default namespace
+# kubectl delete secret hippo-pguser-calltelemetry
+sudo yum install -y jq
+# Copy secret to the ct namespace for database access
+kubectl -n postgres-operator get secret hippo-pguser-calltelemetry -o json  | jq 'del(.metadata["namespace","creationTimestamp","resourceVersion","selfLink","uid","ownerReferences", "managedFields"])'  | kubectl apply -n ct -f -
 
 echo "Scaling DNS in Kuberentes to match node count"
 /snap/bin/kubectl scale deployment.v1.apps/coredns --replicas=$NODES -n kube-system
 
-echo "Starting CallTelemetry deployment via Helm Chart"
+# echo "Installing MetalLB" --- part of the stable-ha charts, not necessary.
+# helm repo add metallb https://metallb.github.io/metallb
+# # 0.13 has breaking changes and outstanding issues
+# helm install metallb metallb/metallb --version 0.12.1
+# helm install metallb bitnami/metallb
+
+kubectl create namespace ct
+helm repo add ct_charts https://storage.googleapis.com/ct_charts/
+helm repo update
+# echo "Starting CallTelemetry deployment via Helm Chart"
 cat <<EOF > ./custom_values.yaml
 # ct_values.yaml
-db_password: $DB_PASSWORD
-web_replicas: $NODES
 primary_ip: $primary_ip
 secondary_ip: $secondary_ip
-cluster_ip_start: $cluster_ip
-cluster_ip_end: $cluster_ip
-web:
-  cpus: $cpus_per_api
-  imagePullPolicy: IfNotPresent
-  replicas: $NODES
+cluster_ip_start: $admin_ip
+cluster_ip_end: $admin_ip
 EOF
-/snap/bin/helm repo add ct_charts https://storage.googleapis.com/ct_charts/
-/snap/bin/helm repo update
-/snap/bin/helm install ct ct_charts/stable-ha -f ./custom_values.yaml
+helm install -n ct ct ct_charts/stable-ha -f ./custom_values.yaml
+
+# Upgrading:
+# helm upgrade -n ct ct ct_charts/stable-ha -f ./custom_values.yaml
+# Installing without a file:
+
+# helm install ct ct_charts/stable-ha --set primary_ip="$primary_ip" --set secondary_ip="$secondary_ip" --set cluster_ip_start="$admin_ip"
 echo "CallTelemetry Deployment complete"

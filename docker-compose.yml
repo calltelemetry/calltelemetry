@@ -4,7 +4,7 @@ services:
     image: "calltelemetry/traceroute:0.6.7"
     user: root
     expose: [4100]
-    ports: ["4100:4100"]
+    # ports: ["4100:4100"]
   db:
     image: "bitnami/postgresql:latest"
     user: root
@@ -29,12 +29,19 @@ services:
       - EXTERNAL_PORT=80
       - HOSTNAME=$DEFAULT_IPV4
       - EXTERNAL_IP=$DEFAULT_IPV4
-      - LANG=en_US.UTF-8
-      - LANGUAGE=en_US:en
-      - LC_ALL=en_US.UTF-8
+      # - LANG=en_US.UTF-8
+      # - LANGUAGE=en_US:en
+      # - LC_ALL=en_US.UTF-8
       # - EXTERNAL_IP=localhost
-      - CDR_ROOT_PATH=/sftp
+      - TRACEROUTE_SERVICE=http://localhost:4100/traceroute
+      - NATS_CT_HOSTNAME=nats
+      # - CDR_ROOT_PATH=/sftp
+      # Logging levels - debug, info, warn, error
       - LOGGING_LEVEL=debug
-    volumes:
-      - ./sftp:/sftp
-      - ./ctconfig:/home/app/ctconfig
+    # volumes:
+      # - ./sftp:/sftp
+      # - ./ctconfig:/home/app/ctconfig
+  nats:
+    image: 'nats:latest'
+    expose:
+      - "4222"
