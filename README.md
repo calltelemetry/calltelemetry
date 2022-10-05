@@ -36,24 +36,23 @@ Features:
 ## Call Policy Engine
 
 - Inbound & Outbound call block rules to block harassing callers or spam.
-- Realtime Robocall Spam protection via Twilio + TrueSpam
+- Realtime Robocall Spam protection via TrueSpam
 - Processed MCID triggers so that users press one button to block calls.
-- Add "Apps" and Webhooks to any call event.
+- Add Apps and Webhooks to any call event.
 - Self Service Blocking via Jabber custom tab
 - Access Phone details, CDP neighbor data, and Subnet in your alerts/webhooks.
 - Use Google Text to Speech to generate announcements and upload automatically across all CUCM Clusters (beta)
 - Change Calling / Called Names and Numbers
 - Central Policy API across all CUCMs in your environment.
 
-## Integration Apps
-
+## Apps
+- TrueSpam API for realtime caller score
 - Postgres Lookup of Caller ID
 - Webex Teams Space with live call data
-- CSV Lookup to locate subnets for location data
+- CSV Lookup to locate subnets for location data - Locate phones in MRA, VPN, or Site lists.
 - ICMP Traceroute to locate the last hop for location data
 - Send data via Email or SMS to any destination
 - XML SOAP web lookup App for querying APIs
-- Compare the IP of the phone to a list of MRA and VPN Subnets to determine if the phone is local or remote.
 - Share realtime data via webhook to any third party API.
 
 ## Greeting Injection
@@ -69,7 +68,7 @@ Features:
 - Add prefix to calling party
 - Lookup name and match to internal callers
 - Bulk import of users if you don't want to automatically sync.
-# Self Hosted any way you choose
+# You can host it any way you choose
 
 - [Vmware OVA Appliance](https://docs.calltelemetry.com/deployment/ova.html)
 - [Docker](https://hub.docker.com/r/calltelemetry/web)

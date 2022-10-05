@@ -92,6 +92,7 @@ kubectl apply -k postgres-operator-examples/kustomize/postgres
 # kubectl delete secret hippo-pguser-calltelemetry
 sudo yum install -y jq
 # Copy secret to the ct namespace for database access
+kubectl create namespace ct
 kubectl -n postgres-operator get secret hippo-pguser-calltelemetry -o json  | jq 'del(.metadata["namespace","creationTimestamp","resourceVersion","selfLink","uid","ownerReferences", "managedFields"])'  | kubectl apply -n ct -f -
 
 echo "Scaling DNS in Kuberentes to match node count"
@@ -103,7 +104,6 @@ echo "Scaling DNS in Kuberentes to match node count"
 # helm install metallb metallb/metallb --version 0.12.1
 # helm install metallb bitnami/metallb
 
-kubectl create namespace ct
 helm repo add ct_charts https://storage.googleapis.com/ct_charts/
 helm repo update
 # echo "Starting CallTelemetry deployment via Helm Chart"
