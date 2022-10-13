@@ -28,32 +28,26 @@ Features:
 - Meraki Location Sync for CDP neighbors and pulls switch physical address and notes.
 - 911 QR Code Location Tool for easy location updating
 
-## API Integrations
-
-- Trigger webhooks to push realtime data to third party services.
-- Want to share realtime data to your CRM platform - easy.
-
 ## Call Policy Engine
 
 - Inbound & Outbound call block rules to block harassing callers or spam.
-- Realtime Robocall Spam protection via Twilio + TrueSpam
+- Realtime Robocall Spam protection via TrueSpam
 - Processed MCID triggers so that users press one button to block calls.
-- Add "Apps" and Webhooks to any call event.
+- Add Apps and Webhooks to any call event.
 - Self Service Blocking via Jabber custom tab
 - Access Phone details, CDP neighbor data, and Subnet in your alerts/webhooks.
 - Use Google Text to Speech to generate announcements and upload automatically across all CUCM Clusters (beta)
 - Change Calling / Called Names and Numbers
 - Central Policy API across all CUCMs in your environment.
 
-## Integration Apps
-
+## Apps
+- TrueSpam API for realtime caller spam robocall score, with actions to block call, redirect, or rename.
 - Postgres Lookup of Caller ID
 - Webex Teams Space with live call data
-- CSV Lookup to locate subnets for location data
+- CSV Lookup to locate subnets for location data - Locate phones in MRA, VPN, or Site lists.
 - ICMP Traceroute to locate the last hop for location data
 - Send data via Email or SMS to any destination
 - XML SOAP web lookup App for querying APIs
-- Compare the IP of the phone to a list of MRA and VPN Subnets to determine if the phone is local or remote.
 - Share realtime data via webhook to any third party API.
 
 ## Greeting Injection
@@ -69,7 +63,7 @@ Features:
 - Add prefix to calling party
 - Lookup name and match to internal callers
 - Bulk import of users if you don't want to automatically sync.
-# Self Hosted any way you choose
+# You can host it any way you choose
 
 - [Vmware OVA Appliance](https://docs.calltelemetry.com/deployment/ova.html)
 - [Docker](https://hub.docker.com/r/calltelemetry/web)
@@ -101,9 +95,11 @@ Features:
 - Simple reports for quick troubleshooting.
 - CDR Anlaytics to find spam robocallers
 
+
 ---
 
 Visit the official [Release Notes](https://docs.calltelemetry.com/changelog/) full release notes.
+- 10-13-2022 0.6.7 - TrueSpam Reputation Service, Phone Discovery becomes an App.
 - 9-12-2022 0.6.7 - Robocall filtering and many other enhancements.
 - 8-11-2022 0.6.6 - Duplicate call filtering (for HA configurations), CDR troubleshooting enhancements
 - 7-29-2022 0.6.5 - Internal Caller ID on Missed Calls
