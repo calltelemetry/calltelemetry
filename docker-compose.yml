@@ -17,9 +17,9 @@ services:
     volumes:
       - ./postgres-data:/bitnami/postgresql
   web:
-    image: "calltelemetry/web:0.6.7"
+    image: "calltelemetry/web:0.6.8"
     restart: "always"
-    ports: ["80:4080", "443:4001", "22:3022"]
+    ports: ["80:4080", "8443:4443", "443:4001", "22:3022"]
     environment:
       - DB_USER=calltelemetry
       - DB_PASSWORD=postgres
