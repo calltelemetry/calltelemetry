@@ -1,5 +1,5 @@
 #! /bin/bash
-# Backup Docker config
+# Backup Docker config, if it exists.
 mv docker-compose.yml old-docker-compose.yml
 # Download new docker compose file
 wget https://storage.googleapis.com/ct_ovas/docker-compose.yml -O docker-compose.yml
@@ -7,14 +7,15 @@ wget https://storage.googleapis.com/ct_ovas/docker-compose.yml -O docker-compose
 docker-compose pull
 # Restart docker
 systemctl restart docker-compose-app.service
+# Fresh Install & Fix for appliance permissions on pre-0.6.8
+mkdir -p backups
+sudo chown -R calltelemetry backups
 # Refresh OVA scripts
 rm backup.sh
 wget https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/ova/backup.sh -O backup.sh
 chmod +x backup.sh
-# Fix for appliance permissions on pre-0.6.8
-sudo chown -R calltelemetry /home/calltelemetry/backups
-chmod +x /home/calltelemetry/backup.sh
-chown calltelemetry /home/calltelemetry/backup.sh
+chmod +x backup.sh
+chown calltelemetry backup.sh
 rm update.sh
 wget https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/ova/update.sh -O update.sh
 chmod +x update.sh
