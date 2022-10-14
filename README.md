@@ -28,11 +28,6 @@ Features:
 - Meraki Location Sync for CDP neighbors and pulls switch physical address and notes.
 - 911 QR Code Location Tool for easy location updating
 
-## API Integrations
-
-- Trigger webhooks to push realtime data to third party services.
-- Want to share realtime data to your CRM platform - easy.
-
 ## Call Policy Engine
 
 - Inbound & Outbound call block rules to block harassing callers or spam.
@@ -46,7 +41,7 @@ Features:
 - Central Policy API across all CUCMs in your environment.
 
 ## Apps
-- TrueSpam API for realtime caller score
+- TrueSpam API for realtime caller spam robocall score, with actions to block call, redirect, or rename.
 - Postgres Lookup of Caller ID
 - Webex Teams Space with live call data
 - CSV Lookup to locate subnets for location data - Locate phones in MRA, VPN, or Site lists.
@@ -100,9 +95,11 @@ Features:
 - Simple reports for quick troubleshooting.
 - CDR Anlaytics to find spam robocallers
 
+
 ---
 
 Visit the official [Release Notes](https://docs.calltelemetry.com/changelog/) full release notes.
+- 10-13-2022 0.6.7 - TrueSpam Reputation Service, Phone Discovery becomes an App.
 - 9-12-2022 0.6.7 - Robocall filtering and many other enhancements.
 - 8-11-2022 0.6.6 - Duplicate call filtering (for HA configurations), CDR troubleshooting enhancements
 - 7-29-2022 0.6.5 - Internal Caller ID on Missed Calls
