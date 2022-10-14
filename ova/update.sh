@@ -9,12 +9,12 @@ docker-compose pull
 systemctl restart docker-compose-app.service
 # Refresh OVA scripts
 rm backup.sh
-wget https://raw.githubusercontent.com/calltelemetry/calltelemetry/0.6.8/ova/backup.sh -O backup.sh
+wget https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/ova/backup.sh -O backup.sh
 chmod +x backup.sh
 rm update.sh
-wget https://raw.githubusercontent.com/calltelemetry/calltelemetry/0.6.8/ova/update.sh -O update.sh
+wget https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/ova/update.sh -O update.sh
 chmod +x update.sh
 rm reset.sh
-wget https://raw.githubusercontent.com/calltelemetry/calltelemetry/0.6.8/ova/reset.sh -O reset.sh
+wget https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/ova/reset.sh -O reset.sh
 chmod +x reset.sh
 
