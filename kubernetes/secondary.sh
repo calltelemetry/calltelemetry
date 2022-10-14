@@ -5,10 +5,7 @@ export primary_ip="192.168.123.156"
 export K3S_TOKEN="calltelemetry"
 
 # Nothing below this needs to be edited
-export K3S_URL="https://$primary_ip:6443"
-export INSTALL_K3S_CHANNEL=stable
-export K3S_KUBECONFIG_MODE="0644"
-
+sudo curl -sfL https://get.k3s.io | K3S_URL="https://$primary_ip:644" K3S_KUBECONFIG_MODE=0644 K3S_TOKEN=calltelemetry sh -s server --disable traefik --disable servicelb
 # Install Secondary
 curl -sfL https://get.k3s.io | sh -s server  --no-deploy traefik --disable servicelb
 mkdir -p ~/.kube
