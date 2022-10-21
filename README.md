@@ -52,30 +52,29 @@ Features:
 
 ## Greeting Injection
 
-- Greeting Injection on permit or blocked calls.
-- Works on Internal or External calls.
+- Greeting Injection using native CUCM Announcements
+- Works on Internal or External calls
 - Injecting Announcements does not require Unity Connections or UCCX.
 - Greeting Injection does not change your intended callflow, even the CDR stays the same!
 
 ## Missed Call Alerts
 - Missed call alerts to email
-- Auto synchronization of all AXL users (add/update/delete)
-- Add prefix to calling party
-- Lookup name and match to internal callers
-- Bulk import of users if you don't want to automatically sync.
+- Auto synchronization of all CUCM AXL users nightly
+- Add prefix to calling party to normalize outbound callback
+- Lookup name and match Caller ID to internal callers
+- Bulk import of users if you don't want to sync.
 # You can host it any way you choose
 
 - [Vmware OVA Appliance](https://docs.calltelemetry.com/deployment/ova.html)
 - [Docker](https://hub.docker.com/r/calltelemetry/web)
 - [Kubernetes](https://docs.calltelemetry.com/deployment/k3s.html)
 - [Multinode HA Kubenretes failover](https://docs.calltelemetry.com/deployment/k3s.html)
-
 # 100% Private
 
-- On-premise or your cloud.
+- On-premise or your cloud. Doesn't matter.
 - No tracking, analytics, or call home features.
-
-# More Tools
+- Even Runs isolated and internet air gapped
+# Even More Tools
 
 ## Remote Control IP Phones
 
@@ -99,7 +98,7 @@ Features:
 ---
 
 Visit the official [Release Notes](https://docs.calltelemetry.com/changelog/) full release notes.
-- 10-13-2022 0.6.7 - TrueSpam Reputation Service, Phone Discovery becomes an App.
+- 10-13-2022 0.6.8 - TrueSpam Reputation Service, Phone Discovery becomes an App.
 - 9-12-2022 0.6.7 - Robocall filtering and many other enhancements.
 - 8-11-2022 0.6.6 - Duplicate call filtering (for HA configurations), CDR troubleshooting enhancements
 - 7-29-2022 0.6.5 - Internal Caller ID on Missed Calls
