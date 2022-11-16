@@ -1,12 +1,14 @@
 version: "3"
 services:
   traceroute:
-    image: "calltelemetry/traceroute:0.6.7"
+    image: "calltelemetry/traceroute:0.6.8"
+    # ICMP needs root access
     user: root
     expose: [4100]
-    # ports: ["4100:4100"]
+    networks:
+      - ct
   db:
-    image: "bitnami/postgresql:latest"
+    image: "bitnami/postgresql:14"
     user: root
     restart: "always"
     environment:
@@ -16,32 +18,30 @@ services:
     expose: [5432]
     volumes:
       - ./postgres-data:/bitnami/postgresql
+    networks:
+      - ct
   web:
-    image: "calltelemetry/web:0.6.8"
+    image: "calltelemetry/web:0.6.9"
     restart: "always"
     ports: ["80:4080", "8443:4443", "443:4001", "22:3022"]
     environment:
+    # Change these if you want to run your own DB server.
       - DB_USER=calltelemetry
       - DB_PASSWORD=postgres
       - DB_HOSTNAME=db
       - DB_NAME=calltelemetry_prod
       - DB_PORT=5432
-      - EXTERNAL_PORT=80
-      - HOSTNAME=$DEFAULT_IPV4
+      # Enter an IP or FQDN here, but should auto detect IP.
       - EXTERNAL_IP=$DEFAULT_IPV4
-      # - LANG=en_US.UTF-8
-      # - LANGUAGE=en_US:en
-      # - LC_ALL=en_US.UTF-8
-      # - EXTERNAL_IP=localhost
-      - TRACEROUTE_SERVICE=http://localhost:4100/traceroute
-      - NATS_CT_HOSTNAME=nats
-      # - CDR_ROOT_PATH=/sftp
       # Logging levels - debug, info, warn, error
-      - LOGGING_LEVEL=debug
-    # volumes:
-      # - ./sftp:/sftp
-      # - ./ctconfig:/home/app/ctconfig
+      - LOGGING_LEVEL=warn
+    networks:
+      - ct
   nats:
     image: 'nats:latest'
     expose:
       - "4222"
+    networks:
+      - ct
+networks:
+  ct:
