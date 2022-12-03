@@ -41,6 +41,10 @@ spec:
       databases:
         - calltelemetry_prod
       options: "SUPERUSER"
+    - name: calltelemetry-dev
+      databases:
+        - calltelemetry_dev
+      options: "SUPERUSER"
   image: registry.developers.crunchydata.com/crunchydata/crunchy-postgres:ubi8-14.5-0
   postgresVersion: 14
   instances:
@@ -107,14 +111,15 @@ echo "Scaling DNS in Kuberentes to match node count"
 helm repo add ct_charts https://storage.googleapis.com/ct_charts/
 helm repo update
 # echo "Starting CallTelemetry deployment via Helm Chart"
-cat <<EOF > ./custom_values.yaml
-# ct_values.yaml
+cat <<EOF > ./custom_prod.yaml
+# ct_prod.yaml
+environment: prod
 primary_ip: $primary_ip
 secondary_ip: $secondary_ip
 cluster_ip_start: $admin_ip
 cluster_ip_end: $admin_ip
 EOF
-helm install -n ct ct ct_charts/stable-ha -f ./custom_values.yaml
+helm install -n ct ct ct_charts/stable-ha -f ./ct_prod.yaml
 
 # Upgrading:
 # helm upgrade -n ct ct ct_charts/stable-ha -f ./custom_values.yaml
