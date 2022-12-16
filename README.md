@@ -15,6 +15,7 @@ Features:
 ## Alerts
 
 - Realtime 911 Alerts
+- Discover the phone in realtime, to use for location discovery in alerts.
 - Alerts can include CDP neighbor, Subnet, and Callmanager data.
 - Email, SMS, Webex Teams Integration
 - Creates a Webex Teams Space for each rule alert, invites others, and allows you to collaborate as a team in the space for situational awareness of the call.
@@ -101,6 +102,7 @@ Features:
 ---
 
 Visit the official [Release Notes](https://docs.calltelemetry.com/changelog/) full release notes.
+- 12-15-2022 0.7.0 - Major phone dashboard work, international discovery support, policy page rebuild.
 - 11-11-2022 0.6.9 - TrueSpam Enhancements, Cloud Connector, Webex Missed Call Alerts
 - 10-13-2022 0.6.8 - TrueSpam Reputation Service, Phone Discovery becomes an App.
 - 9-12-2022 0.6.7 - Robocall filtering and many other enhancements.

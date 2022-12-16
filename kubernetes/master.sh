@@ -41,10 +41,6 @@ spec:
       databases:
         - calltelemetry_prod
       options: "SUPERUSER"
-    - name: calltelemetry-dev
-      databases:
-        - calltelemetry_dev
-      options: "SUPERUSER"
   image: registry.developers.crunchydata.com/crunchydata/crunchy-postgres:ubi8-14.5-0
   postgresVersion: 14
   instances:
