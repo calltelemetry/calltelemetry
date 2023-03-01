@@ -2,15 +2,20 @@
 
 export NODES=3
 # These are the two primary Virtual IPs for the CURRI API, and Admin IP
-export primary_ip="192.168.123.231"
-export secondary_ip="192.168.123.232"
-export admin_ip="192.168.123.233"
+export primary_ip="192.168.123.205"
+export secondary_ip="192.168.123.206"
+export admin_ip="192.168.123.207"
 
 # uninstall:
 # /usr/local/bin/k3s-uninstall.sh
 
+# Install Metallb
+kubectl create namespace metallb-system
+helm repo add metallb https://metallb.github.io/metallb
+helm install -n metallb-system metallb metallb/metallb --set crds.validationFailurePolicy=Ignore
+
+
 # Install K3s on the master
-# cluster-init means master
 # token is a preshared key among the k3s nodes for HA
 curl -sfL https://get.k3s.io | K3S_KUBECONFIG_MODE=0644 K3S_TOKEN=calltelemetry sh -s server --cluster-init --disable traefik --disable servicelb
 mkdir -p ~/.kube

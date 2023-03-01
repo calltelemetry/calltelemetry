@@ -1,8 +1,9 @@
 # Install Metallb
 kubectl create namespace metallb-system
 helm repo add metallb https://metallb.github.io/metallb
-helm install -n metallb-system metallb metallb/metallb --set crds.validationFailurePolicy=Ignore
-
+# Old workaround for https://github.com/metallb/metallb/issues/1597
+# helm install -n metallb-system metallb metallb/metallb --set crds.validationFailurePolicy=Ignore
+helm install -n metallb-system metallb metallb/metallb
 # Create Dev Namespace
 
 kubectl create namespace ct-dev
@@ -67,3 +68,10 @@ admin_ip: 192.168.123.102/32
 EOF
 
 helm install -n ct-dev ct ct_charts/stable-ha -f ./ct_dev.yaml
+
+# Check Certificate end dates
+openssl s_client -connect localhost:6443 -showcerts < /dev/null 2>&1 | openssl x509 -noout -enddate
+#sudo rm /var/lib/rancher/k3s/server/tls/dynamic-cert.json
+#sudo kubectl --insecure-skip-tls-verify=true delete secret -n kube-system k3s-serving
+#sudo rm -rf /var/lib/rancher/k3s/server/tls/*.crt
+cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
