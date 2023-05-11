@@ -32,6 +32,7 @@
 - Access Phone details, CDP neighbor data, and Subnet in your alerts/webhooks.
 - Use Google Text to Speech to generate announcements and upload automatically across all CUCM Clusters (beta)
 - Change Calling / Called Names and Numbers
+- Lookup Caller ID via API
 - Central Policy API across all CUCMs in your environment.
 
 ## Apps
