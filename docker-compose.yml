@@ -4,7 +4,7 @@ services:
     image: "calltelemetry/traceroute:0.7.2"
     # ICMP needs root access
     user: root
-    expose: [4100]
+    expose: [ 4100 ]
     networks:
       - ct
   db:
@@ -15,17 +15,17 @@ services:
       - POSTGRES_USER=calltelemetry
       - POSTGRES_PASSWORD=postgres
       - POSTGRES_DB=calltelemetry_prod
-    expose: [5432]
+    expose: [ 5432 ]
     volumes:
       - ./postgres-data:/bitnami/postgresql
     networks:
       - ct
   web:
-    image: "calltelemetry/web:0.7.5-rc5"
+    image: "calltelemetry/web:0.7.5-rc6"
     restart: "always"
-    ports: ["80:4080", "8443:4443", "443:4001", "22:3022"]
+    ports: [ "80:4080", "8443:4443", "443:4001", "22:3022" ]
     environment:
-    # Change these if you want to run your own DB server.
+      # Change these if you want to run your own DB server.
       - DB_USER=calltelemetry
       - DB_PASSWORD=postgres
       - DB_HOSTNAME=db
