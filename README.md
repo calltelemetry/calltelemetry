@@ -61,7 +61,7 @@
 # Host it any way you choose
 
 - [Vmware OVA Appliance](https://docs.calltelemetry.com/deployment/ova.html)
-- [Docker](https://hub.docker.com/r/calltelemetry/web)
+- [Docker](https://docs.calltelemetry.com/deployment/docker.html)
 - [Kubernetes](https://docs.calltelemetry.com/deployment/k3s.html)
 - [Multinode HA Kubenretes failover](https://docs.calltelemetry.com/deployment/k3s.html)
 # 100% Private and Secure
@@ -70,7 +70,7 @@
 - No tracking, analytics, or call home features.
 - Role based access support for multiple team members.
 - CURRI / ECC TLS support, upload your own certificate.
-- Even Runs isolated and internet air gapped.
+- Even runs isolated and internet air gapped.
 
 ## Remote Control IP Phones
 
