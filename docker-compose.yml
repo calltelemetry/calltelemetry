@@ -21,7 +21,7 @@ services:
     networks:
       - ct
   web:
-    image: "calltelemetry/web:0.7.7-rc22"
+    image: "calltelemetry/web:0.7.8-rc20"
     restart: "always"
     ports: ["80:4080", "8443:4443", "443:4001", "22:3022"]
     environment:
@@ -35,6 +35,8 @@ services:
       - EXTERNAL_IP=$DEFAULT_IPV4
       # Logging levels - debug, info, warn, error
       - LOGGING_LEVEL=warn
+      - ADMIN_NODE=TRUE
+      - WORKER_NODE=TRUE
     networks:
       - ct
   nats:
