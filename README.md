@@ -25,6 +25,7 @@
 ## Call Policy Engine
 
 - Inbound & Outbound call block rules to block harassing callers or spam.
+- XML Phone Service for users to manage their call history and block list.
 - Realtime Robocall Spam protection via TrueSpam
 - Processed MCID triggers so that users press one button to block calls.
 - Add Apps and Webhooks to any call event.
