@@ -1,4 +1,4 @@
-piVersion: postgres-operator.crunchydata.com/v1beta1
+apiVersion: postgres-operator.crunchydata.com/v1beta1
 kind: PostgresCluster
 metadata:
   name: hippo
@@ -8,7 +8,7 @@ spec:
       databases:
         - calltelemetry_prod
       options: "SUPERUSER"
-  image: registry.developers.crunchydata.com/crunchydata/crunchy-postgres:ubi8-14.5-0
+  image: registry.developers.crunchydata.com/crunchydata/crunchy-postgres:ubi8-14.5-1
   postgresVersion: 14
   instances:
     - name: instance1
@@ -29,9 +29,11 @@ spec:
                 postgres-operator.crunchydata.com/instance-set: instance1
   backups:
     pgbackrest:
-      image: registry.developers.crunchydata.com/crunchydata/crunchy-pgbackrest:ubi8-2.40-0
+      image: registry.developers.crunchydata.com/crunchydata/crunchy-pgbackrest:ubi8-2.47-1
       repos:
-      - name: repo1
+      - name: repo2
+        schedules:
+          full: "* * * * 0"
         volume:
           volumeClaimSpec:
             accessModes:
