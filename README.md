@@ -18,7 +18,7 @@ More Advanced features in paid editions.
   - Users can manage their own call history and block list.
   - [Jabber Portal](https://docs.calltelemetry.com/mcid/jabber) for users to see history and block calls.
   - [Phone XML Portal](https://docs.calltelemetry.com/mcid/phone-xml-service) for phone users to see history and block calls.
-  - Users can also press the MCID softkey to block calls.
+  - Users can also press the [MCID softkey](https://docs.calltelemetry.com/mcid/user_mcids) to block calls.
 [Learn more about Call Blocking](https://docs.calltelemetry.com/mcid/intro)
 
 ### [Greeting Injection](https://docs.calltelemetry.com/policies/rule_greetings) - Community Feature
@@ -27,7 +27,7 @@ More Advanced features in paid editions.
 - Injecting Announcements does not require Unity Connections or UCCX.
 - Greeting Injection does not change your intended callflow.
 
-## [Call Apps](https://docs.calltelemetry.com/policies/call-apps)] - Premium Feature
+## [Call Apps](https://docs.calltelemetry.com/policies/call-apps) - Premium Feature
 - TrueSpam API for realtime caller spam robocall score, with actions to block call, redirect, or rename.
 - CSV Lookup to locate subnets for location data - Locate phones in MRA, VPN, or Site lists.
 - ICMP Traceroute to locate the last hop for location data
