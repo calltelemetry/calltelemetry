@@ -5,7 +5,7 @@
 ### Free [Community Edition](https://calltelemetry.com/getting-started)
 More Advanced features in paid editions.
 
-## Call Policy Engine - Comunity Feature
+## [Call Policy](https://docs.calltelemetry.com/policies/introduction) Engine - Community Feature
 - Simple call blocking features to block harassing callers or spam.
 - Realtime Robocall Spam protection via TrueSpam Scoring.
 - Add Apps and Webhooks to any incoming call event.
@@ -27,27 +27,26 @@ More Advanced features in paid editions.
 - Injecting Announcements does not require Unity Connections or UCCX.
 - Greeting Injection does not change your intended callflow.
 
-## Call Apps - Premium Feature
+## [Call Apps](https://docs.calltelemetry.com/policies/call-apps)] - Premium Feature
 - TrueSpam API for realtime caller spam robocall score, with actions to block call, redirect, or rename.
 - CSV Lookup to locate subnets for location data - Locate phones in MRA, VPN, or Site lists.
 - ICMP Traceroute to locate the last hop for location data
 - Send data via Email or SMS to any destination
 - XML SOAP web lookup App for querying APIs
 - Share realtime data via webhook to any third party API.
-[Learn more about Call Apps](https://docs.calltelemetry.com/policies/call-apps)
 
 ### CRM Connectors
 - Change Calling and Called Names, creating a simple CRM connection for Cisco Callmanager.
-- Lookup and modify Caller ID via [Webhook](https://docs.calltelemetry.com/policies/apps/crm-integration-webhook) or [Postgres](https://docs.calltelemetry.com/policies/apps/crm-integration-postgresql)
+- Lookup and modify Caller ID via [Webhook CRM App](https://docs.calltelemetry.com/policies/apps/crm-integration-webhook) or [PostgreSQL CRM App](https://docs.calltelemetry.com/policies/apps/crm-integration-postgresql)
 
-## 911 Call Alerts - Premium
+## [911 Call Alerts](https://docs.calltelemetry.com/e911) - Premium
 - Realtime 911 Alerts with location data for Cisco IP Phones.
 - Discover Cisco IP Phone details in realtime.
 - Alerts can include CDP neighbor, Subnet, and Cisco Callmanager data.
 - Notications for Email, SMS, MS Teams, and Webex Teams.
 - Creates a Webex Teams Space for each rule alert, invites others, and allows you to collaborate as a team in the space for situational awareness of the call.
 
-### [911 Location Discovery](https://docs.calltelemetry.com/e911) for Emergency Alerts
+### Location Discovery Apps for Emergency Alerts
 
 - Discovery of CDP and LLDP Netowrk Switch Neighbor, IP Subnet, and ICMP traceroute for use in call workflows.
 - 911 Location Manager: Subnet, Switch, Port.
