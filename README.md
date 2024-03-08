@@ -62,6 +62,9 @@ More Advanced features in paid editions.
 - Bulk import of users if you don't want to sync.
 [Learn more about Missed Calls](https://docs.calltelemetry.com/missed-call/intro)
 
+## [CDR Webhooks](https://docs.calltelemetry.com/cdr/webhooks) - Premium
+Fire off a webhook for every call event in CDR matching multiple conditions. Include CDR data in the webhook payload.
+
 ## Multiple runtime options
 Multiple OS options - CentOS 9 Stream, AlamaLinux, RHEL supported, or run your own containers.
 
@@ -77,18 +80,16 @@ Deployment options:
 - Role based access support for multiple team members.
 - Cisco CURRI API and Cisco Extended Call Control Profile TLS support
 
-## Remote Control Cisco IP Phones - Community with limits
-- Remote Control with Live Streaming Screen View of any phone
-- Remote Factory Reset Cisco IP Phones
-
-## Phone Inventory and Remote Control - Community with limits
+## [Phone Dashboard and Cisco IP Phone Remote Control](https://docs.calltelemetry.com/realtime/phone-dashboard-reports) - Community with limits
 - Reports showing all details, serial, and CDP LLDP Neighbor and port for every phone
 - Report on the Hardware Version V03 / V04 etc, if you are preparing for a Webex Calling Migration
 - Search across any phone field
 - Export all or selected phone data
+- Remote Control with Live Streaming Screen View of any phone
+- Remote Factory Reset Cisco IP Phones
 
-## CDR Reports - Community with limits
 
+## [CDR Reports](https://docs.calltelemetry.com/cdr/reporting) - Community with limits
 - Free SFTP server for CDR processing
 - Decodes all Cisco CDR fields, not just epoch timestamps.
 - Simple and Advanced reports for quick troubleshooting.
