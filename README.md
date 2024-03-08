@@ -47,7 +47,7 @@ More Advanced features in paid editions.
 - Notications for Email, SMS, MS Teams, and Webex Teams.
 - Creates a Webex Teams Space for each rule alert, invites others, and allows you to collaborate as a team in the space for situational awareness of the call.
 
-### 911 Location Tools for Emergency Alerts
+### [911 Location Discovery](https://docs.calltelemetry.com/e911) for Emergency Alerts
 
 - Discovery of CDP and LLDP Netowrk Switch Neighbor, IP Subnet, and ICMP traceroute for use in call workflows.
 - 911 Location Manager: Subnet, Switch, Port.
@@ -55,7 +55,7 @@ More Advanced features in paid editions.
 - Meraki Location Sync for CDP neighbors and pulls switch physical address and notes.
 - 911 QR Code Location Tool for network drop wire mapping.
 
-## Missed Call Alerts and Notifications - Premium
+## [Missed Call Alerts and Notifications](https://docs.calltelemetry.com/missed-call/intro) - Premium
 - Missed call alerts to Email or Webex App
 - Auto synchronization and provision of all Cisco Callmanager users nightly
 - Add prefix to calling party to normalize outbound callback
@@ -64,26 +64,25 @@ More Advanced features in paid editions.
 [Learn more about Missed Calls](https://docs.calltelemetry.com/missed-call/intro)
 
 ## Multiple runtime options
+Multiple OS options - CentOS 9 Stream, AlamaLinux, RHEL supported, or run your own containers.
 
+Deployment options:
 - [Vmware OVA Appliance](https://docs.calltelemetry.com/deployment/ova.html)
 - [Docker](https://docs.calltelemetry.com/deployment/docker.html)
 - [Kubernetes](https://docs.calltelemetry.com/deployment/k3s.html)
 - [Multinode HA Kubenretes failover](https://docs.calltelemetry.com/deployment/k3s.html)
 
-- On-premise or run your own Cloud Containers.
-- CentOS 9 Stream, AlamaLinux, RHEL supported.
+### Private and Secure
 - Can run air gapped with no internet access.
 - No tracking, analytics, or telemetry tracking features. (We don't track you or your data)
 - Role based access support for multiple team members.
-- Cisco CURRI API and Cisco Extended Call Control Profile TLS support, you can upload your own certificate.
+- Cisco CURRI API and Cisco Extended Call Control Profile TLS support
 
 ## Remote Control Cisco IP Phones - Community with limits
-
 - Remote Control with Live Streaming Screen View of any phone
 - Remote Factory Reset Cisco IP Phones
 
 ## Phone Inventory and Remote Control - Community with limits
-
 - Reports showing all details, serial, and CDP LLDP Neighbor and port for every phone
 - Report on the Hardware Version V03 / V04 etc, if you are preparing for a Webex Calling Migration
 - Search across any phone field
