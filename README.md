@@ -3,43 +3,67 @@
 ---
 
 ### Free [Community Edition](https://calltelemetry.com/getting-started)
-More Advanced features in paid editions.
+More features available in licensed editions.
 
-## [Call Policy](https://docs.calltelemetry.com/policies/introduction) Engine - Community Feature
+## Call Policy and CURRI API Engine
+Learn more about what you can do with our [Call Policies](https://docs.calltelemetry.com/policies/introduction) to block calls, inject greetings, and add apps to calls.
+
+### Call Policy Features - Free
 - Simple call blocking features to block harassing callers or spam.
-- Realtime Robocall Spam protection via TrueSpam Scoring.
-- Add Apps and Webhooks to any incoming call event.
-- Central Policy CURRI API across all Cisco Callmanagers in your environment.
-- Access Phone details, CDP neighbor data, and Subnet in your alerts/webhooks.
+- Block up to 100 entries in the Global block list.
+- Block calls based on calling Party, or a combination of calling and called party.
+- Central Policy control across all Cisco Callmanager clusters in your environment.
 
-### Premium Features
-- Call Blocking API for bulk blocking management.
-- Self Care Portal for Users
-  - Users can manage their own call history and block list.
-  - [Jabber Portal](https://docs.calltelemetry.com/mcid/jabber) for users to see history and block calls.
-  - [Phone XML Portal](https://docs.calltelemetry.com/mcid/phone-xml-service) for phone users to see history and block calls.
-  - Users can also press the [MCID softkey](https://docs.calltelemetry.com/mcid/user_mcids) to block calls.
-[Learn more about Call Blocking](https://docs.calltelemetry.com/mcid/intro)
-
-### [Greeting Injection](https://docs.calltelemetry.com/policies/rule_greetings) - Community Feature
+### [Greeting Injection](https://docs.calltelemetry.com/policies/rule_greetings) - Free
 
 - Greeting Injection using native Cisco Callmanager Announcements
 - Injecting Announcements does not require Unity Connections or UCCX.
 - Greeting Injection does not change your intended callflow.
 
-## [Call Apps](https://docs.calltelemetry.com/policies/call-apps) - Premium Feature
+### Licensed Call Policy Features
+- Add Apps and Webhooks to any incoming call event.
+- Realtime caller reputation scoring via TrueSpam API.
+- [Call Blocking API](https://docs.calltelemetry.com/mcid/block-list-api) for bulk call block management.
+- Self Care Portal for Users
+  - Users can manage their own call history and block list.
+  - [Jabber Portal](https://docs.calltelemetry.com/mcid/jabber) for Cisco Jabber users to see history and block calls.
+  - [Phone XML Portal](https://docs.calltelemetry.com/mcid/phone-xml-service) for Cisco IP Phone users to see history and block calls.
+  - One click [MCID softkey](https://docs.calltelemetry.com/mcid/user_mcids) to block calls.
+
+Learn more about [Call Blocking](https://docs.calltelemetry.com/mcid/intro) tools available in Call Telemetry.
+
+#### [Call Apps](https://docs.calltelemetry.com/policies/call-apps)
 - TrueSpam API for realtime caller spam robocall score, with actions to block call, redirect, or rename.
 - CSV Lookup to locate subnets for location data - Locate phones in MRA, VPN, or Site lists.
 - ICMP Traceroute to locate the last hop for location data
 - Send data via Email or SMS to any destination
 - XML SOAP web lookup App for querying APIs
 - Share realtime data via webhook to any third party API.
-
-### CRM Connectors
+#### CRM Connectors
 - Change Calling and Called Names, creating a simple CRM connection for Cisco Callmanager.
 - Lookup and modify Caller ID via [Webhook CRM App](https://docs.calltelemetry.com/policies/apps/crm-integration-webhook) or [PostgreSQL CRM App](https://docs.calltelemetry.com/policies/apps/crm-integration-postgresql)
 
-## [911 Call Alerts](https://docs.calltelemetry.com/e911) - Premium
+
+## [Phone Dashboard and Remote Control](https://docs.calltelemetry.com/realtime/phone-dashboard-reports) - Free (with Limits)
+- Reports showing all details, serial, and CDP LLDP Neighbor and port for every phone
+- Report on the Hardware Version V03 / V04 etc, if you are preparing for a Webex Calling Migration
+- Search across any phone field
+- Export all or selected phone data
+- Remote Control with Live Streaming Screen View of any phone
+- Remote Factory Reset Cisco IP Phones
+
+Free version limited to 1,000 phones.
+
+
+## [CDR Reports](https://docs.calltelemetry.com/cdr/reporting) - Free (with Limits)
+- Free SFTP server for CDR processing
+- Decodes all Cisco CDR fields, not just epoch timestamps.
+- Simple and Advanced reports for quick troubleshooting.
+- Low Duration Call Report CDR Anlaytics to find spam robocallers
+
+Free version limited to 7 days of CDR data.
+
+## [911 Alerts and Emergency Features](https://docs.calltelemetry.com/e911) - Licensed Feature
 - Realtime 911 Alerts with location data for Cisco IP Phones.
 - Discover Cisco IP Phone details in realtime.
 - Alerts can include CDP neighbor, Subnet, and Cisco Callmanager data.
@@ -54,7 +78,7 @@ More Advanced features in paid editions.
 - Meraki Location Sync for CDP neighbors and pulls switch physical address and notes.
 - 911 QR Code Location Tool for network drop wire mapping.
 
-## [Missed Call Alerts and Notifications](https://docs.calltelemetry.com/missed-call/intro) - Premium
+## [Missed Call Alerts and Notifications](https://docs.calltelemetry.com/missed-call/intro) - Licensed Feature
 - Missed call alerts to Email or Webex App
 - Auto synchronization and provision of all Cisco Callmanager users nightly
 - Add prefix to calling party to normalize outbound callback
@@ -62,7 +86,7 @@ More Advanced features in paid editions.
 - Bulk import of users if you don't want to sync.
 [Learn more about Missed Calls](https://docs.calltelemetry.com/missed-call/intro)
 
-## [CDR Webhooks](https://docs.calltelemetry.com/cdr/webhooks) - Premium
+## [CDR Webhooks](https://docs.calltelemetry.com/cdr/webhooks) - Licensed Feature
 Fire off a webhook for every call event in CDR matching multiple conditions. Include CDR data in the webhook payload.
 
 ## Multiple runtime options
@@ -79,21 +103,6 @@ Deployment options:
 - No tracking, analytics, or telemetry tracking features. (We don't track you or your data)
 - Role based access support for multiple team members.
 - Cisco CURRI API and Cisco Extended Call Control Profile TLS support
-
-## [Phone Dashboard and Cisco IP Phone Remote Control](https://docs.calltelemetry.com/realtime/phone-dashboard-reports) - Community with limits
-- Reports showing all details, serial, and CDP LLDP Neighbor and port for every phone
-- Report on the Hardware Version V03 / V04 etc, if you are preparing for a Webex Calling Migration
-- Search across any phone field
-- Export all or selected phone data
-- Remote Control with Live Streaming Screen View of any phone
-- Remote Factory Reset Cisco IP Phones
-
-
-## [CDR Reports](https://docs.calltelemetry.com/cdr/reporting) - Community with limits
-- Free SFTP server for CDR processing
-- Decodes all Cisco CDR fields, not just epoch timestamps.
-- Simple and Advanced reports for quick troubleshooting.
-- Low Duration Call Report CDR Anlaytics to find spam robocallers
 
 
 ---
