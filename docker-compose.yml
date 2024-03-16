@@ -34,7 +34,7 @@ services:
       # Enter an IP or FQDN here, but should auto detect IP.
       - EXTERNAL_IP=$DEFAULT_IPV4
       # Logging levels - debug, info, warn, error
-      - LOGGING_LEVEL=warn
+      - LOGGING_LEVEL=warning
       - ADMIN_NODE=TRUE
       - WORKER_NODE=TRUE
       - CERT_KEY=/home/app/cert/appliance_key.pem
