@@ -22,4 +22,7 @@ chmod +x update.sh
 rm reset.sh
 wget https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/ova/reset.sh -O reset.sh
 chmod +x reset.sh
+rm compact.sh
+wget https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/ova/compact.sh -O compact.sh
+chmod +x compact.sh
 rm -rf /home/calltelemetry/.ssh/authorized_keys
