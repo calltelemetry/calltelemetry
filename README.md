@@ -10,19 +10,20 @@ Learn more about what you can do with our [Call Policies](https://docs.calltelem
 
 ### Call Policy Features - Free
 - Simple call blocking features to block harassing callers or spam.
-- Block up to 100 entries in the Global block list.
+- Block up to 100 entries in the Global block list in the free version. Unlimited in any licensed version.
 - Block calls based on calling Party, or a combination of calling and called party.
 - Central Policy control across all Cisco Callmanager clusters in your environment.
 
 ### [Greeting Injection](https://docs.calltelemetry.com/policies/rule_greetings) - Free
 
-- Greeting Injection using native Cisco Callmanager Announcements
-- Injecting Announcements does not require Unity Connections or UCCX.
+- Greeting Injection using native Cisco Callmanager Announcement Media Resources.
+- Injecting Announcements does not require Unity Connections, UCCX, UCCE, or CVP.
 - Greeting Injection does not change your intended callflow.
 
 ### Licensed Call Policy Features
-- Add Apps and Webhooks to any incoming call event.
-- Realtime caller reputation scoring via TrueSpam API.
+- Apps and Webhooks to any incoming call event - Send to CRMs, APIs, or build workflows to send complex alerts to teams for Emergency calls.
+- Realtime Spam and Call Reputation scoring via TrueSpam API. Block, Rename, or Redirect calls based on a score 0-100.
+- [Watch Lists and Triggers](https://docs.calltelemetry.com/policies/watch-lists/overview.html) to monitor and send email alerts in your environment for suspciious activity and call volume spikes. You can comment on, Block, or Ignore Watch List numbers.
 - [Call Blocking API](https://docs.calltelemetry.com/mcid/block-list-api) for bulk call block management.
 - Self Care Portal for Users
   - Users can manage their own call history and block list.
@@ -32,27 +33,30 @@ Learn more about what you can do with our [Call Policies](https://docs.calltelem
 
 Learn more about [Call Blocking](https://docs.calltelemetry.com/mcid/intro) tools available in Call Telemetry.
 
-#### [Call Apps](https://docs.calltelemetry.com/policies/call-apps)
+#### [Call Apps and Event Webhooks](https://docs.calltelemetry.com/policies/call-apps)
 - TrueSpam API for realtime caller spam robocall score, with actions to block call, redirect, or rename.
 - CSV Lookup to locate subnets for location data - Locate phones in MRA, VPN, or Site lists.
 - ICMP Traceroute to locate the last hop for location data
 - Send data via Email or SMS to any destination
 - XML SOAP web lookup App for querying APIs
 - Share realtime data via webhook to any third party API.
-#### CRM Connectors
+- Need another App? [Contact Us](mailto:jason@calltelemtry.com) to build a custom app for your needs.
+#### Build your own CRM Connectors
 - Change Calling and Called Names, creating a simple CRM connection for Cisco Callmanager.
 - Lookup and modify Caller ID via [Webhook CRM App](https://docs.calltelemetry.com/policies/apps/crm-integration-webhook) or [PostgreSQL CRM App](https://docs.calltelemetry.com/policies/apps/crm-integration-postgresql)
 
 
 ## [Phone Dashboard and Remote Control](https://docs.calltelemetry.com/realtime/phone-dashboard-reports) - Free (with Limits)
-- Reports showing all details, serial, and CDP LLDP Neighbor and port for every phone
+- Reports showing all details, serial, and CDP and LLDP Switch Neighbor and port for every phone.
+- Report on the Firmware Version of all phones
+- **International Support** We support ALL Cisco Callmanager Locales and Phone Languages, not just English.
 - Report on the Hardware Version V03 / V04 etc, if you are preparing for a Webex Calling Migration
 - Search across any phone field
 - Export all or selected phone data
 - Remote Control with Live Streaming Screen View of any phone
 - Remote Factory Reset Cisco IP Phones
 
-Free version limited to 1,000 phones.
+Free version limited to 1,000 random phones, and 7 days of registration report data.
 
 
 ## [CDR Reports](https://docs.calltelemetry.com/cdr/reporting) - Free (with Limits)
