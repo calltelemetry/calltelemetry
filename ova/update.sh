@@ -2,7 +2,7 @@
 # Backup Docker config, if it exists.
 mv docker-compose.yml old-docker-compose.yml
 # Download new docker compose file
-wget https://raw.githubusercontent.com/calltelemetry/calltelemetry/docker-compose.yml -O docker-compose.yml
+wget https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/docker-compose.yml -O docker-compose.yml
 # Pull new image
 docker-compose pull
 # Restart docker
