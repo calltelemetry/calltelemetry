@@ -17,7 +17,7 @@ sudo snap install helm --classic
 
 # Install K9s Kubernetes Management tool
 echo "Installing k9s toolkit - https://github.com/derailed/k9s/"
-wget https://github.com/derailed/k9s/releases/download/v0.26.3/k9s_Linux_x86_64.tar.gz
+wget https://github.com/derailed/k9s/releases/download/v0.32.5/k9s_Linux_x86_64.tar.gz
 tar -xzf k9s_Linux_x86_64.tar.gz
 sudo mv k9s /usr/local/bin
 mkdir ~/.k9s

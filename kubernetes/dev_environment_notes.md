@@ -1,9 +1,3 @@
-# Install Metallb
-kubectl create namespace metallb-system
-helm repo add metallb https://metallb.github.io/metallb
-# Old workaround for https://github.com/metallb/metallb/issues/1597
-# helm install -n metallb-system metallb metallb/metallb --set crds.validationFailurePolicy=Ignore
-helm install -n metallb-system metallb metallb/metallb
 # Create Dev Namespace
 
 kubectl create namespace ct-dev
