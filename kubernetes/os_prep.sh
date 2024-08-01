@@ -1,4 +1,7 @@
 #!/bin/bash
+# Runs on CentOS Strema, Almalinux or RHEL
+# This script will install the necessary tools to run the Call Telemetry application on Kubernetes
+
 # Disable Firewall and selinux
 sudo systemctl stop firewalld
 sudo systemctl disable firewalld
