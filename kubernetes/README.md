@@ -67,6 +67,7 @@ sudo dnf install -y git
    Install K3s on the primary node. Note the token value, which is hashed into the shared cluster secret value.
 
    ```bash
+   # From Primary Node.
    export K3S_TOKEN="calltelemetry"
    curl -sfL https://get.k3s.io | K3S_KUBECONFIG_MODE=0644 sh -s server --cluster-init --disable traefik --disable servicelb
    ```
@@ -77,6 +78,7 @@ sudo dnf install -y git
    Set up `kubectl`, the command-line tool for interacting with the Kubernetes cluster:
 
    ```bash
+   # From Primary node.
    mkdir -p ~/.kube
    sudo cat /etc/rancher/k3s/k3s.yaml > ~/.kube/config
    ```
@@ -89,6 +91,7 @@ sudo dnf install -y git
    Join secondary nodes to the K3s cluster. Note the token value, and the primary node IP address.
 
    ```bash
+   # From the secondary node to be installed.
    export primary_ip="192.168.123.156"
    export K3S_TOKEN="calltelemetry"
    sudo curl -sfL https://get.k3s.io | K3S_URL="https://$primary_ip:6443" K3S_KUBECONFIG_MODE=0644 sh -s server --disable traefik --disable servicelb
@@ -96,12 +99,37 @@ sudo dnf install -y git
    sudo cat /etc/rancher/k3s/k3s.yaml > ~/.kube/config
    ```
 
+   Checking Nodes
+
+    ```bash
+    # From any node.
+    [calltelemetry@ct-node-1 ~]$ kubectl get node
+    NAME        STATUS   ROLES                       AGE   VERSION
+    ct-node-1   Ready    control-plane,etcd,master   34h   v1.29.6+k3s2
+    ct-node-2   Ready    control-plane,etcd,master   33h   v1.29.6+k3s2
+    ct-node-3   Ready    control-plane,etcd,master   34h   v1.29.6+k3s2
+    [calltelemetry@ct-node-1 ~]$
+    ```
+
 2. **Scale DNS Pods**
    Adjust DNS pod replicas to match the number of total nodes. This helps with failover.
 
    ```bash
+   # From any node.
    kubectl scale deployment.v1.apps/coredns --replicas=3 -n kube-system
    ```
+
+   Check DNS Pod Scale
+
+    ```bash
+    # From any node.
+    [calltelemetry@ct-node-1 ~]$ kubectl get pods -A | grep dns
+    kube-system         coredns-6799fbcd5-2v68f                  1/1     Running     0                   13m
+    kube-system         coredns-6799fbcd5-55mdh                  1/1     Running     0                   13m
+    kube-system         coredns-6799fbcd5-6skkc                  1/1     Running     2 (<invalid> ago)   34h
+    [calltelemetry@ct-node-1 ~]$
+    ```
+
 
 ### MetalLB Installation for Load Balancing
 
@@ -112,6 +140,7 @@ sudo dnf install -y git
    Helm is a package manager for Kubernetes, and it simplifies the deployment of applications:
 
    ```bash
+   # From Primary node.
    kubectl create namespace metallb-system
    helm repo add metallb https://metallb.github.io/metallb
    helm install -n metallb-system metallb metallb/metallb
@@ -124,6 +153,7 @@ The **CrunchyData PostgreSQL Operator** automates PostgreSQL database cluster de
 1. **Install PostgreSQL Operator and CRDs**
 
    ```bash
+   # From Primary node.
    kubectl create namespace postgres-operator
    git clone https://github.com/CrunchyData/postgres-operator-examples.git
    kubectl apply --server-side -k postgres-operator-examples/kustomize/install/default
@@ -132,6 +162,7 @@ The **CrunchyData PostgreSQL Operator** automates PostgreSQL database cluster de
 2. **Create CT PostgreSQL Database Cluster**
 
    ```bash
+   # From Primary node.
    kubectl create namespace ct
    kubectl apply -n ct -f calltelemetry/kuberentes/postgres/ct-postgres.yaml
    ```
@@ -141,6 +172,7 @@ The **CrunchyData PostgreSQL Operator** automates PostgreSQL database cluster de
 1. **Add Call Telemetry Helm Repository**
 
    ```bash
+   # From Primary node.
    helm repo add ct_charts https://storage.googleapis.com/ct_charts/
    helm repo update
    ```
@@ -149,6 +181,7 @@ The **CrunchyData PostgreSQL Operator** automates PostgreSQL database cluster de
    Customize deployment parameters such as hostname and IPs:
 
    ```bash
+   # From Primary node.
    cat <<EOF > ./ct_prod.yaml
    hostname: calltelemetry.local
    environment: prod
@@ -162,9 +195,10 @@ The **CrunchyData PostgreSQL Operator** automates PostgreSQL database cluster de
    ```
 
 3. **Deploy Using Helm**
-   Helm is used to deploy the application with the specified configuration:
+   Helm is used to deploy the application with the specified configuration. The release name is ct, the namespace is ct.
 
    ```bash
+   # From primary node.
    helm install -n ct ct ct_charts/stable-ha -f ./ct_prod.yaml
    ```
 
@@ -173,6 +207,7 @@ The **CrunchyData PostgreSQL Operator** automates PostgreSQL database cluster de
 To upgrade the Call Telemetry application, use:
 
 ```bash
+# From Primary node.
 helm upgrade -n ct ct ct_charts/stable-ha -f ./ct_prod.yaml
 ```
 
@@ -183,5 +218,6 @@ helm upgrade -n ct ct ct_charts/stable-ha -f ./ct_prod.yaml
 To uninstall K3s, use:
 
 ```bash
+# Node to be uninstalled.
 /usr/local/bin/k3s-uninstall.sh
 ```
