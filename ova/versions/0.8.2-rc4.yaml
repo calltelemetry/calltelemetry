@@ -5,7 +5,7 @@ services:
     image: traefik:latest
     command:
       - "--api.insecure=true"
-      - "--log.level=DEBUG"
+      - "--log.level=INFO"
       - "--accesslog=true"
       - "--accesslog.filepath=/var/log/traefik/access.log"
       - "--accesslog.bufferingsize=100"
@@ -24,7 +24,7 @@ services:
       - ct
 
   vue-web:
-    image: "calltelemetry/vue:0.8.2-rc3"
+    image: "calltelemetry/vue:0.8.2-rc4"
     restart: "always"
     expose:
       - "80"
