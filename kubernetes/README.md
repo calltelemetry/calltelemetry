@@ -221,3 +221,12 @@ To uninstall K3s, use:
 # Node to be uninstalled.
 /usr/local/bin/k3s-uninstall.sh
 ```
+
+## References
+
+## SQL - Crunchy Data PostgreSQL Operator
+
+[Cruncy Data PostgreSQL Operator Github](https://github.com/CrunchyData/postgres-operator)
+
+[Crunch Data PostgreSQL Operator Docs](https://access.crunchydata.com/documentation/postgres-operator/latest)
+
