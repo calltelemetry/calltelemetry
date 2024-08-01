@@ -1,5 +1,18 @@
 #!/bin/bash
 
+# ASCII Art Logo
+cat << "EOF"
+
+   ______      ____   ______     __                    __
+  / ____/___ _/ / /  /_  __/__  / /__  ____ ___  ___  / /________  __
+ / /   / __ `/ / /    / / / _ \/ / _ \/ __ `__ \/ _ \/ __/ ___/ / / /
+/ /___/ /_/ / / /    / / /  __/ /  __/ / / / / /  __/ /_/ /  / /_/ /
+\____/\__,_/_/_/    /_/  \___/_/\___/_/ /_/ /_/\___/\__/_/   \__, /
+                                                            /____/
+
+https://calltelemetry.com
+EOF
+
 # Directory for storing backups and other directories to be cleared
 BACKUP_DIR="/home/calltelemetry/backups"
 BACKUP_FOLDER_PATH="/home/calltelemetry/db_dumps"
@@ -102,7 +115,7 @@ update() {
 rollback() {
   BACKUP_FILE=$(ls -t $BACKUP_DIR/docker-compose-*.yml | head -n 1)
 
-  if [ -f "$BACKUP_FILE" ]; then
+  if [ -f "$BACKUP_FILE" ];then
     cp "$BACKUP_FILE" "$ORIGINAL_FILE"
     echo "Rolled back to the previous docker-compose configuration from $BACKUP_FILE."
     echo "Restarting Docker Compose service..."
