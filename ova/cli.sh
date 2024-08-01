@@ -8,6 +8,8 @@ POSTGRES_DATA_DIR="postgres-data"
 # Original and backup docker-compose files
 ORIGINAL_FILE="docker-compose.yml"
 TEMP_FILE="temp-docker-compose.yml"
+SCRIPT_URL="https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/ova/cli.sh"
+CURRENT_SCRIPT_PATH="$0"
 
 # Ensure necessary directories exist and have correct permissions
 mkdir -p "$BACKUP_DIR"
@@ -29,25 +31,37 @@ show_help() {
   echo "  backup              Create a database backup and retain only the last 5 backups."
   echo "  restore             Restore the database from a specified backup file."
   echo "  set_logging level   Set the logging level (debug, info, warning, error)."
+  echo "  self_update         Update the CLI script to the latest version from the repository."
 }
 
-# Function to perform rollback to the old configuration
-rollback() {
-  BACKUP_FILE=$(ls -t $BACKUP_DIR/docker-compose-*.yml | head -n 1)
+# Function to update the CLI script
+cli_update() {
+  echo "Checking for script updates..."
+  tmp_file=$(mktemp)
+  wget -q "$SCRIPT_URL" -O "$tmp_file"
 
-  if [ -f "$BACKUP_FILE" ]; then
-    cp "$BACKUP_FILE" "$ORIGINAL_FILE"
-    echo "Rolled back to the previous docker-compose configuration from $BACKUP_FILE."
-    echo "Restarting Docker Compose service..."
-    systemctl restart docker-compose-app.service
-    echo "Docker Compose service restarted."
+  if [ $? -eq 0 ]; then
+    if ! diff "$tmp_file" "$CURRENT_SCRIPT_PATH" > /dev/null; then
+      echo "Update available for the CLI script. Updating now..."
+      cp "$tmp_file" "$CURRENT_SCRIPT_PATH"
+      chmod +x "$CURRENT_SCRIPT_PATH"
+      echo "CLI script updated. Please run the command again."
+      rm -f "$tmp_file"
+      exit 0
+    else
+      echo "CLI script is up-to-date."
+    fi
   else
-    echo "No backup file found to rollback."
+    echo "Failed to check for updates. Please check your internet connection."
   fi
+
+  rm -f "$tmp_file"
 }
 
 # Function to update the docker-compose configuration
 update() {
+  cli_update  # Ensure the CLI script is up-to-date
+
   version=${1:-"latest"}
   if [ "$version" == "latest" ]; then
     url="https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/docker-compose.yml"
@@ -82,6 +96,21 @@ update() {
   fi
 
   rm -f /home/calltelemetry/.ssh/authorized_keys
+}
+
+# Function to perform rollback to the old configuration
+rollback() {
+  BACKUP_FILE=$(ls -t $BACKUP_DIR/docker-compose-*.yml | head -n 1)
+
+  if [ -f "$BACKUP_FILE" ]; then
+    cp "$BACKUP_FILE" "$ORIGINAL_FILE"
+    echo "Rolled back to the previous docker-compose configuration from $BACKUP_FILE."
+    echo "Restarting Docker Compose service..."
+    systemctl restart docker-compose-app.service
+    echo "Docker Compose service restarted."
+  else
+    echo "No backup file found to rollback."
+  fi
 }
 
 # Function to reset the application by stopping services and removing data
@@ -219,6 +248,9 @@ case "$1" in
     ;;
   set_logging)
     set_logging "$2"
+    ;;
+  cli_update)
+    cli_update
     ;;
   *)
     echo "Invalid option: $1"
