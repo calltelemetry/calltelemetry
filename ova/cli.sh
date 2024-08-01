@@ -103,11 +103,15 @@ compact_system() {
   echo "Pruning Docker system..."
   docker system prune --all -f
 
+  echo "Starting Docker Compose services..."
+  sudo docker-compose up -d db  # Start the database service
+
   echo "Compacting PostgreSQL database..."
   sudo docker-compose exec -e PGPASSWORD=postgres db psql -d calltelemetry_prod -U calltelemetry -c 'VACUUM FULL;'
 
   echo "System compaction complete."
 }
+
 
 # Function to create a backup and retain only the last 5 backups
 backup() {
@@ -127,15 +131,17 @@ backup() {
 
   backup_file=${backup_folder_path}/${file_name}
 
+  # Create a database backup
   docker exec -e PGPASSWORD=postgres -it ${container} pg_dump -U ${username} -d ${dbname} > ${backup_file}
 
   echo "Dump successful: ${backup_file}"
 
   # Delete all but 5 recent files in backup folder
-  find ${backup_folder_path} -maxdepth 1 -name "*.sql" -type f | xargs ls -t | awk 'NR>5' | xargs -L1 rm
+  find ${backup_folder_path} -maxdepth 1 -name "*.sql" -type f | xargs ls -t | awk 'NR>5' | xargs -I {} rm -- {}
 
   echo "Old backups removed, keeping only the most recent 5."
 }
+
 
 # Main script logic
 case "$1" in
