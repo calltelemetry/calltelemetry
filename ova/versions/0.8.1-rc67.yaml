@@ -1,0 +1,62 @@
+version: "3"
+services:
+  traceroute:
+    image: "calltelemetry/traceroute:0.7.3"
+    # ICMP needs root access
+    user: root
+    expose: [4100]
+    # ports: ["4100:4100"]
+    networks:
+      - ct
+  db:
+    image: "bitnami/postgresql:14"
+    user: root
+    restart: "always"
+    environment:
+      - POSTGRES_USER=calltelemetry
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=calltelemetry_prod
+    expose: [5432]
+    volumes:
+      - ./postgres-data:/bitnami/postgresql
+    networks:
+      - ct
+  web:
+    image: "calltelemetry/web:0.8.1-rc67"
+    restart: "always"
+    ports: ["80:4080", "8443:4443", "443:4001", "22:3022"]
+    environment:
+      # Change these if you want to run your own DB server.
+      - DB_USER=calltelemetry
+      - DB_PASSWORD=postgres
+      - DB_HOSTNAME=db
+      - DB_NAME=calltelemetry_prod
+      - DB_PORT=5432
+      # Enter an IP or FQDN here, but should auto detect IP.
+      - EXTERNAL_IP=$DEFAULT_IPV4
+      # - CDR_ROOT_PATH=/sftp
+      # Logging levels - debug, info, warning, error
+      - LOGGING_LEVEL=warning
+      - ADMIN_NODE=TRUE
+      - WORKER_NODE=TRUE
+      - CERT_KEY=/home/app/cert/appliance_key.pem
+      - CERT_PUBLIC=/home/app/cert/appliance.pem
+
+    # volumes:
+    # - ./sftp:/sftp
+    # - ./ctconfig:/home/app/ctconfig
+    networks:
+      - ct
+  nats:
+    image: "nats:latest"
+    expose:
+      - "4222"
+    # ports:
+    #   - "8222:8222"
+    # command: "-c /etc/nats/nats.conf "
+    # volumes:
+    #  - ./nats.conf/:/etc/nats
+    networks:
+      - ct
+networks:
+  ct:
