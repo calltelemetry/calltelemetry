@@ -1,0 +1,109 @@
+version: "3.8"
+
+services:
+  traefik:
+    image: traefik:latest
+    command:
+      - "--api.insecure=true"
+      - "--log.level=INFO"
+      - "--accesslog=true"
+      - "--accesslog.filepath=/var/log/traefik/access.log"
+      - "--accesslog.bufferingsize=100"
+      - "--providers.docker=true"
+      - "--entrypoints.websecure.address=:443"
+      - "--entrypoints.websecure.http.tls=true"
+    ports:
+      - "443:443"
+      - "8080:8080"
+      - "8081:8081"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"
+      - "./certs:/certs"
+      - "./traefik-logs:/var/log/traefik"
+    networks:
+      - ct
+
+  vue-web:
+    image: "calltelemetry/vue:0.8.2-rc5"
+    restart: "always"
+    expose:
+      - "80"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.vue-web.rule=PathPrefix(`/`) && !PathPrefix(`/api`)"
+      - "traefik.http.routers.vue-web.entrypoints=websecure"
+      - "traefik.http.services.vue-web.loadbalancer.server.port=80"
+    networks:
+      - ct
+
+  traceroute:
+    image: "calltelemetry/traceroute:0.7.3"
+    user: root
+    expose:
+      - "4100"
+    networks:
+      - ct
+
+  db:
+    image: "bitnami/postgresql:14"
+    user: root
+    restart: "always"
+    environment:
+      - POSTGRES_USER=calltelemetry
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=calltelemetry_prod
+    expose:
+      - "5432"
+    volumes:
+      - ./postgres-data:/bitnami/postgresql
+    networks:
+      - ct
+
+  web:
+    image: "calltelemetry/web:0.8.2-rc5"
+    restart: "always"
+    expose:
+      - 4001
+      - 4000
+      - 4080
+    ports:
+      - "80:4080"
+      - "8443:4443"
+      - "22:3022"
+    environment:
+      - DB_USER=calltelemetry
+      - DB_PASSWORD=postgres
+      - DB_HOSTNAME=db
+      - DB_NAME=calltelemetry_prod
+      - DB_PORT=5432
+      - EXTERNAL_IP=$DEFAULT_IPV4
+      - LOGGING_LEVEL=warning
+      - ADMIN_NODE=TRUE
+      - WORKER_NODE=TRUE
+      - CERT_KEY=/home/app/cert/appliance_key.pem
+      - CERT_PUBLIC=/home/app/cert/appliance.pem
+      # can be HACKNEY, IBROWSE, MINT, GUN or HTTPC
+      - HTTP_ADAPTER=HACKNEY
+    networks:
+      - ct
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.web.rule=PathPrefix(`/api`)"
+      - "traefik.http.routers.web.entrypoints=websecure"
+      - "traefik.http.services.web.loadbalancer.server.port=4000"
+
+  nats:
+    image: "nats:latest"
+    expose:
+      - "4222"
+    networks:
+      - ct
+
+networks:
+  ct:
+
+volumes:
+  certs:
+    driver: local
+  traefik-logs:
+    driver: local
