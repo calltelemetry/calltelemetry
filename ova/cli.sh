@@ -245,7 +245,10 @@ build_appliance() {
   if [ $? -eq 0 ]; then
     chmod +x /tmp/prep.sh
     /tmp/prep.sh
-    echo "Appliance build complete."
+    echo "Appliance build complete. You MUST reboot to apply changes. You will then be ready to install the Call Telemetry Docker Application."
+    echo "*** IMPORTANT - After reboot, you MUST access the appliance on port 2222 - NOT PORT 22. ***"
+    echo "When ready, run sudo reboot -n to restart the appliance."
+echo "After the reboot, continue the installation instructions on https://docs.calletlemetry.com/deployment/docker to continue"
   else
     echo "Failed to download the prep script. Please check your internet connection."
   fi
