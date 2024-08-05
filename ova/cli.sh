@@ -26,8 +26,8 @@ CURRENT_SCRIPT_PATH="$0"
 PREP_SCRIPT_URL="https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/ova/prep.sh"
 
 # Ensure necessary directories exist and have correct permissions
-mkdir -p "$BACKUP_DIR"
-mkdir -p "$BACKUP_FOLDER_PATH"
+mkdir -p "$BACKUP_DIR" -p
+mkdir -p "$BACKUP_FOLDER_PATH" -p
 sudo chown -R calltelemetry "$BACKUP_DIR"
 sudo chown -R calltelemetry "$BACKUP_FOLDER_PATH"
 
@@ -229,10 +229,6 @@ set_logging() {
     return 1
   fi
 
-  new_level=$1
-  sed -i -E "s/^(.*LOGGING_LEVEL=).*$/\Here's the continuation and integration of the `build-appliance` option into your script:
-
-```bash
   new_level=$1
   sed -i -E "s/^(.*LOGGING_LEVEL=).*$/\1$new_level/" "$ORIGINAL_FILE"
   echo "Logging level set to $new_level in $ORIGINAL_FILE."
