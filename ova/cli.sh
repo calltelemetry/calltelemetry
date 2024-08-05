@@ -23,6 +23,7 @@ ORIGINAL_FILE="docker-compose.yml"
 TEMP_FILE="temp-docker-compose.yml"
 SCRIPT_URL="https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/ova/cli.sh"
 CURRENT_SCRIPT_PATH="$0"
+PREP_SCRIPT_URL="https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/ova/prep.sh"
 
 # Ensure necessary directories exist and have correct permissions
 mkdir -p "$BACKUP_DIR"
@@ -45,6 +46,7 @@ show_help() {
   echo "  restore             Restore the database from a specified backup file."
   echo "  set_logging level   Set the logging level (debug, info, warning, error)."
   echo "  self_update         Update the CLI script to the latest version from the repository."
+  echo "  build-appliance     Download and execute the prep script to build the appliance."
 }
 
 # Function to update the CLI script
@@ -228,12 +230,30 @@ set_logging() {
   fi
 
   new_level=$1
+  sed -i -E "s/^(.*LOGGING_LEVEL=).*$/\Here's the continuation and integration of the `build-appliance` option into your script:
+
+```bash
+  new_level=$1
   sed -i -E "s/^(.*LOGGING_LEVEL=).*$/\1$new_level/" "$ORIGINAL_FILE"
   echo "Logging level set to $new_level in $ORIGINAL_FILE."
 
   echo "Restarting Docker Compose service..."
   systemctl restart docker-compose-app.service
   echo "Docker Compose service restarted."
+}
+
+# Function to build the appliance by fetching and executing the prep script
+build_appliance() {
+  echo "Downloading and executing the prep script to build the appliance..."
+  wget -q "$PREP_SCRIPT_URL" -O /tmp/prep.sh
+  if [ $? -eq 0 ]; then
+    chmod +x /tmp/prep.sh
+    /tmp/prep.sh
+    echo "Appliance build complete."
+  else
+    echo "Failed to download the prep script. Please check your internet connection."
+  fi
+  rm -f /tmp/prep.sh
 }
 
 # Main script logic
@@ -264,6 +284,9 @@ case "$1" in
     ;;
   cli_update)
     cli_update
+    ;;
+  build-appliance)
+    build_appliance
     ;;
   *)
     echo "Invalid option: $1"
