@@ -125,7 +125,7 @@ sudo systemctl enable docker.service --now
 sudo systemctl enable docker-compose-app
 
 # Setup a Backup Job
-cat <<'EOF' >/etc/crontab
+sudo tee -a /etc/crontab > /dev/null <<'EOF'
 0 0 * * * calltelemetry /home/calltelemetry/backup.sh
 EOF
 
