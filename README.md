@@ -1,39 +1,38 @@
-# Call Policy Engine and 911 Location Discovery for Cisco Callmanager
+# Call Policy Engine, and Realtime Tool Suite for Cisco Callmanager
 
 ---
-[Latest Version and Release Notes](https://docs.calltelemetry.com/changelog)
-
+[Latest Version and Release Notes](https://docs.calltelemetry.com/releases)
 
 ## Free [Vmware Appliance Download](https://calltelemetry.com/getting-started) with Community License
 
-Community License includes:
+Community License includes these core features:
 
 - Policy Engine with Call Blocking
 - Unlimited Permit and Block Rules
 - Unlimited Policies
-- Glboal Block List for up to 100 numbers
-- Modify Calling and Called Party Numbers and Names
+- Greeting Injection
+- Global Block List for up to 100 numbers
+- Modify Calling and Called Party Numbers and Calling Names
 - Phone Dashboard and Neighbor discovery up to 1000 phones
 - Phone Remote Control
 - Basic CDR Reports up to 7 days
-- Greeting Injection
 - 1 Administrator
 - 1 Callmanager Cluster
 
-Additional features are available with a [paid license](https://calltelemetry.com/#pricing).
+Additional features are enabled with a [paid license](https://calltelemetry.com/#pricing).
 
 ### Multiple Deployment options
 
 - [Vmware OVA Appliance](https://docs.calltelemetry.com/deployment/ova.html)
-- [Bring your own OS Docker](https://docs.calltelemetry.com/deployment/docker.html)
-- [Kubernetes with HA and failover](https://docs.calltelemetry.com/deployment/k3s.html)
+- [Bring your own OS](https://docs.calltelemetry.com/deployment/docker.html)
+- [HA Cluster](https://docs.calltelemetry.com/deployment/k3s.html)
 
 ### Private and Secure
 
 - Secure - No internet required. Air gap support.
 - Private - No user tracking or analytics.
-- Team Support - Multi-user Role Based access support based on features.
-- Encryption Support - TLS Administration, Secure FTP, and Cisco CURRI / Cisco Extended Call Control Profile TLS support
+- Teams Support - Multi-user Role Based access support based on features.
+- Encryption Support - TLS Administration, Secure FTP, and Cisco CURRI API TLS support
 
 ## Call Policy and CURRI API Engine
 
