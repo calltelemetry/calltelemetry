@@ -1,9 +1,9 @@
 
-# Call Telemetry Deployment Guide
+# Call Telemetry HA Deployment Guide
 
 This guide provides detailed instructions for setting up and deploying the Call Telemetry application using Kuberenetes with load balancing an a HA PostgreSQL Cluster.
 
-Kubernetes is free to use on your own, and support is available please context [Support](mailto:jason@calltelelemetry.com) for more information.
+Kubernetes is free to use on your own, and support is available please contact [Support](mailto:jason@calltelelemetry.com) for more information.
 
 ## Prerequisites
 
@@ -29,32 +29,8 @@ This step configures the firewall, and installs some tools needed for managing K
 - CentOS Stream 9.x
 
 ```bash
-# Disable Firewall and selinux
-sudo systemctl stop firewalld
-sudo systemctl disable firewalld
-sudo setenforce permissive
-sudo systemctl disable rpcbind
-
-# Install Kubectl and Helm via SNAPS
-sudo yum install -y wget epel-release
-sudo yum install -y snapd
-sudo systemctl enable --now snapd.socket
-sudo ln -s /var/lib/snapd/snap /snap
-sudo snap wait system seed.loaded
-sudo systemctl restart snapd.seeded.service
-sudo snap install kubectl --classic
-sudo snap install helm --classic
-
-# Install K9s Kubernetes Management tool
-echo "Installing k9s toolkit - https://github.com/derailed/k9s/"
-wget https://github.com/derailed/k9s/releases/download/v0.32.5/k9s_Linux_x86_64.tar.gz
-tar -xzf k9s_Linux_x86_64.tar.gz
-sudo mv k9s /usr/local/bin
-mkdir ~/.k9s
-rm -rf k9s*
-
-# Install GIT
-sudo dnf install -y git
+# Installs Kubernetes tooling and sets up the firewall.
+sudo curl https://get.calltelemetry.com | sudo sh -s -- prep-cluster-node
 ```
 
 ### K3s Installation
