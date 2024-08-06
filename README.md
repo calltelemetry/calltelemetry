@@ -38,12 +38,12 @@ Additional features are enabled with a [paid license](https://calltelemetry.com/
 
 ### Call Policy Features
 
-- Use a Global Block list to block calls across multiple clusters.
+- Use a [Global Block list](https://docs.calltelemetry.com/call-block/global-call-block-list) to block calls across multiple clusters.
 - Block calls based on calling Party, or a combination of calling and called party.
 - Unlimited Call Routing Rules - Block, Permit, Change Caller IDs, Translate / Redirect, or Inject Greetings.
 - Multiple Cluster Support - Central Policy control across all Cisco Callmanager clusters in your environment.
-- Apps and Webhooks to any incoming call event - Send to CRMs, APIs, or build workflows to send complex alerts to teams for Emergency calls.
-- Realtime Spam and Call Reputation scoring via TrueSpam API. Block, Rename, or Redirect calls based on a score 0-100.
+- Apps and [Webhooks](https://docs.calltelemetry.com/policies/apps/crm-integration-webhook) to any incoming call event - Send to CRMs, APIs, or build workflows to send complex alerts to teams for Emergency calls.
+- Realtime Spam and [Call Reputation scoring](https://docs.calltelemetry.com/policies/truespam_filtering) via TrueSpam API. Block, Rename, or Redirect calls based on a score 0-100.
 - [Watch Lists and Triggers](https://docs.calltelemetry.com/policies/watch-lists/overview.html) to monitor and send email alerts in your environment for suspciious activity and call volume spikes. You can comment on, Block, or Ignore Watch List numbers.
 - [Call Blocking API](https://docs.calltelemetry.com/mcid/block-list-api) for bulk call block management.
 - Self Care Portal for Users
@@ -56,7 +56,7 @@ Learn more about [Call Blocking](https://docs.calltelemetry.com/mcid/intro) tool
 
 ### [Greeting Injection](https://docs.calltelemetry.com/policies/rule_greetings)
 
-- Greeting Injection using native Cisco Callmanager Announcement Media Resources.
+- [Greeting Injection](https://docs.calltelemetry.com/policies/rule_greetings) using native Cisco Callmanager Announcement Media Resources.
 - Injecting Announcements does not require Unity Connections, UCCX, UCCE, or CVP.
 - Greeting Injection does not change your intended callflow.
 
@@ -75,7 +75,6 @@ Learn more about [Call Blocking](https://docs.calltelemetry.com/mcid/intro) tool
 - Change Calling and Called Names, creating a simple CRM connection for Cisco Callmanager.
 - Lookup and modify Caller ID via [Webhook CRM App](https://docs.calltelemetry.com/policies/apps/crm-integration-webhook) or [PostgreSQL CRM App](https://docs.calltelemetry.com/policies/apps/crm-integration-postgresql)
 
-
 ## [Phone Dashboard and Remote Control](https://docs.calltelemetry.com/realtime/phone-dashboard-reports)
 
 - Reports showing all details, serial, and CDP and LLDP Switch Neighbor and port for every phone.
@@ -86,7 +85,6 @@ Learn more about [Call Blocking](https://docs.calltelemetry.com/mcid/intro) tool
 - Export all or selected phone data
 - Remote Control with Live Streaming Screen View of any phone
 - Remote Factory Reset Cisco IP Phones
-
 
 ## [CDR Reports](https://docs.calltelemetry.com/cdr/reporting)
 
@@ -103,7 +101,7 @@ Learn more about [Call Blocking](https://docs.calltelemetry.com/mcid/intro) tool
 - Notications for Email, SMS, MS Teams, and Webex Teams.
 - Creates a Webex Teams Space for each rule alert, invites others, and allows you to collaborate as a team in the space for situational awareness of the call.
 
-### [Location Discovery Apps for Emergency Alerts](https://docs.calltelemetry.com/e911)
+### [Dispatchable Location Discovery Apps for Emergency Alerts](https://docs.calltelemetry.com/e911)
 
 - Discovery of CDP and LLDP Netowrk Switch Neighbor, IP Subnet, and ICMP traceroute for use in call workflows.
 - 911 Location Manager: Subnet, Switch, Port.
