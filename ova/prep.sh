@@ -123,6 +123,7 @@ sudo chmod +x /home/calltelemetry/backup.sh
 sudo chown calltelemetry /home/calltelemetry/backup.sh
 
 sudo usermod -aG docker calltelemetry
+sudo systemctl restart docker
 
 sudo tee /etc/issue > /dev/null <<'EOF'
 Call Telemetry Appliance
