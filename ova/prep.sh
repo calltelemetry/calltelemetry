@@ -1,24 +1,12 @@
 #!/bin/sh -eux
 sudo hostname ct-appliance
 
-# Disable RPCBind
-# systemctl disable rpcbind
-
-# change docker-compose prort to 2222
-sudo sed -i "s/#Port 22/Port 2222/" /etc/ssh/sshd_config
-
-# If RHEL or AlmaLinux, add 2222 to SELinux
-if [[ -f /etc/redhat-release ]]; then
-  sudo semanage port -a -t ssh_port_t -p tcp 2222
-  sudo firewall-cmd --zone=public --add-port=2222/tcp --permanent
-  sudo firewall-cmd --reload
-fi
-
 # If CentOS
 if [[ -f /etc/centos-release ]]; then
   sudo dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
 fi
-# If RHEL / ALmaLinux
+
+# If RHEL / AlmaLinux
 if [[ -f /etc/redhat-release ]]; then
   sudo dnf config-manager --add-repo https://download.docker.com/linux/rhel/docker-ce.repo
 fi
@@ -28,7 +16,6 @@ sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin 
 
 # Enable and Start Docker
 sudo systemctl enable --now docker
-
 
 # Add calltelemetry user
 if id "calltelemetry" >/dev/null 2>&1; then
@@ -48,7 +35,6 @@ sudo curl -L "https://github.com/docker/compose/releases/download/$(curl -s http
 sudo chmod +x /usr/local/bin/docker-compose
 sudo ln -sf /usr/local/bin/docker-compose /usr/bin/docker-compose
 
-
 # Setup Call Telemetry Home
 cd /home/calltelemetry/
 chown -R calltelemetry /home/calltelemetry
@@ -56,8 +42,6 @@ chown -R calltelemetry /home/calltelemetry
 # Prep SFTP root
 mkdir /home/calltelemetry/sftp -p
 chown calltelemetry /home/calltelemetry/sftp
-
-
 
 # Install the setup-network-environment binary
 # This helps discover the host IP address and other network settings
@@ -79,7 +63,6 @@ ExecStart=/opt/bin/setup-network-environment
 RemainAfterExit=yes
 Type=oneshot
 EOF
-
 
 # Install Docker Compose Service
 sudo tee /etc/systemd/system/docker-compose-app.service > /dev/null <<EOF
@@ -107,7 +90,6 @@ TimeoutStartSec=0
 WantedBy=multi-user.target
 EOF
 
-
 # Enable Docker Log rotation
 sudo tee /etc/logrotate.d/docker > /dev/null <<EOF
 /var/lib/docker/containers/*/*.log {
@@ -133,7 +115,6 @@ EOF
 wget https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/ova/reset.sh -O reset.sh
 sudo chmod +x /home/calltelemetry/reset.sh
 
-
 # Prep Backup Directory and Script
 sudo mkdir /home/calltelemetry/backups -p
 sudo chown -R calltelemetry /home/calltelemetry/backups
@@ -142,7 +123,6 @@ sudo chmod +x /home/calltelemetry/backup.sh
 sudo chown calltelemetry /home/calltelemetry/backup.sh
 
 sudo usermod -aG docker calltelemetry
-
 
 sudo tee /etc/issue > /dev/null <<'EOF'
 Call Telemetry Appliance
@@ -161,9 +141,25 @@ System IP Address: \4
 Mgmt: https://\4
 EOF
 
-echo "Appliance prep complete. You must reboot to apply changes. You will then be ready to install the Call Telemetry Docker Application."
-echo "IMPORTANT - After reboot, you can access the appliance on port 2222 - NOT PORT 22."
-echo "Change your terminal connection appropriately."
-echo "After the reboot, continue the installation instructions on https://docs.calletlemetry.com/deployment/docker to continue"
-# sleep 15
-# reboot
+echo "Appliance prep complete."
+echo "IMPORTANT - After this next step you must access the appliance on port 2222 - NOT PORT 22."
+
+# Prompt the user for confirmation to apply the SSH port change
+read -p "The SSH management port must changed to 2222. Applying this change will disconnect your SSH session. Do you want to apply this change and restart the SSH service? (yes/no): " response
+
+if [ "$response" = "yes" ]; then
+  # Change SSH port to 2222
+  sudo sed -i "s/#Port 22/Port 2222/" /etc/ssh/sshd_config
+
+  # If RHEL or AlmaLinux, add 2222 to SELinux
+  if [[ -f /etc/redhat-release ]]; then
+    sudo semanage port -a -t ssh_port_t -p tcp 2222
+    sudo firewall-cmd --zone=public --add-port=2222/tcp --permanent
+    sudo firewall-cmd --reload
+  fi
+
+  # Restart SSH service
+  sudo systemctl restart sshd
+else
+  echo "The SSH port change was not applied. Please rerun the script and choose 'yes' to complete the setup."
+fi
