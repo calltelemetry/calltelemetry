@@ -2,7 +2,7 @@
 
 This document will walk through the steps to create a lab instance for Call Telemetry. The instance will be compeletely isolated from the production instance in a difference namesapce, including using a different Postgres cluster.
 
-### Create Dev Namespace
+## Create Dev Namespace
 
 ```bash
 kubectl create namespace ct-dev
