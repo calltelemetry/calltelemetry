@@ -246,7 +246,6 @@ build_appliance() {
   if [ $? -eq 0 ]; then
     chmod +x /tmp/prep.sh
     /tmp/prep.sh
-    echo "Appliance prep complete."
   else
     echo "Failed to download the prep script. Please check your internet connection."
   fi
