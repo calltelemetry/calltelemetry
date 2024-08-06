@@ -26,8 +26,8 @@ CURRENT_SCRIPT_PATH="$0"
 PREP_SCRIPT_URL="https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/ova/prep.sh"
 
 # Ensure necessary directories exist and have correct permissions
-mkdir -p "$BACKUP_DIR" -p
-mkdir -p "$BACKUP_FOLDER_PATH" -p
+mkdir -p "$BACKUP_DIR"
+mkdir -p "$BACKUP_FOLDER_PATH"
 sudo chown -R calltelemetry "$BACKUP_DIR"
 sudo chown -R calltelemetry "$BACKUP_FOLDER_PATH"
 
@@ -57,15 +57,24 @@ cli_update() {
   wget -q "$SCRIPT_URL" -O "$tmp_file"
 
   if [ $? -eq 0 ]; then
-    if ! diff "$tmp_file" "$CURRENT_SCRIPT_PATH" > /dev/null; then
-      echo "Update available for the CLI script. Updating now..."
+    if [ -f "$CURRENT_SCRIPT_PATH" ]; then
+      if ! diff "$tmp_file" "$CURRENT_SCRIPT_PATH" > /dev/null; then
+        echo "Update available for the CLI script. Updating now..."
+        cp "$tmp_file" "$CURRENT_SCRIPT_PATH"
+        chmod +x "$CURRENT_SCRIPT_PATH"
+        echo "CLI script updated. Please run the command again."
+        rm -f "$tmp_file"
+        exit 0
+      else
+        echo "CLI script is up-to-date."
+      fi
+    else
+      echo "Current script path not found: $CURRENT_SCRIPT_PATH. Updating script..."
       cp "$tmp_file" "$CURRENT_SCRIPT_PATH"
       chmod +x "$CURRENT_SCRIPT_PATH"
-      echo "CLI script updated. Please run the command again."
+      echo "CLI script installed. Please run the command again."
       rm -f "$tmp_file"
       exit 0
-    else
-      echo "CLI script is up-to-date."
     fi
   else
     echo "Failed to check for updates. Please check your internet connection."
