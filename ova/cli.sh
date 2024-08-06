@@ -62,19 +62,15 @@ cli_update() {
         echo "Update available for the CLI script. Updating now..."
         cp "$tmp_file" "$CURRENT_SCRIPT_PATH"
         chmod +x "$CURRENT_SCRIPT_PATH"
-        echo "CLI script updated. Please run the command again."
-        rm -f "$tmp_file"
-        exit 0
+        echo "CLI script updated."
       else
         echo "CLI script is up-to-date."
       fi
     else
-      echo "Current script path not found: $CURRENT_SCRIPT_PATH. Updating script..."
+      echo "Current script path not found: $CURRENT_SCRIPT_PATH. Installing new script..."
       cp "$tmp_file" "$CURRENT_SCRIPT_PATH"
       chmod +x "$CURRENT_SCRIPT_PATH"
-      echo "CLI script installed. Please run the command again."
-      rm -f "$tmp_file"
-      exit 0
+      echo "CLI script installed."
     fi
   else
     echo "Failed to check for updates. Please check your internet connection."
