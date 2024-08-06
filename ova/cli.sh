@@ -45,8 +45,9 @@ show_help() {
   echo "  backup              Create a database backup and retain only the last 5 backups."
   echo "  restore             Restore the database from a specified backup file."
   echo "  set_logging level   Set the logging level (debug, info, warning, error)."
-  echo "  self_update         Update the CLI script to the latest version from the repository."
+  echo "  cli_update          Update the CLI script to the latest version from the repository."
   echo "  build-appliance     Download and execute the prep script to build the appliance."
+  echo "  prep-cluster-node   Prepare the cluster node with necessary tools."
 }
 
 # Function to update the CLI script
@@ -255,6 +256,37 @@ build_appliance() {
   rm -f /tmp/prep.sh
 }
 
+# Function to prepare the cluster node with necessary tools
+prep_cluster_node() {
+  # Disable Firewall and SELinux
+  sudo systemctl stop firewalld
+  sudo systemctl disable firewalld
+  sudo setenforce permissive
+  sudo systemctl disable rpcbind
+
+  # Install Kubectl and Helm via SNAPS
+  sudo yum install -y wget epel-release
+  sudo yum install -y snapd
+  sudo systemctl enable --now snapd.socket
+  sudo ln -s /var/lib/snapd/snap /snap
+  sudo snap wait system seed.loaded
+  sudo systemctl restart snapd.seeded.service
+  sudo snap install kubectl --classic
+  sudo snap install helm --classic
+
+  # Install K9s Kubernetes Management tool
+  echo "Installing k9s toolkit - https://github.com/derailed/k9s/"
+  K9S_LATEST_VERSION=$(curl -s https://api.github.com/repos/derailed/k9s/releases/latest | grep "tag_name" | cut -d '"' -f 4)
+  wget https://github.com/derailed/k9s/releases/download/$K9S_LATEST_VERSION/k9s_Linux_x86_64.tar.gz
+  tar -xzf k9s_Linux_x86_64.tar.gz
+  sudo mv k9s /usr/local/bin
+  mkdir -p ~/.k9s
+  rm -rf k9s*
+
+  # Install GIT
+  sudo dnf install -y git
+}
+
 # Main script logic
 case "$1" in
   --help)
@@ -286,6 +318,9 @@ case "$1" in
     ;;
   build-appliance)
     build_appliance
+    ;;
+  prep-cluster-node)
+    prep_cluster_node
     ;;
   *)
     echo "Invalid option: $1"
