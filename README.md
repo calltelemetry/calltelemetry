@@ -3,9 +3,7 @@
 ---
 [Latest Version and Release Notes](https://docs.calltelemetry.com/releases)
 
-## Free [Vmware Appliance Download](https://calltelemetry.com/getting-started) with Community License
-
-Community License includes these core features:
+Free Community License includes these core features:
 
 - Policy Engine with Call Blocking
 - Unlimited Permit and Block Rules
@@ -21,7 +19,7 @@ Community License includes these core features:
 
 Additional features are enabled with a [paid license](https://calltelemetry.com/#pricing).
 
-### Multiple Deployment options
+## Multiple Deployment options
 
 - [Vmware OVA Appliance](https://docs.calltelemetry.com/deployment/ova.html)
 - [Bring your own OS](https://docs.calltelemetry.com/deployment/docker.html)
