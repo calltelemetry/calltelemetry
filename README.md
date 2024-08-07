@@ -63,7 +63,7 @@ Learn more about [Call Blocking](https://docs.calltelemetry.com/mcid/intro) tool
 #### [Call Apps and Event Webhooks](https://docs.calltelemetry.com/policies/call-apps)
 
 - TrueSpam API for realtime caller spam robocall score, with actions to block call, redirect, or rename.
-- CSV Lookup to locate subnets for location data - Locate phones in MRA, VPN, or Site lists.
+- [CSV Lookup to locate subnets](https://docs.calltelemetry.com/policies/apps/e911-subnet-csv) for location data - Locate phones in MRA, VPN, or Site lists.
 - ICMP Traceroute to locate the last hop for location data
 - Send data via Email or SMS to any destination
 - XML SOAP web lookup App for querying APIs
@@ -103,11 +103,11 @@ Learn more about [Call Blocking](https://docs.calltelemetry.com/mcid/intro) tool
 
 ### [Dispatchable Location Discovery Apps for Emergency Alerts](https://docs.calltelemetry.com/e911)
 
-- Discovery of CDP and LLDP Netowrk Switch Neighbor, IP Subnet, and ICMP traceroute for use in call workflows.
-- 911 Location Manager: Subnet, Switch, Port.
-- Query APIs for more location data from Cisco IP Phone data.
+- [Discovery](https://docs.calltelemetry.com/policies/apps/e911-phone-discovery) of CDP and LLDP Netowrk Switch Neighbor, IP Subnet, and ICMP traceroute for use in call workflows.
+- 911 Location Manager covering Neighbor CDP LLDP Switch, Port, and [Subnet locations](https://docs.calltelemetry.com/policies/apps/e911-subnet-csv).
+- Query APIs for dispatchable emeregency location data from discovered Cisco IP Phone data.
 - Meraki Location Sync for CDP neighbors and pulls switch physical address and notes.
-- 911 QR Code generator for network drop wire mapping.
+- 911 [QR Code generator](https://docs.calltelemetry.com/e911/qr-code) for network drop wire mapping.
 
 ## [Missed Call Alerts and Notifications](https://docs.calltelemetry.com/missed-call/intro)
 
