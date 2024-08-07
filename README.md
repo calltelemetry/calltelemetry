@@ -95,15 +95,14 @@ Learn more about [Call Blocking](https://docs.calltelemetry.com/mcid/intro) tool
 
 ## [911 Alerts and Emergency Features](https://docs.calltelemetry.com/e911)
 
-- Realtime 911 Alerts with location data for Cisco IP Phones.
-- Discover Cisco IP Phone details in realtime.
-- Alerts can include CDP neighbor, Subnet, and Cisco Callmanager data.
+- [Realtime 911 Alerts](https://docs.calltelemetry.com/policies/trigger-call-alerts) with location data for Cisco IP Phones. Alerts can include CDP neighbor, Subnet, and Cisco Callmanager data.
 - Notications for Email, SMS, MS Teams, and Webex Teams.
+- [Discover Cisco IP Phone details](https://docs.calltelemetry.com/policies/apps/e911-phone-discovery) in realtime.
 - Creates a Webex Teams Space for each rule alert, invites others, and allows you to collaborate as a team in the space for situational awareness of the call.
 
 ### [Dispatchable Location Discovery Apps for Emergency Alerts](https://docs.calltelemetry.com/e911)
 
-- [Discovery](https://docs.calltelemetry.com/policies/apps/e911-phone-discovery) of CDP and LLDP Netowrk Switch Neighbor, IP Subnet, and ICMP traceroute for use in call workflows.
+- [Phone Discovery](https://docs.calltelemetry.com/policies/apps/e911-phone-discovery) of CDP and LLDP Netowrk Switch Neighbor, IP Subnet, and ICMP traceroute for use in call workflows.
 - 911 Location Manager covering Neighbor CDP LLDP Switch, Port, and [Subnet locations](https://docs.calltelemetry.com/policies/apps/e911-subnet-csv).
 - Query APIs for dispatchable emeregency location data from discovered Cisco IP Phone data.
 - Meraki Location Sync for CDP neighbors and pulls switch physical address and notes.
