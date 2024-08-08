@@ -3,6 +3,19 @@
 ---
 [Latest Version and Release Notes](https://docs.calltelemetry.com/releases)
 
+## Multiple Deployment options
+
+- [Vmware OVA Appliance](https://docs.calltelemetry.com/deployment/ova.html)
+- [Bring your own OS](https://docs.calltelemetry.com/deployment/docker.html)
+- [HA Cluster](https://docs.calltelemetry.com/deployment/k3s.html)
+
+### Private and Secure
+
+- Secure - No internet required. Air gap support.
+- Private - No user tracking or analytics.
+- Teams Support - Multi-user Role Based access support based on features.
+- Encryption Support - TLS Administration, Secure FTP, and Cisco CURRI API TLS support
+
 Free Community License includes these core features:
 
 - Policy Engine with Call Blocking
@@ -18,19 +31,6 @@ Free Community License includes these core features:
 - 1 Callmanager Cluster
 
 Additional features are enabled with a [paid license](https://calltelemetry.com/#pricing).
-
-## Multiple Deployment options
-
-- [Vmware OVA Appliance](https://docs.calltelemetry.com/deployment/ova.html)
-- [Bring your own OS](https://docs.calltelemetry.com/deployment/docker.html)
-- [HA Cluster](https://docs.calltelemetry.com/deployment/k3s.html)
-
-### Private and Secure
-
-- Secure - No internet required. Air gap support.
-- Private - No user tracking or analytics.
-- Teams Support - Multi-user Role Based access support based on features.
-- Encryption Support - TLS Administration, Secure FTP, and Cisco CURRI API TLS support
 
 ## Call Policy and CURRI API Engine
 
