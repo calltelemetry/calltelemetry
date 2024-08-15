@@ -22,7 +22,7 @@ services:
     networks:
       - ct
   web:
-    image: "calltelemetry/web:0.8.1-rc67"
+    image: "calltelemetry/web:0.8.1-rc68"
     restart: "always"
     ports: ["80:4080", "8443:4443", "443:4001", "22:3022"]
     environment:
