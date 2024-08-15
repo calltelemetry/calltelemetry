@@ -107,6 +107,10 @@ update() {
       echo "Restarting Docker Compose service..."
       systemctl restart docker-compose-app.service
       echo "Docker Compose service restarted."
+      echo "Update complete, services are starting."
+      echo "Note for upgrades - When upgrading from pre-0.8.1 to 0.8.2 there are several SQL indexes to rebuild."
+      echo "SQL Indexing can take 5-15 minutes depending on the size of your database."
+      echo "During this time, the API and Web UI will not be accessible. You can run the linux command top and see if there is high cpu from postgresql, if so, it is still rebuilding indexes, and this is normal."
     else
       echo "Docker image pull failed. Rolling back to previous configuration."
       rollback
