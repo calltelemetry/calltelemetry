@@ -152,15 +152,29 @@ echo "IMPORTANT - After this next step you must access the appliance on port 222
 # Prompt the user for confirmation to apply the SSH port change
 read -p "The SSH management port must changed to 2222. Applying this change will disconnect your SSH session. Do you want to apply this change and restart the SSH service? (yes/no): " response < /dev/tty
 
+
 if [ "$response" = "yes" ]; then
   # Change SSH port to 2222
   sudo sed -i "s/#Port 22/Port 2222/" /etc/ssh/sshd_config
+  echo "Configuring firewall for port 2222"
 
-  # If RHEL or AlmaLinux, add 2222 to SELinux
-  if [[ -f /etc/redhat-release ]]; then
+  # Detect AlmaLinux, CentOS, or RHEL and handle accordingly
+  if grep -q "AlmaLinux" /etc/os-release; then
+    sudo firewall-cmd --zone=public --add-port=2222/tcp --permanent
+    sudo firewall-cmd --reload
+
+  elif grep -q "CentOS" /etc/os-release; then
     sudo semanage port -a -t ssh_port_t -p tcp 2222
     sudo firewall-cmd --zone=public --add-port=2222/tcp --permanent
     sudo firewall-cmd --reload
+
+  elif grep -q "Red Hat Enterprise Linux" /etc/os-release; then
+    sudo semanage port -a -t ssh_port_t -p tcp 2222
+    sudo firewall-cmd --zone=public --add-port=2222/tcp --permanent
+    sudo firewall-cmd --reload
+
+  else
+    echo "Unsupported OS. Please make sure your firewall allows access to port 2222"
   fi
 
   # Restart SSH service
@@ -168,3 +182,4 @@ if [ "$response" = "yes" ]; then
 else
   echo "The SSH port change was not applied. Please rerun the script and choose 'yes' to complete the setup."
 fi
+Exp
