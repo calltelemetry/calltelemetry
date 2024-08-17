@@ -28,8 +28,7 @@ PREP_SCRIPT_URL="https://raw.githubusercontent.com/calltelemetry/calltelemetry/m
 # Ensure necessary directories exist and have correct permissions
 mkdir -p "$BACKUP_DIR"
 mkdir -p "$BACKUP_FOLDER_PATH"
-sudo chown -R calltelemetry "$BACKUP_DIR"
-sudo chown -R calltelemetry "$BACKUP_FOLDER_PATH"
+
 
 # Function to display help
 show_help() {
@@ -252,9 +251,12 @@ set_logging() {
 build_appliance() {
   echo "Downloading and executing the prep script to build the appliance..."
   wget -q "$PREP_SCRIPT_URL" -O /tmp/prep.sh
+  echo "Script downloaded. Executing the script..."
   if [ $? -eq 0 ]; then
     chmod +x /tmp/prep.sh
     /tmp/prep.sh
+    sudo chown -R calltelemetry "$BACKUP_DIR"
+    sudo chown -R calltelemetry "$BACKUP_FOLDER_PATH"
   else
     echo "Failed to download the prep script. Please check your internet connection."
   fi
