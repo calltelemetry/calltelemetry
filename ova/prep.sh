@@ -189,4 +189,3 @@ if [ "$response" = "yes" ]; then
 else
   echo "The SSH port change was not applied. Please rerun the script and choose 'yes' to complete the setup."
 fi
-Exp
