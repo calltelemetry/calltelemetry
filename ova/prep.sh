@@ -1,6 +1,10 @@
 #!/bin/sh -eux
 sudo hostname ct-appliance
 
+# Install wget and basic net tools if not already installed.
+sudo dnf install wget net-tools -y
+
+
 # If CentOS
 if [[ -f /etc/centos-release ]]; then
   sudo dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
