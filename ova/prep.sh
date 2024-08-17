@@ -160,21 +160,26 @@ if [ "$response" = "yes" ]; then
 
   # Detect AlmaLinux, CentOS, or RHEL and handle accordingly
   if grep -q "AlmaLinux" /etc/os-release; then
+    sudo yum install policycoreutils-python-utils -y
+    sudo semanage port -a -t ssh_port_t -p tcp 2222
     sudo firewall-cmd --zone=public --add-port=2222/tcp --permanent
     sudo firewall-cmd --reload
 
   elif grep -q "CentOS" /etc/os-release; then
+    sudo yum install policycoreutils-python-utils -y
     sudo semanage port -a -t ssh_port_t -p tcp 2222
     sudo firewall-cmd --zone=public --add-port=2222/tcp --permanent
     sudo firewall-cmd --reload
 
   elif grep -q "Red Hat Enterprise Linux" /etc/os-release; then
+    echo "Detected Red Hat Enterprise Linux. Installing semanage tools and configuring firewall..."
+    sudo yum install policycoreutils-python-utils -y
     sudo semanage port -a -t ssh_port_t -p tcp 2222
     sudo firewall-cmd --zone=public --add-port=2222/tcp --permanent
     sudo firewall-cmd --reload
 
   else
-    echo "Unsupported OS. Please make sure your firewall allows access to port 2222"
+      echo "Unsupported OS. Please make sure your firewall allows access to port 2222 "
   fi
 
   # Restart SSH service
