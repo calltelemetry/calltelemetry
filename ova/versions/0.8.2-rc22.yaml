@@ -26,7 +26,7 @@ services:
       - ct
 
   vue-web:
-    image: "calltelemetry/vue:0.8.2-rc12"
+    image: "calltelemetry/vue:0.8.2-rc22"
     restart: "always"
     expose:
       - "80"
@@ -63,7 +63,7 @@ services:
       - ct
 
   web:
-    image: "calltelemetry/web:0.8.2-rc12"
+    image: "calltelemetry/web:0.8.2-rc22"
     restart: "always"
     expose:
       - 4001
@@ -83,8 +83,8 @@ services:
       - LOGGING_LEVEL=warning
       - ADMIN_NODE=TRUE
       - WORKER_NODE=TRUE
-      - CERT_KEY=/home/app/cert/appliance_key.pem
-      - CERT_PUBLIC=/home/app/cert/appliance.pem
+      # - CERT_KEY=/home/app/cert/appliance_key.pem
+      # - CERT_PUBLIC=/home/app/cert/appliance.pem
       # can be HACKNEY, IBROWSE, MINT, GUN or HTTPC.
        # GUN is the new standard. Hackney was default 0.8.1 and before.
       - HTTP_ADAPTER=GUN
