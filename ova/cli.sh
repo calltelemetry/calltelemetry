@@ -99,10 +99,16 @@ update() {
 
   wget "$url" -O "$TEMP_FILE"
 
-  if [ -f "$TEMP_FILE" ]; then
+  # Download NATS configuration file
+  nats_conf_url="https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/ova/nats.conf"
+  nats_conf_file="nats.conf"
+  wget "$nats_conf_url" -O "$nats_conf_file"
+
+  if [ -f "$TEMP_FILE" ] && [ -f "$nats_conf_file" ]; then
     if docker-compose -f "$TEMP_FILE" pull; then
       mv "$TEMP_FILE" "$ORIGINAL_FILE"
       echo "New docker-compose.yml moved to production."
+      echo "NATS configuration file downloaded."
       echo "Restarting Docker Compose service..."
       systemctl restart docker-compose-app.service
       echo "Docker Compose service restarted."
