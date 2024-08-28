@@ -98,6 +98,9 @@ services:
       - "traefik.http.routers.web.tls=true"
   nats:
     image: "nats:latest"
+    command: "-c /etc/nats/nats.conf"
+    volumes:
+      - ./nats.conf:/etc/nats/nats.conf
     expose:
       - "4222"
     networks:
