@@ -108,7 +108,7 @@ services:
 
 networks:
   ct:
-    enable_ipv6: true
+    # enable_ipv6: true
 
 volumes:
   certs:
