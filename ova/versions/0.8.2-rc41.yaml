@@ -26,7 +26,7 @@ services:
       - ct
 
   vue-web:
-    image: "calltelemetry/vue:0.8.2-rc40"
+    image: "calltelemetry/vue:0.8.2-rc41"
     restart: "always"
     expose:
       - "80"
@@ -63,7 +63,7 @@ services:
       - ct
 
   web:
-    image: "calltelemetry/web:0.8.2-rc40"
+    image: "calltelemetry/web:0.8.2-rc41"
     restart: "always"
     expose:
       - 4001
