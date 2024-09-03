@@ -1,0 +1,26 @@
+# General settings for Traefik
+log:
+  level: INFO
+
+# default LoadBalancer service
+service:
+  enabled: false
+
+# Traefik dashboard
+dashboard:
+  enabled: false
+
+# Additional arguments to configure Traefik
+additionalArguments:
+  - --providers.kubernetescrd
+  - --entryPoints.web.address=:80
+  - --entryPoints.websecure.address=:443
+
+# IngressClass configuration
+ingressClass:
+  enabled: true
+  isDefaultClass: true  # Set to true if Traefik should be the default IngressClass
+
+# Experimental features
+experimental:
+  plugins: {}
