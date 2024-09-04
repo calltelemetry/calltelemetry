@@ -29,7 +29,6 @@ PREP_SCRIPT_URL="https://raw.githubusercontent.com/calltelemetry/calltelemetry/m
 mkdir -p "$BACKUP_DIR"
 mkdir -p "$BACKUP_FOLDER_PATH"
 
-
 # Function to display help
 show_help() {
   echo "Usage: script_name.sh [option] [parameter]"
@@ -76,6 +75,31 @@ cli_update() {
   fi
 
   rm -f "$tmp_file"
+
+  # Download the Caddyfile
+  CADDYFILE_URL="https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/ova/Caddyfile"
+  caddyfile_tmp=$(mktemp)
+  wget -q "$CADDYFILE_URL" -O "$caddyfile_tmp"
+
+  if [ $? -eq 0 ]; then
+    if [ -f "/etc/caddy/Caddyfile" ]; then
+      if ! diff "$caddyfile_tmp" "/etc/caddy/Caddyfile" > /dev/null; then
+        echo "Update available for the Caddyfile. Updating now..."
+        cp "$caddyfile_tmp" "/etc/caddy/Caddyfile"
+        echo "Caddyfile updated."
+      else
+        echo "Caddyfile is up-to-date."
+      fi
+    else
+      echo "Caddyfile not found. Installing new Caddyfile..."
+      cp "$caddyfile_tmp" "/etc/caddy/Caddyfile"
+      echo "Caddyfile installed."
+    fi
+  else
+    echo "Failed to download the Caddyfile. Please check your internet connection."
+  fi
+
+  rm -f "$caddyfile_tmp"
 }
 
 # Function to update the docker-compose configuration
