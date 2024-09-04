@@ -321,12 +321,29 @@ prep_cluster_node() {
   sudo dnf install -y git
 }
 
+# Function to generate self-signed certificates if they do not exist
+generate_self_signed_certificates() {
+  cert_dir="./certs"
+  cert_file="$cert_dir/appliance.crt"
+  key_file="$cert_dir/appliance_key.pem"
+
+  if [ ! -f "$cert_file" ] || [ ! -f "$key_file" ]; then
+    echo "Generating self-signed certificates..."
+    mkdir -p "$cert_dir"
+    openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout "$key_file" -out "$cert_file" -subj "/CN=appliance.calltelemetry.internal"
+    echo "No certs found. Self-signed certificates generated."
+  else
+    echo "Certificates already exist. Skipping generation."
+  fi
+}
+
 # Main script logic
 case "$1" in
   --help)
     show_help
     ;;
   update)
+    generate_self_signed_certificates  # Ensure certificates are generated before update
     update "$2"
     ;;
   rollback)
