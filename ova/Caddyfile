@@ -1,0 +1,11 @@
+# Caddyfile
+{
+    default_sni demo.calltelemetry.internal  # Replace with your default domain
+}
+
+:443 {
+    reverse_proxy /api* web:4000
+    reverse_proxy /* vue-web:80
+
+    tls /certs/appliance.crt /certs/appliance_key.pem  # Default certificate and key files
+}
