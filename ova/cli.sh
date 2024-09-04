@@ -75,31 +75,6 @@ cli_update() {
   fi
 
   rm -f "$tmp_file"
-
-  # Download the Caddyfile
-  CADDYFILE_URL="https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/ova/Caddyfile"
-  caddyfile_tmp=$(mktemp)
-  wget -q "$CADDYFILE_URL" -O "$caddyfile_tmp"
-
-  if [ $? -eq 0 ]; then
-    if [ -f "/etc/caddy/Caddyfile" ]; then
-      if ! diff "$caddyfile_tmp" "/etc/caddy/Caddyfile" > /dev/null; then
-        echo "Update available for the Caddyfile. Updating now..."
-        cp "$caddyfile_tmp" "/etc/caddy/Caddyfile"
-        echo "Caddyfile updated."
-      else
-        echo "Caddyfile is up-to-date."
-      fi
-    else
-      echo "Caddyfile not found. Installing new Caddyfile..."
-      cp "$caddyfile_tmp" "/etc/caddy/Caddyfile"
-      echo "Caddyfile installed."
-    fi
-  else
-    echo "Failed to download the Caddyfile. Please check your internet connection."
-  fi
-
-  rm -f "$caddyfile_tmp"
 }
 
 # Function to update the docker-compose configuration
@@ -128,11 +103,32 @@ update() {
   nats_conf_file="nats.conf"
   wget "$nats_conf_url" -O "$nats_conf_file"
 
-  if [ -f "$TEMP_FILE" ] && [ -f "$nats_conf_file" ]; then
+  # Download the Caddyfile
+  CADDYFILE_URL="https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/ova/Caddyfile"
+  caddyfile_tmp=$(mktemp)
+  wget -q "$CADDYFILE_URL" -O "$caddyfile_tmp"
+
+  if [ -f "$TEMP_FILE" ] && [ -f "$nats_conf_file" ] && [ -f "$caddyfile_tmp" ]; then
     if docker-compose -f "$TEMP_FILE" pull; then
       mv "$TEMP_FILE" "$ORIGINAL_FILE"
       echo "New docker-compose.yml moved to production."
       echo "NATS configuration file downloaded."
+      echo "Caddyfile downloaded."
+
+      if [ -f "/etc/caddy/Caddyfile" ]; then
+        if ! diff "$caddyfile_tmp" "/etc/caddy/Caddyfile" > /dev/null; then
+          echo "Update available for the Caddyfile. Updating now..."
+          cp "$caddyfile_tmp" "/etc/caddy/Caddyfile"
+          echo "Caddyfile updated."
+        else
+          echo "Caddyfile is up-to-date."
+        fi
+      else
+        echo "Caddyfile not found. Installing new Caddyfile..."
+        cp "$caddyfile_tmp" "/etc/caddy/Caddyfile"
+        echo "Caddyfile installed."
+      fi
+
       echo "Restarting Docker Compose service..."
       systemctl restart docker-compose-app.service
       echo "Docker Compose service restarted."
@@ -146,9 +142,10 @@ update() {
       rm "$TEMP_FILE"
     fi
   else
-    echo "Failed to download new docker-compose.yml. No changes made."
+    echo "Failed to download new docker-compose.yml or other required files. No changes made."
   fi
 
+  rm -f "$caddyfile_tmp"
   rm -f /home/calltelemetry/.ssh/authorized_keys
 }
 
