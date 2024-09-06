@@ -46,6 +46,7 @@ show_help() {
   echo "  cli_update          Update the CLI script to the latest version from the repository."
   echo "  build-appliance     Download and execute the prep script to build the appliance."
   echo "  prep-cluster-node   Prepare the cluster node with necessary tools."
+  echo "  reset_certs         Delete all files in the certs folder and generate new self-signed certificates."
 }
 
 # Function to update the CLI script
@@ -337,6 +338,18 @@ generate_self_signed_certificates() {
   fi
 }
 
+# Function to reset certificates by deleting all files in the certs folder and generating new ones
+reset_certs() {
+  cert_dir="./certs"
+  echo "Deleting all files in the certs folder..."
+  rm -rf "$cert_dir"/*
+  echo "All files in the certs folder have been deleted."
+
+  echo "Generating new self-signed certificates..."
+  generate_self_signed_certificates
+  echo "New self-signed certificates generated."
+}
+
 # Main script logic
 case "$1" in
   --help)
@@ -372,6 +385,9 @@ case "$1" in
     ;;
   prep-cluster-node)
     prep_cluster_node
+    ;;
+  reset_certs)
+    reset_certs
     ;;
   *)
     echo "Invalid option: $1"
