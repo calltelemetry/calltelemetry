@@ -116,17 +116,17 @@ update() {
       echo "NATS configuration file downloaded."
       echo "Caddyfile downloaded."
 
-      if [ -f "/etc/caddy/Caddyfile" ]; then
-        if ! diff "$caddyfile_tmp" "/etc/caddy/Caddyfile" > /dev/null; then
+      if [ -f "./Caddyfile" ]; then
+        if ! diff "$caddyfile_tmp" "./Caddyfile" > /dev/null; then
           echo "Update available for the Caddyfile. Updating now..."
-          cp "$caddyfile_tmp" "/etc/caddy/Caddyfile"
+          cp "$caddyfile_tmp" "./Caddyfile"
           echo "Caddyfile updated."
         else
           echo "Caddyfile is up-to-date."
         fi
       else
         echo "Caddyfile not found. Installing new Caddyfile..."
-        cp "$caddyfile_tmp" "/etc/caddy/Caddyfile"
+        cp "$caddyfile_tmp" "./Caddyfile"
         echo "Caddyfile installed."
       fi
 
