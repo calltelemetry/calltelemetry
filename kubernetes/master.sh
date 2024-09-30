@@ -38,7 +38,18 @@ kubectl apply --server-side -k postgres-operator-examples/kustomize/install/defa
 
 # Create the Postgres database cluster
 kubectl create namespace ct
-kubectl apply -n ct -f calltelemetry/kuberentes/postgres/ct-postgres.yaml
+kubectl apply -n ct -f calltelemetry/kubernetes/postgres/ct-postgres.yaml
+
+# Traefik Ingress Controller
+helm repo add traefik https://helm.traefik.io/traefik
+helm repo update
+helm install -n traefik traefik traefik/traefik \
+  --set crds.enabled=true \
+  --set "additionalArguments[0]=--providers.kubernetesingress" \
+  --set "additionalArguments[1]=--log.level=DEBUG" \
+  --set "additionalArguments[2]=--entrypoints.websecure.http.tls" \
+  --set "additionalArguments[3]=--providers.kubernetescrd" \
+  --set "additionalArguments[4]=--accesslog" \
 
 # Install the Call Telemetry Application
 
