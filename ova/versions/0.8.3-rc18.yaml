@@ -65,8 +65,7 @@ services:
       - CERT_KEY=/home/app/cert/appliance_key.pem
       - CERT_PUBLIC=/home/app/cert/appliance.crt
       # can be HACKNEY, IBROWSE, MINT, GUN or HTTPC.
-       # GUN is the new standard. Hackney was default 0.8.1 and before.
-      - HTTP_ADAPTER=GUN
+      - HTTP_ADAPTER=HACKNEY
       - LOG_PATH=/var/log
     tmpfs:
       - /var/log:rw,mode=0555,size=5000m
