@@ -12,7 +12,7 @@ services:
       - ct
 
   vue-web:
-    image: "calltelemetry/vue:0.8.2-rc71"
+    image: "calltelemetry/vue:0.8.3-rc53"
     restart: "always"
     expose:
       - "80"
@@ -43,7 +43,7 @@ services:
       - ct
 
   web:
-    image: "calltelemetry/web:0.8.2-rc71"
+    image: "calltelemetry/web:0.8.3-rc53"
     restart: "always"
     user: root
     expose:
@@ -66,10 +66,19 @@ services:
       - CERT_PUBLIC=/home/app/cert/appliance.crt
       # can be HACKNEY, IBROWSE, MINT, GUN or HTTPC.
       - HTTP_ADAPTER=HACKNEY
+      - LOG_PATH=/var/log
+    tmpfs:
+      - /var/log:rw,mode=0555,size=5000m
     networks:
       - ct
     volumes:
       - ./certs:/home/app/cert:rw
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "7" # Keeps 7 days of logs
+        compress: "true" # Compresses rotated files
 
   nats:
     image: "nats:latest"
