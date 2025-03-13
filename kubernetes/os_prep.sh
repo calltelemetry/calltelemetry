@@ -2,6 +2,30 @@
 # Runs on CentOS Strema, Almalinux or RHEL
 # This script will install the necessary tools to run the Call Telemetry application on Kubernetes
 
+# Need 2379 and 2380 for ETCD HA
+sudo firewall-cmd --permanent --add-port=2379/tcp
+sudo firewall-cmd --permanent --add-port=2380/tcp
+# Need 7946 for k3s MetalLB
+sudo firewall-cmd --permanent --add-port=7946/tcp
+sudo firewall-cmd --permanent --add-port=7946/udp
+# Need 443 for HTTPS
+sudo firewall-cmd --permanent --add-port=443/tcp
+# Need 80 for HTTP
+sudo firewall-cmd --permanent --add-port=80/tcp
+# Need 22 for SSH, and 2222 for Admin SSH
+sudo firewall-cmd --permanent --add-port=22/tcp
+sudo firewall-cmd --permanent --add-port=2222/tcp
+# Need 6443 for Kube API
+sudo firewall-cmd --permanent --add-port=6443/tcp
+# Need 10250 and 10251 and 10259 and 10257 for Kubelet API, Kubelet Metrics, Kubelet and Kube Proxy
+sudo firewall-cmd --permanent --add-port=10250/tcp
+sudo firewall-cmd --permanent --add-port=10251/tcp
+sudo firewall-cmd --permanent --add-port=10259/tcp
+sudo firewall-cmd --permanent --add-port=10257/tcp
+# Need 30000-32767 for K8s NodePort Traffic
+sudo firewall-cmd --permanent --add-port=30000-32767/tcp
+sudo firewall-cmd --reload
+
 # Disable Firewall and selinux
 sudo systemctl stop firewalld
 sudo systemctl disable firewalld
