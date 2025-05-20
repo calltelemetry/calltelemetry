@@ -13,7 +13,7 @@
 
 - Secure - No internet required. Air gap support.
 - Private - No user tracking or analytics.
-- Teams Support - Multi-user Role Based access support based on features.
+- RBAC Teams Support - Multi-user Role Based access.
 - Encryption Support - TLS Administration, Secure FTP, and Cisco CURRI API TLS support
 
 Free Community License includes these core features:
@@ -26,7 +26,7 @@ Free Community License includes these core features:
 - Modify Calling and Called Party Numbers and Calling Names
 - Phone Dashboard and Neighbor discovery up to 1000 phones
 - Phone Remote Control
-- Basic CDR Reports up to 7 days
+- Basic CDR and Report data up to 7 days
 - 1 Administrator
 - 1 Callmanager Cluster
 
