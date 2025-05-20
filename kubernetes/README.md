@@ -1,6 +1,10 @@
 
 # Call Telemetry HA Deployment Guide
 
+::: warning
+This document is about to be heavily updated, and our Kubernetes charts and guides have moved to a new repository. Please check the [Call Telemetry Charts Repo](https://github.com/calltelemetry/k8s) for the latest information.
+:::
+
 This guide provides detailed instructions for setting up and deploying the Call Telemetry application using Kuberenetes with load balancing an a HA PostgreSQL Cluster.
 
 Kubernetes is free to use on your own, and support is available please contact [Support](mailto:jason@calltelelemetry.com) for more information.
