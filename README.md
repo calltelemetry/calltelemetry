@@ -27,6 +27,7 @@ Free Community License includes these core features:
 - Phone Dashboard and Neighbor discovery up to 1000 phones
 - Phone Remote Control
 - Basic CDR and Report data up to 7 days
+- CMR Data up to 24 hours
 - 1 Administrator
 - 1 Callmanager Cluster
 
@@ -38,7 +39,7 @@ Additional features are enabled with a [paid license](https://calltelemetry.com/
 
 ### Call Policy Features
 
-- Use a [Global Block list](https://docs.calltelemetry.com/call-block/global-call-block-list) to block calls across multiple clusters.
+- [Global Block list](https://docs.calltelemetry.com/call-block/global-call-block-list) blocks calls across multiple clusters.
 - Block calls based on calling Party, or a combination of calling and called party.
 - Unlimited Call Routing Rules - Block, Permit, Change Caller IDs, Translate / Redirect, or Inject Greetings.
 - Multiple Cluster Support - Central Policy control across all Cisco Callmanager clusters in your environment.
@@ -68,7 +69,7 @@ Learn more about [Call Blocking](https://docs.calltelemetry.com/mcid/intro) tool
 - Send data via Email or SMS to any destination
 - XML SOAP web lookup App for querying APIs
 - Share realtime data via webhook to any third party API.
-- Need another App? [Contact Us](mailto:jason@calltelemtry.com) to build a custom app for your needs.
+- Need another App? [Contact me](mailto:jason@calltelemtry.com) to build a custom app for your needs.
 
 #### Build your own CRM Connectors
 
