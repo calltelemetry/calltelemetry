@@ -12,7 +12,7 @@ services:
       - ct
 
   vue-web:
-    image: "calltelemetry/vue:0.8.4-rc51"
+    image: "calltelemetry/vue:0.8.4-rc52"
     restart: "always"
     expose:
       - "80"
