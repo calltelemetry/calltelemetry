@@ -2,3 +2,5 @@ postgres-data/
 .ssh/
 .devspace
 devspace.yaml
+.claude/
+CLAUDE.md
