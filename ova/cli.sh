@@ -40,6 +40,7 @@ show_help() {
   echo "  rollback            Roll back to the previous docker-compose configuration."
   echo "  reset               Stop the application, remove data, and restart the application."
   echo "  compact             Prune Docker system and compact the PostgreSQL database."
+  echo "  purge               Remove unused Docker images, containers, networks, and volumes."
   echo "  backup              Create a database backup and retain only the last 5 backups."
   echo "  restore             Restore the database from a specified backup file."
   echo "  set_logging level   Set the logging level (debug, info, warning, error)."
@@ -133,10 +134,21 @@ update() {
       echo "Restarting Docker Compose service..."
       systemctl restart docker-compose-app.service
       echo "Docker Compose service restarted."
-      echo "Update complete, services are starting."
-      echo "Note for upgrades - When upgrading from pre-0.8.1 to 0.8.2 there are several SQL indexes to rebuild."
-      echo "SQL Indexing can take 5-15 minutes depending on the size of your database."
-      echo "During this time, the API and Web UI will not be accessible. You can run the linux command top and see if there is high cpu from postgresql, if so, it is still rebuilding indexes, and this is normal."
+      
+      echo "Cleaning up unused Docker resources..."
+      purge_docker
+      
+      echo "Monitoring service startup..."
+      wait_for_services
+      
+      if [ $? -eq 0 ]; then
+        echo "✅ Update complete! All services are running and ready."
+      else
+        echo "⚠️  Update complete, but some services may still be initializing."
+        echo "This is normal during major upgrades with SQL index rebuilds."
+        echo "Monitor progress with: docker-compose logs -f"
+        echo "Check CPU usage with: top (high postgresql CPU is normal during index rebuilds)"
+      fi
     else
       echo "Docker image pull failed. Rolling back to previous configuration."
       rollback
@@ -187,7 +199,12 @@ reset_app() {
 
 # Function to compact the system
 compact_system() {
-  echo "Pruning Docker system..."
+  echo "Performing comprehensive system cleanup..."
+  
+  # First run our detailed purge function
+  purge_docker
+  
+  echo "Running full Docker system prune..."
   docker system prune --all -f
 
   echo "Starting Docker Compose database service..."
@@ -200,6 +217,105 @@ compact_system() {
   sudo docker-compose exec -e PGPASSWORD=postgres db psql -d calltelemetry_prod -U calltelemetry -c 'VACUUM FULL;'
 
   echo "System compaction complete."
+}
+
+# Function to wait for services to be ready
+wait_for_services() {
+  echo "Waiting for services to start up..."
+  
+  # Define expected services
+  services=("caddy" "vue-web" "traceroute" "db" "web" "nats")
+  max_wait=300  # 5 minutes
+  wait_time=0
+  
+  while [ $wait_time -lt $max_wait ]; do
+    all_ready=true
+    
+    echo "Checking service status (${wait_time}s elapsed)..."
+    
+    for service in "${services[@]}"; do
+      container=$(docker-compose ps -q $service 2>/dev/null)
+      if [ -n "$container" ]; then
+        status=$(docker inspect --format='{{.State.Status}}' $container 2>/dev/null)
+        
+        if [ "$status" = "running" ]; then
+          echo "  ✓ $service: running"
+        else
+          echo "  ✗ $service: $status"
+          all_ready=false
+        fi
+      else
+        echo "  ✗ $service: container not found"
+        all_ready=false
+      fi
+    done
+    
+    # Service-specific readiness checks
+    echo "Checking service readiness..."
+    
+    # Database connectivity check
+    if docker-compose exec -T db pg_isready -U calltelemetry -d calltelemetry_prod >/dev/null 2>&1; then
+      echo "  ✓ Database: accepting connections"
+    else
+      echo "  ⏳ Database: not ready (may be rebuilding indexes)"
+      all_ready=false
+    fi
+    
+    # Web API readiness check (port 4080)
+    if docker-compose exec -T web sh -c 'nc -z localhost 4080' >/dev/null 2>&1; then
+      echo "  ✓ Web API: port 4080 listening"
+    else
+      echo "  ⏳ Web API: port 4080 not ready"
+      all_ready=false
+    fi
+    
+    # NATS readiness check
+    if docker-compose exec -T nats sh -c 'nc -z localhost 4222' >/dev/null 2>&1; then
+      echo "  ✓ NATS: port 4222 listening"
+    else
+      echo "  ⏳ NATS: port 4222 not ready"
+      all_ready=false
+    fi
+    
+    if [ "$all_ready" = true ]; then
+      echo "✅ All services are running and ready!"
+      return 0
+    fi
+    
+    sleep 10
+    wait_time=$((wait_time + 10))
+  done
+  
+  echo "⚠️  Some services may still be starting up after ${max_wait}s"
+  echo "This is normal for database index rebuilds during major upgrades."
+  echo "Monitor progress with: docker-compose logs -f"
+  return 1
+}
+
+# Function to purge unused Docker resources
+purge_docker() {
+  echo "Starting Docker cleanup..."
+  
+  echo "Removing stopped containers..."
+  docker container prune -f
+  
+  echo "Removing unused networks..."
+  docker network prune -f
+  
+  echo "Removing unused volumes..."
+  docker volume prune -f
+  
+  echo "Removing unused images (keeping images from last 24 hours)..."
+  docker image prune -a -f --filter "until=24h"
+  
+  echo "Removing dangling images..."
+  docker image prune -f
+  
+  echo "Docker cleanup complete."
+  
+  # Display space savings
+  echo "Current Docker system usage:"
+  docker system df
 }
 
 # Function to create a backup and retain only the last 5 backups
@@ -367,6 +483,9 @@ case "$1" in
     ;;
   compact)
     compact_system
+    ;;
+  purge)
+    purge_docker
     ;;
   backup)
     backup
