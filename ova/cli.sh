@@ -307,11 +307,7 @@ purge_docker() {
   dangling_space=$(echo "$dangling_output" | grep "Total reclaimed space" | awk '{print $4 $5}' || echo "0B")
   echo "done (${dangling_space})"
   
-  echo "✅ Docker cleanup complete."
-  
-  # Display final space usage summary
-  echo "Current Docker system usage:"
-  docker system df
+  echo "Docker cleanup complete."
 }
 
 # Function to create a backup and retain only the last 5 backups
