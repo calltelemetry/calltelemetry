@@ -1,0 +1,71 @@
+name: Update Documentation
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., 0.8.4)'
+        required: true
+        type: string
+      release_type:
+        description: 'Type of release'
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+          - rc
+        default: 'patch'
+
+jobs:
+  update-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Update version files
+        run: |
+          VERSION="${{ inputs.version }}"
+          echo "📝 Updating documentation for version $VERSION"
+          
+          # Update version references in documentation
+          if [ -f "README.md" ]; then
+            sed -i.bak "s/Version: [0-9]\+\.[0-9]\+\.[0-9]\+/Version: $VERSION/g" README.md
+            rm README.md.bak 2>/dev/null || true
+          fi
+          
+          # Create or update version-specific configuration file
+          mkdir -p ova/versions
+          if [ -f "ova/versions/0.8.4-rc86.yaml" ]; then
+            # Use latest version file as template
+            LATEST_VERSION_FILE=$(ls -1 ova/versions/*.yaml | tail -1)
+            cp "$LATEST_VERSION_FILE" "ova/versions/$VERSION.yaml"
+            
+            # Update version references in the new file
+            sed -i.bak "s/0\.8\.4-rc[0-9]\+/$VERSION/g" "ova/versions/$VERSION.yaml"
+            rm "ova/versions/$VERSION.yaml.bak" 2>/dev/null || true
+          fi
+
+      - name: Commit changes
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          
+          if git diff --quiet; then
+            echo "✅ No changes to commit"
+          else
+            git add .
+            git commit -m "docs: update for release ${{ inputs.version }}"
+            git push
+            echo "✅ Documentation updated for version ${{ inputs.version }}"
+          fi
+
+      - name: Create release tag
+        if: ${{ inputs.release_type != 'rc' }}
+        run: |
+          VERSION="${{ inputs.version }}"
+          git tag -a "$VERSION" -m "Release $VERSION"
+          git push origin "$VERSION"
+          echo "✅ Tagged release $VERSION"
