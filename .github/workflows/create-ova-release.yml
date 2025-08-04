@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'OVA Release version (e.g., 0.8.4-rc.99)'
+        description: 'OVA Release version (e.g., 0.8.4-rc99)'
         required: true
         type: string
       web_version:
