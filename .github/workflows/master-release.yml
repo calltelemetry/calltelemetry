@@ -20,11 +20,11 @@ jobs:
       - name: Checkout calltelemetry repo
         uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.RELEASE_TOKEN }}
 
       - name: Gather latest releases from all repositories
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
           VERSION: ${{ inputs.version }}
         run: |
           echo "🔍 Gathering latest releases from all CallTelemetry repositories..."
@@ -294,4 +294,4 @@ jobs:
           echo "✅ Created release $VERSION with OVA configuration"
           echo "📦 Docker compose file available at: ova/versions/$VERSION.yml"
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
