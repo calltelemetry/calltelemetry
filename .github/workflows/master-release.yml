@@ -1,0 +1,297 @@
+name: Master Release Orchestrator
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'OVA Release version (e.g., 0.8.4-rc.94)'
+        required: true
+        type: string
+      description:
+        description: 'Release description (optional)'
+        required: false
+        type: string
+        default: ''
+
+jobs:
+  create-ova-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout calltelemetry repo
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Gather latest releases from all repositories
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          echo "🔍 Gathering latest releases from all CallTelemetry repositories..."
+          
+          # Define all CallTelemetry repositories and their Docker image mappings
+          declare -A REPO_TO_IMAGE
+          REPO_TO_IMAGE["ct-quasar"]="calltelemetry/web"
+          REPO_TO_IMAGE["cdr-cisco"]="calltelemetry/api"  
+          REPO_TO_IMAGE["tracer"]="calltelemetry/tracer"
+          REPO_TO_IMAGE["ct-syslog"]="calltelemetry/syslog"
+          REPO_TO_IMAGE["teams-azure-auth"]="calltelemetry/teams-auth"
+          REPO_TO_IMAGE["ct-teams"]="calltelemetry/teams"
+          REPO_TO_IMAGE["webex_notify_python"]="calltelemetry/webex-notify"
+          REPO_TO_IMAGE["sftp"]="calltelemetry/sftp"
+          REPO_TO_IMAGE["webex_bot"]="calltelemetry/webex-bot"
+          
+          # Get latest release version for each repository
+          declare -A REPO_VERSIONS
+          declare -A REPO_DATES
+          
+          echo "## 📦 Repository Versions for OVA Release $VERSION" > release_summary.md
+          echo "" >> release_summary.md
+          
+          for repo in "${!REPO_TO_IMAGE[@]}"; do
+            echo "🔍 Checking $repo..."
+            
+            # Get latest release info
+            LATEST_RESPONSE=$(gh api repos/calltelemetry/$repo/releases/latest 2>/dev/null || echo '{"tag_name":"latest","published_at":"unknown"}')
+            
+            if echo "$LATEST_RESPONSE" | grep -q "Not Found"; then
+              REPO_VERSIONS["$repo"]="latest"
+              REPO_DATES["$repo"]="No releases"
+              echo "⚠️  No releases found for $repo, using: latest"
+              echo "- **$repo**: \`latest\` (No releases)" >> release_summary.md
+            else
+              TAG_NAME=$(echo "$LATEST_RESPONSE" | jq -r '.tag_name')
+              PUBLISHED_DATE=$(echo "$LATEST_RESPONSE" | jq -r '.published_at')
+              REPO_VERSIONS["$repo"]="$TAG_NAME"
+              REPO_DATES["$repo"]="$PUBLISHED_DATE"
+              echo "✅ Found $repo: $TAG_NAME ($PUBLISHED_DATE)"
+              echo "- **$repo**: \`$TAG_NAME\` ($(date -d "$PUBLISHED_DATE" '+%Y-%m-%d %H:%M UTC' 2>/dev/null || echo "$PUBLISHED_DATE"))" >> release_summary.md
+            fi
+          done
+          
+          echo "" >> release_summary.md
+          echo "## 🐳 Docker Images" >> release_summary.md
+          echo "" >> release_summary.md
+          
+          # Generate complete docker-compose file for OVA
+          echo "🐳 Generating OVA docker-compose.yml..."
+          mkdir -p ova/versions
+          
+          cat > ova/versions/$VERSION.yml << EOF
+          # CallTelemetry OVA Release $VERSION
+          # Generated: $(date -u '+%Y-%m-%d %H:%M:%S UTC')
+          # Description: ${{ inputs.description }}
+          
+          version: '3.8'
+          
+          services:
+            web:
+              image: ${REPO_TO_IMAGE["ct-quasar"]}:${REPO_VERSIONS["ct-quasar"]}
+              ports:
+                - "80:80"
+                - "443:443"
+              environment:
+                - NODE_ENV=production
+                - VUE_APP_API_BASE_URL=http://api:4000
+              restart: unless-stopped
+              depends_on:
+                - api
+              volumes:
+                - ./certs:/etc/ssl/certs:ro
+          
+            api:
+              image: ${REPO_TO_IMAGE["cdr-cisco"]}:${REPO_VERSIONS["cdr-cisco"]}
+              ports:
+                - "4000:4000"
+              environment:
+                - MIX_ENV=prod
+                - DATABASE_URL=postgresql://\${POSTGRES_USER:-calltelemetry}:\${POSTGRES_PASSWORD}@postgres:5432/calltelemetry
+                - NATS_URL=nats://nats:4222
+                - SECRET_KEY_BASE=\${SECRET_KEY_BASE}
+                - PHX_HOST=\${PHX_HOST:-localhost}
+              restart: unless-stopped
+              depends_on:
+                - postgres
+                - nats
+              volumes:
+                - api_uploads:/app/uploads
+          
+            tracer:
+              image: ${REPO_TO_IMAGE["tracer"]}:${REPO_VERSIONS["tracer"]}
+              ports:
+                - "4369:4369"
+              environment:
+                - MIX_ENV=prod
+                - NATS_URL=nats://nats:4222
+              restart: unless-stopped
+              depends_on:
+                - nats
+          
+            syslog:
+              image: ${REPO_TO_IMAGE["ct-syslog"]}:${REPO_VERSIONS["ct-syslog"]}
+              ports:
+                - "514:514/udp"
+                - "1514:1514/udp"
+              environment:  
+                - MIX_ENV=prod
+                - NATS_URL=nats://nats:4222
+              restart: unless-stopped
+              depends_on:
+                - nats
+          
+            teams-auth:
+              image: ${REPO_TO_IMAGE["teams-azure-auth"]}:${REPO_VERSIONS["teams-azure-auth"]}
+              ports:
+                - "3000:3000"
+              environment:
+                - NODE_ENV=production
+                - AZURE_CLIENT_ID=\${AZURE_CLIENT_ID}
+                - AZURE_CLIENT_SECRET=\${AZURE_CLIENT_SECRET}
+                - AZURE_TENANT_ID=\${AZURE_TENANT_ID}
+                - REDIRECT_URI=\${REDIRECT_URI}
+              restart: unless-stopped
+          
+            teams:
+              image: ${REPO_TO_IMAGE["ct-teams"]}:${REPO_VERSIONS["ct-teams"]}
+              environment:
+                - NODE_ENV=production
+                - NATS_URL=nats://nats:4222
+                - TEAMS_WEBHOOK_URL=\${TEAMS_WEBHOOK_URL}
+              restart: unless-stopped
+              depends_on:
+                - nats
+          
+            webex-notify:
+              image: ${REPO_TO_IMAGE["webex_notify_python"]}:${REPO_VERSIONS["webex_notify_python"]}
+              environment:
+                - NATS_URL=nats://nats:4222
+                - WEBEX_BOT_TOKEN=\${WEBEX_BOT_TOKEN}
+              restart: unless-stopped
+              depends_on:
+                - nats
+          
+            sftp:
+              image: ${REPO_TO_IMAGE["sftp"]}:${REPO_VERSIONS["sftp"]}
+              ports:
+                - "2222:22"
+              environment:
+                - MIX_ENV=prod
+                - NATS_URL=nats://nats:4222
+              restart: unless-stopped
+              depends_on:
+                - nats
+              volumes:
+                - sftp_data:/app/uploads
+          
+            webex-bot:
+              image: ${REPO_TO_IMAGE["webex_bot"]}:${REPO_VERSIONS["webex_bot"]}
+              environment:
+                - NODE_ENV=production
+                - WEBEX_BOT_TOKEN=\${WEBEX_BOT_TOKEN}
+                - WEBEX_WEBHOOK_SECRET=\${WEBEX_WEBHOOK_SECRET}
+              restart: unless-stopped
+          
+            postgres:
+              image: postgres:15
+              environment:
+                - POSTGRES_DB=calltelemetry
+                - POSTGRES_USER=\${POSTGRES_USER:-calltelemetry}
+                - POSTGRES_PASSWORD=\${POSTGRES_PASSWORD}
+                - POSTGRES_INITDB_ARGS=--encoding=UTF-8
+              volumes:
+                - postgres_data:/var/lib/postgresql/data
+                - ./postgres/init:/docker-entrypoint-initdb.d:ro
+              restart: unless-stopped
+              ports:
+                - "5432:5432"
+          
+            nats:
+              image: nats:latest
+              ports:
+                - "4222:4222"
+                - "8222:8222"
+                - "6222:6222"
+              command: |
+                --jetstream
+                --store_dir=/data
+                --max_memory_store=1GB
+                --max_file_store=10GB
+              volumes:
+                - nats_data:/data
+              restart: unless-stopped
+          
+            redis:
+              image: redis:7-alpine
+              ports:
+                - "6379:6379"
+              volumes:
+                - redis_data:/data
+              restart: unless-stopped
+              command: redis-server --appendonly yes
+          
+          volumes:
+            postgres_data:
+            nats_data:
+            redis_data:
+            api_uploads:
+            sftp_data:
+          
+          networks:
+            default:
+              name: calltelemetry
+          
+          # Service Versions Used:
+          EOF
+          
+          for repo in "${!REPO_TO_IMAGE[@]}"; do
+            echo "# $repo: ${REPO_VERSIONS["$repo"]} -> ${REPO_TO_IMAGE["$repo"]}:${REPO_VERSIONS["$repo"]}" >> ova/versions/$VERSION.yml
+            echo "- **${REPO_TO_IMAGE["$repo"]}**: \`${REPO_VERSIONS["$repo"]}\`" >> release_summary.md
+          done
+          
+          echo "" >> release_summary.md
+          echo "## 🚀 Deployment" >> release_summary.md
+          echo "" >> release_summary.md
+          echo "\`\`\`bash" >> release_summary.md
+          echo "# Download and deploy OVA release $VERSION" >> release_summary.md
+          echo "wget https://github.com/calltelemetry/calltelemetry/releases/download/$VERSION/$VERSION.yml" >> release_summary.md
+          echo "docker-compose -f $VERSION.yml up -d" >> release_summary.md
+          echo "\`\`\`" >> release_summary.md
+          
+          echo "✅ Generated ova/versions/$VERSION.yml with complete service stack"
+          echo "✅ Generated release summary with all versions"
+
+      - name: Commit and push OVA configuration
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          
+          git add ova/versions/${{ inputs.version }}.yml
+          git commit -m "feat: add OVA release ${{ inputs.version }}
+
+          Complete docker-compose configuration with latest service versions.
+          
+          🤖 Generated with [Claude Code](https://claude.ai/code)
+          
+          Co-Authored-By: Claude <noreply@anthropic.com>"
+          git push
+
+      - name: Create GitHub release
+        run: |
+          VERSION="${{ inputs.version }}"
+          DESCRIPTION="${{ inputs.description }}"
+          
+          if [[ -n "$DESCRIPTION" ]]; then
+            RELEASE_TITLE="CallTelemetry OVA $VERSION - $DESCRIPTION"
+          else
+            RELEASE_TITLE="CallTelemetry OVA $VERSION"
+          fi
+          
+          gh release create "$VERSION" \
+            --title "$RELEASE_TITLE" \
+            --notes-file release_summary.md \
+            ova/versions/$VERSION.yml
+          
+          echo "✅ Created release $VERSION with OVA configuration"
+          echo "📦 Docker compose file available at: ova/versions/$VERSION.yml"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
