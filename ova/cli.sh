@@ -82,6 +82,57 @@ cli_update() {
   rm -f "$tmp_file"
 }
 
+# Function to extract image tags from a docker-compose file
+extract_images() {
+  local compose_file="$1"
+  grep -E "image.*calltelemetry" "$compose_file" | sed 's/.*image: *"//' | sed 's/".*//' | grep -v "^$"
+}
+
+# Function to check if Docker images are available
+check_image_availability() {
+  local compose_file="$1"
+  local images=$(extract_images "$compose_file")
+  local all_available=true
+  local unavailable_images=""
+  
+  echo "Checking image availability..."
+  
+  for image in $images; do
+    echo -n "  Checking $image... "
+    if docker manifest inspect "$image" >/dev/null 2>&1; then
+      echo "✓ Available"
+    else
+      echo "✗ Not available"
+      all_available=false
+      unavailable_images="$unavailable_images$image\n"
+    fi
+  done
+  
+  if [ "$all_available" = true ]; then
+    echo "✅ All images are available online"
+    return 0
+  else
+    echo "❌ Some images are not available:"
+    echo -e "$unavailable_images"
+    return 1
+  fi
+}
+
+# Function to get current version from docker-compose.yml
+get_current_version() {
+  if [ -f "$ORIGINAL_FILE" ]; then
+    # Extract version from vue-web image tag
+    current_image=$(grep -E "calltelemetry/vue:" "$ORIGINAL_FILE" | head -1 | sed 's/.*calltelemetry\/vue://' | sed 's/".*//')
+    if [ -n "$current_image" ]; then
+      echo "$current_image"
+    else
+      echo "unknown"
+    fi
+  else
+    echo "not installed"
+  fi
+}
+
 # Function to update the docker-compose configuration
 update() {
   cli_update  # Ensure the CLI script is up-to-date
@@ -93,6 +144,12 @@ update() {
     url="https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/ova/versions/$version.yaml"
   fi
 
+  # Get current version
+  current_version=$(get_current_version)
+  echo "Current version: $current_version"
+  echo "Target version: $version"
+  echo ""
+
   timestamp=$(date "+%Y-%m-%d-%H-%M-%S")
   timestamped_backup_file="$BACKUP_DIR/docker-compose-$timestamp.yml"
 
@@ -101,7 +158,41 @@ update() {
     echo "Existing docker-compose.yml backed up to $timestamped_backup_file"
   fi
 
+  echo "Downloading new configuration..."
   wget "$url" -O "$TEMP_FILE"
+  
+  if [ ! -f "$TEMP_FILE" ]; then
+    echo "❌ Failed to download configuration file"
+    return 1
+  fi
+
+  # Check image availability before proceeding
+  if ! check_image_availability "$TEMP_FILE"; then
+    echo ""
+    echo "❌ Cannot proceed with upgrade - some images are not available"
+    echo "Please ensure all images are built and pushed to the registry"
+    rm -f "$TEMP_FILE"
+    return 1
+  fi
+
+  echo ""
+  echo "⚠️  You are about to upgrade from $current_version to $version"
+  echo "This will:"
+  echo "  - Stop all services"
+  echo "  - Update container images"
+  echo "  - Restart services"
+  echo "  - Run automatic cleanup"
+  echo ""
+  read -p "Proceed with upgrade? (y/N): " -n 1 -r
+  echo ""
+  
+  if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    echo "Upgrade cancelled by user"
+    rm -f "$TEMP_FILE"
+    return 0
+  fi
+
+  echo "Proceeding with upgrade..."
 
   # Download NATS configuration file
   nats_conf_url="https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/ova/nats.conf"
