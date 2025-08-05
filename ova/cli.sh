@@ -183,13 +183,20 @@ update() {
   echo "  - Restart services"
   echo "  - Run automatic cleanup"
   echo ""
-  read -p "Proceed with upgrade? (y/N): " -n 1 -r
-  echo ""
   
-  if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-    echo "Upgrade cancelled by user"
-    rm -f "$TEMP_FILE"
-    return 0
+  # Check if running in interactive mode (has proper stdin)
+  if [[ -t 0 ]]; then
+    read -p "Proceed with upgrade? (y/N): " -n 1 -r
+    echo ""
+    
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+      echo "Upgrade cancelled by user"
+      rm -f "$TEMP_FILE"
+      return 0
+    fi
+  else
+    echo "Running in non-interactive mode - proceeding automatically"
+    sleep 2
   fi
 
   echo "Proceeding with upgrade..."
