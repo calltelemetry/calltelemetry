@@ -159,10 +159,10 @@ update() {
   fi
 
   echo "Downloading new configuration..."
-  wget "$url" -O "$TEMP_FILE"
-  
-  if [ ! -f "$TEMP_FILE" ]; then
-    echo "❌ Failed to download configuration file"
+  if ! wget "$url" -O "$TEMP_FILE" 2>/dev/null; then
+    echo "❌ Failed to download configuration file from: $url"
+    echo "Please verify that version $version exists"
+    rm -f "$TEMP_FILE"
     return 1
   fi
 
