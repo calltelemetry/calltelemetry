@@ -43,6 +43,9 @@ show_help() {
   echo "  purge               Remove unused Docker images, containers, networks, and volumes."
   echo "  backup              Create a database backup and retain only the last 5 backups."
   echo "  restore             Restore the database from a specified backup file."
+  echo "  migration_status    Check migration status and generate report."
+  echo "  migration_run       Execute pending database migrations."
+  echo "  migration_rollback [steps]  Rollback database migrations (default: 1 step)."
   echo "  set_logging level   Set the logging level (debug, info, warning, error)."
   echo "  cli_update          Update the CLI script to the latest version from the repository."
   echo "  build-appliance     Download and execute the prep script to build the appliance."
@@ -367,6 +370,228 @@ restore() {
   echo "Database restored from $backup_file."
 }
 
+# Function to get the release binary path
+get_release_binary() {
+  echo "/home/app/onprem/bin/onprem"
+}
+
+# Function to check migration status using Elixir release
+migration_status() {
+  echo "Checking database migration status..."
+  
+  report_file="migrations-report.txt"
+  timestamp=$(date "+%Y-%m-%d %H:%M:%S")
+  
+  # Initialize report file
+  cat > "$report_file" << EOF
+Call Telemetry Database Migration Status Report
+Generated: $timestamp
+==========================================
+
+EOF
+
+  # Check if web container is running
+  web_container=$(docker-compose ps -q web 2>/dev/null)
+  if [ -z "$web_container" ]; then
+    echo "Error: Web container not found or not running."
+    echo "ERROR: Web container not found at $timestamp" >> "$report_file"
+    return 1
+  fi
+
+  echo "Web container found: $web_container" >> "$report_file"
+  echo "Finding release binary..." >> "$report_file"
+
+  # Get the release binary path
+  release_bin=$(get_release_binary)
+
+  echo "Using release binary: $release_bin" >> "$report_file"
+  echo "" >> "$report_file"
+
+  # Execute migration status check using Elixir
+  echo "Executing migration status check..."
+  migration_output=$(docker-compose exec -T web "$release_bin" rpc '
+    IO.puts("=== Migration Status ===")
+    
+    try do
+      migrations = Ecto.Migrator.migrations(Cdrcisco.Repo)
+      
+      if migrations == [] do
+        IO.puts("No migrations found!")
+      else
+        IO.puts("Status\tVersion\t\tName")
+        IO.puts("------\t-------\t\t----")
+        
+        # Force full output without truncation
+        Process.put(:iex_width, :infinity)
+        
+        Enum.each(migrations, fn {status, version, name} ->
+          status_str = case status do
+            :up -> "UP   "
+            :down -> "DOWN "
+          end
+          IO.puts("#{status_str}\t#{version}\t#{name}")
+          # Force flush to ensure no truncation
+          :io.format("~n", [])
+        end)
+        
+        pending = Enum.filter(migrations, fn {status, _, _} -> status == :down end)
+        applied = Enum.filter(migrations, fn {status, _, _} -> status == :up end)
+        
+        IO.puts("")
+        IO.puts("=== Summary ===")
+        IO.puts("Total migrations: #{length(migrations)}")
+        IO.puts("Applied migrations: #{length(applied)}")
+        IO.puts("Pending migrations: #{length(pending)}")
+        
+        if length(pending) > 0 do
+          IO.puts("")
+          IO.puts("WARNING: There are pending migrations!")
+          IO.puts("Run: ./ova/cli.sh migration_run")
+        else
+          IO.puts("")
+          IO.puts("All migrations are up to date!")
+        end
+        
+        # Show last 5 and first 5 for verification
+        IO.puts("")
+        IO.puts("=== Recent Migrations (Last 5) ===")
+        migrations |> Enum.take(-5) |> Enum.each(fn {status, version, name} ->
+          status_str = if status == :up, do: "UP", else: "DOWN"
+          IO.puts("#{status_str}\t#{version}\t#{name}")
+        end)
+      end
+    rescue
+      e -> 
+        IO.puts("Error checking migrations: #{inspect(e)}")
+    end
+  ' 2>&1)
+
+  # Save output to report
+  echo "Migration Status Output:" >> "$report_file"
+  echo "$migration_output" >> "$report_file"
+  echo "" >> "$report_file"
+  echo "Migration status check completed at: $(date)" >> "$report_file"
+
+  # Display output to console
+  echo "$migration_output"
+  echo ""
+  echo "✅ Migration status check completed"
+  echo "Report saved to: $report_file"
+}
+
+# Function to run pending migrations using Elixir release
+migration_run() {
+  echo "Running pending database migrations..."
+  
+  # Check if web container is running
+  web_container=$(docker-compose ps -q web 2>/dev/null)
+  if [ -z "$web_container" ]; then
+    echo "Error: Web container not found or not running."
+    return 1
+  fi
+
+  # Get the release binary path
+  release_bin=$(get_release_binary)
+
+  echo "Using release binary: $release_bin"
+  
+  # Execute migrations
+  echo "Executing migrations..."
+  migration_output=$(docker-compose exec -T web "$release_bin" rpc '
+    IO.puts("=== Running Migrations ===")
+    
+    try do
+      result = Ecto.Migrator.run(Cdrcisco.Repo, :up, all: true)
+      
+      case result do
+        [] -> 
+          IO.puts("No pending migrations to run.")
+        migrations ->
+          IO.puts("Successfully ran #{length(migrations)} migrations:")
+          for {status, version, name} <- migrations do
+            IO.puts("  #{status} #{version} #{name}")
+          end
+      end
+      
+      IO.puts("")
+      IO.puts("Migration run completed successfully!")
+    rescue
+      e -> 
+        IO.puts("Error running migrations: #{inspect(e)}")
+        System.halt(1)
+    end
+  ' 2>&1)
+
+  # Display output
+  echo "$migration_output"
+  
+  if [ $? -eq 0 ]; then
+    echo ""
+    echo "✅ Migration run completed successfully"
+  else
+    echo ""
+    echo "❌ Migration run failed"
+    return 1
+  fi
+}
+
+# Function to rollback migrations using Elixir release
+migration_rollback() {
+  steps=${1:-1}
+  echo "Rolling back $steps migration(s)..."
+  
+  # Check if web container is running
+  web_container=$(docker-compose ps -q web 2>/dev/null)
+  if [ -z "$web_container" ]; then
+    echo "Error: Web container not found or not running."
+    return 1
+  fi
+
+  # Get the release binary path
+  release_bin=$(get_release_binary)
+
+  echo "Using release binary: $release_bin"
+  
+  # Execute rollback
+  echo "Executing rollback..."
+  rollback_output=$(docker-compose exec -T web "$release_bin" rpc "
+    IO.puts(\"=== Rolling Back Migrations ===\")
+    
+    try do
+      result = Ecto.Migrator.run(Cdrcisco.Repo, :down, step: $steps)
+      
+      case result do
+        [] -> 
+          IO.puts(\"No migrations to rollback.\")
+        migrations ->
+          IO.puts(\"Successfully rolled back #{length(migrations)} migrations:\")
+          for {status, version, name} <- migrations do
+            IO.puts(\"  #{status} #{version} #{name}\")
+          end
+      end
+      
+      IO.puts(\"\")
+      IO.puts(\"Migration rollback completed successfully!\")
+    rescue
+      e -> 
+        IO.puts(\"Error rolling back migrations: #{inspect(e)}\")
+        System.halt(1)
+    end
+  " 2>&1)
+
+  # Display output
+  echo "$rollback_output"
+  
+  if [ $? -eq 0 ]; then
+    echo ""
+    echo "✅ Migration rollback completed successfully"
+  else
+    echo ""
+    echo "❌ Migration rollback failed"
+    return 1
+  fi
+}
+
 # Function to set the logging level in docker-compose.yml
 set_logging() {
   if [[ -z "$1" || ! "$1" =~ ^(debug|info|warning|error)$ ]]; then
@@ -484,6 +709,15 @@ case "$1" in
     ;;
   restore)
     restore "$2"
+    ;;
+  migration_status)
+    migration_status
+    ;;
+  migration_run)
+    migration_run
+    ;;
+  migration_rollback)
+    migration_rollback "$2"
     ;;
   set_logging)
     set_logging "$2"
