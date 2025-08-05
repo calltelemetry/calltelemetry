@@ -394,15 +394,33 @@ EOF
   web_container=$(docker-compose ps -q web 2>/dev/null)
   if [ -z "$web_container" ]; then
     echo "Error: Web container not found or not running."
+    echo "Please start the services with: sudo systemctl start docker-compose-app.service"
     echo "ERROR: Web container not found at $timestamp" >> "$report_file"
+    return 1
+  fi
+
+  # Check if the web container is actually running (not just exists)
+  container_status=$(docker inspect --format='{{.State.Status}}' $web_container 2>/dev/null)
+  if [ "$container_status" != "running" ]; then
+    echo "Error: Web container is not running (status: $container_status)"
+    echo "Please start the services with: sudo systemctl start docker-compose-app.service"
+    echo "ERROR: Web container not running at $timestamp" >> "$report_file"
+    return 1
+  fi
+
+  # Test RPC connection
+  echo "Testing RPC connection..."
+  rpc_test=$(docker-compose exec -T web "$release_bin" rpc 'IO.puts("RPC connection successful")' 2>&1)
+  if [[ "$rpc_test" == *"noconnection"* ]]; then
+    echo "Error: Cannot connect to running application via RPC"
+    echo "The application may still be starting up. Please wait and try again."
+    echo "You can check logs with: docker-compose logs web"
+    echo "ERROR: RPC connection failed at $timestamp" >> "$report_file"
     return 1
   fi
 
   echo "Web container found: $web_container" >> "$report_file"
   echo "Finding release binary..." >> "$report_file"
-
-  # Get the release binary path
-  release_bin=$(get_release_binary)
 
   echo "Using release binary: $release_bin" >> "$report_file"
   echo "" >> "$report_file"
@@ -483,15 +501,29 @@ EOF
 migration_run() {
   echo "Running pending database migrations..."
   
-  # Check if web container is running
+  # Check if web container is running and application is ready
   web_container=$(docker-compose ps -q web 2>/dev/null)
   if [ -z "$web_container" ]; then
     echo "Error: Web container not found or not running."
+    echo "Please start the services with: sudo systemctl start docker-compose-app.service"
     return 1
   fi
 
-  # Get the release binary path
+  container_status=$(docker inspect --format='{{.State.Status}}' $web_container 2>/dev/null)
+  if [ "$container_status" != "running" ]; then
+    echo "Error: Web container is not running (status: $container_status)"
+    echo "Please start the services with: sudo systemctl start docker-compose-app.service"
+    return 1
+  fi
+
+  # Test RPC connection
   release_bin=$(get_release_binary)
+  rpc_test=$(docker-compose exec -T web "$release_bin" rpc 'IO.puts("RPC connection successful")' 2>&1)
+  if [[ "$rpc_test" == *"noconnection"* ]]; then
+    echo "Error: Cannot connect to running application via RPC"
+    echo "The application may still be starting up. Please wait and try again."
+    return 1
+  fi
 
   echo "Using release binary: $release_bin"
   
@@ -540,15 +572,29 @@ migration_rollback() {
   steps=${1:-1}
   echo "Rolling back $steps migration(s)..."
   
-  # Check if web container is running
+  # Check if web container is running and application is ready
   web_container=$(docker-compose ps -q web 2>/dev/null)
   if [ -z "$web_container" ]; then
     echo "Error: Web container not found or not running."
+    echo "Please start the services with: sudo systemctl start docker-compose-app.service"
     return 1
   fi
 
-  # Get the release binary path
+  container_status=$(docker inspect --format='{{.State.Status}}' $web_container 2>/dev/null)
+  if [ "$container_status" != "running" ]; then
+    echo "Error: Web container is not running (status: $container_status)"
+    echo "Please start the services with: sudo systemctl start docker-compose-app.service"
+    return 1
+  fi
+
+  # Test RPC connection
   release_bin=$(get_release_binary)
+  rpc_test=$(docker-compose exec -T web "$release_bin" rpc 'IO.puts("RPC connection successful")' 2>&1)
+  if [[ "$rpc_test" == *"noconnection"* ]]; then
+    echo "Error: Cannot connect to running application via RPC"
+    echo "The application may still be starting up. Please wait and try again."
+    return 1
+  fi
 
   echo "Using release binary: $release_bin"
   
