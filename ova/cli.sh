@@ -150,6 +150,31 @@ update() {
   echo "Target version: $version"
   echo ""
 
+  # Check for CentOS Stream 8 and display warning
+  if [ -f /etc/os-release ]; then
+    if grep -qi "centos.*stream.*8\|CentOS.*Stream.*8\|CENTOS.*STREAM.*8" /etc/os-release; then
+      echo "⚠️  WARNING: This appliance is running CentOS 8 Stream, and the OS has reached end of life in the Red Hat ecosystem. Please download a new appliance from calltelemetry.com, and copy the postgres and certificate folder over to the new appliance. If you continue, older Docker versions may not work with new builds in 0.8.4 releases. Sleeping for 5 seconds. Press CTRL-C to cancel."
+      sleep 5
+    fi
+  fi
+
+  # Check Docker version and update if needed
+  echo "Checking Docker version..."
+  docker_version=$(docker --version 2>/dev/null | grep -o '[0-9]\+\.[0-9]\+' | head -1 | cut -d. -f1)
+  
+  if [ -z "$docker_version" ]; then
+    echo "⚠️  WARNING: Docker not found or not responding"
+  elif [ "$docker_version" -lt 26 ]; then
+    echo "⚠️  WARNING: Docker version $docker_version detected - Docker 26+ is required"
+    echo "Docker is outdated, updating Docker packages..."
+    echo "Running Docker package updates..."
+    sudo dnf update -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    echo "Docker package update completed. Continuing with upgrade..."
+    echo ""
+  else
+    echo "✅ Docker version $docker_version is supported"
+  fi
+
   timestamp=$(date "+%Y-%m-%d-%H-%M-%S")
   timestamped_backup_file="$BACKUP_DIR/docker-compose-$timestamp.yml"
 
