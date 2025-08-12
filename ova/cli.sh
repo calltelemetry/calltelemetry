@@ -444,16 +444,10 @@ backup() {
 
   dbname=calltelemetry_prod
   username=calltelemetry
-  container=$(docker ps --filter "name=db" --format "{{.Names}}" | head -n 1)
-
-  if [ -z "$container" ]; then
-    echo "Error: Database container not found."
-    return 1
-  fi
 
   backup_file=${backup_folder_path}/${file_name}
 
-  docker exec -e PGPASSWORD=postgres -it ${container} pg_dump -U ${username} -d ${dbname} > ${backup_file}
+  docker-compose exec -e PGPASSWORD=postgres -T db pg_dump -U ${username} -d ${dbname} > ${backup_file}
 
   echo "Dump successful: ${backup_file}"
 
