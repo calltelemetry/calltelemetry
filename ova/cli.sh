@@ -337,10 +337,21 @@ compact_system() {
   sudo docker-compose up -d db
 
   echo "Waiting for the database service to be fully operational..."
-  sleep 10
+  sleep 15
 
-  echo "Compacting PostgreSQL database..."
-  sudo docker-compose exec -e PGPASSWORD=postgres db psql -d calltelemetry_prod -U calltelemetry -c 'VACUUM FULL;'
+  echo "Verifying database connectivity..."
+  if ! sudo docker-compose exec -T db pg_isready -U calltelemetry -d calltelemetry_prod >/dev/null 2>&1; then
+    echo "Error: Database is not ready. Cannot perform vacuum."
+    return 1
+  fi
+
+  echo "Compacting PostgreSQL database (this may take several minutes)..."
+  if sudo docker-compose exec -e PGPASSWORD=postgres -T db psql -d calltelemetry_prod -U calltelemetry -c 'VACUUM FULL;'; then
+    echo "✅ Database vacuum completed successfully."
+  else
+    echo "❌ Database vacuum failed."
+    return 1
+  fi
 
   echo "System compaction complete."
 }
