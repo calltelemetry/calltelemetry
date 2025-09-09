@@ -1,0 +1,14 @@
+version: &version 0.8.4-rc109
+services:
+  vue-web:
+    image: calltelemetry/vue-web:0.8.4-rc109
+  web:
+    image: calltelemetry/web:0.8.4-rc109
+  ctconnctor-service:
+    image: calltelemetry/ctconnctor-service:0.8.4-rc109
+  sftp:
+    image: calltelemetry/sftp:0.8.4-rc109
+  ct-syslog:
+    image: calltelemetry/ct-syslog:0.8.4-rc109
+  traceroute:
+    image: calltelemetry/traceroute:0.8.4-rc109
