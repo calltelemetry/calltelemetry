@@ -1,0 +1,101 @@
+version: "3.8"
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - ./certs:/certs:ro
+    networks:
+      - ct
+
+  vue-web:
+    image: "calltelemetry/vue:0.8.4-rc112"
+    restart: "always"
+    expose:
+      - "80"
+    networks:
+      - ct
+
+  traceroute:
+    image: "calltelemetry/traceroute:0.7.3"
+    user: root
+    expose:
+      - "4100"
+    networks:
+      - ct
+
+  db:
+    image: "bitnami/postgresql:14"
+    user: root
+    restart: "always"
+    environment:
+      - POSTGRES_USER=calltelemetry
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=calltelemetry_prod
+    expose:
+      - "5432"
+    volumes:
+      - ./postgres-data:/bitnami/postgresql
+    networks:
+      - ct
+
+  web:
+    image: "calltelemetry/web:0.8.4-rc112"
+    restart: "always"
+    user: root
+    expose:
+      - 4000
+      - 4080
+    ports:
+      - "80:4080"
+      - "22:3022"
+    environment:
+      - DB_USER=calltelemetry
+      - DB_PASSWORD=postgres
+      - DB_HOSTNAME=db
+      - DB_NAME=calltelemetry_prod
+      - DB_PORT=5432
+      - EXTERNAL_IP=$DEFAULT_IPV4
+      - LOGGING_LEVEL=warning
+      - ADMIN_NODE=TRUE
+      - WORKER_NODE=TRUE
+      - CERT_KEY=/home/app/cert/appliance_key.pem
+      - CERT_PUBLIC=/home/app/cert/appliance.crt
+      # can be HACKNEY, IBROWSE, MINT, GUN or HTTPC.
+      - HTTP_ADAPTER=HACKNEY
+      - LOG_PATH=/var/log
+    tmpfs:
+      - /var/log:rw,mode=0555,size=5000m
+    networks:
+      - ct
+    volumes:
+      - ./certs:/home/app/cert:rw
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "7" # Keeps 7 days of logs
+        compress: "true" # Compresses rotated files
+
+  nats:
+    image: "nats:latest"
+    command: "-c /etc/nats/nats.conf"
+    volumes:
+      - ./nats.conf:/etc/nats/nats.conf
+    expose:
+      - "4222"
+    networks:
+      - ct
+
+networks:
+  ct:
+    # enable_ipv6: true
+
+volumes:
+  certs:
+    driver: local
+  traefik-logs:
+    driver: local
