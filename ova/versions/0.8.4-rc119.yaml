@@ -67,12 +67,15 @@ services:
       # can be HACKNEY, IBROWSE, MINT, GUN or HTTPC.
       - HTTP_ADAPTER=HACKNEY
       - LOG_PATH=/var/log
+      - ERL_CRASH_DUMP=/tmp/crash-dumps/erl_crash.dump
+      - ERL_CRASH_DUMP_NICE=1
     tmpfs:
       - /var/log:rw,mode=0555,size=5000m
     networks:
       - ct
     volumes:
       - ./certs:/home/app/cert:rw
+      - ./crash-dumps:/tmp/crash-dumps:rw
     logging:
       driver: "json-file"
       options:
@@ -96,6 +99,8 @@ networks:
 
 volumes:
   certs:
+    driver: local
+  crash-dumps:
     driver: local
   traefik-logs:
     driver: local
