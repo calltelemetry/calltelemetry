@@ -6,8 +6,8 @@ services:
     ports:
       - "443:443"
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile  # Mount the Caddyfile
-      - ./certs:/certs:ro  # Mount the directory containing your certificate files
+      - ./Caddyfile:/etc/caddy/Caddyfile # Mount the Caddyfile
+      - ./certs:/certs:ro # Mount the directory containing your certificate files
     networks:
       - ct
 
@@ -28,7 +28,7 @@ services:
       - ct
 
   db:
-    image: "bitnami/postgresql:14"
+    image: "bitnamilegacy/postgresql:14"
     user: root
     restart: "always"
     environment:
@@ -66,7 +66,7 @@ services:
       - CERT_KEY=/home/app/cert/appliance_key.pem
       - CERT_PUBLIC=/home/app/cert/appliance.pem
       # can be HACKNEY, IBROWSE, MINT, GUN or HTTPC.
-       # GUN is the new standard. Hackney was default 0.8.1 and before.
+      # GUN is the new standard. Hackney was default 0.8.1 and before.
       - HTTP_ADAPTER=GUN
     networks:
       - ct
