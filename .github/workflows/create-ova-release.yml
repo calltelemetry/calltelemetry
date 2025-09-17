@@ -4,22 +4,22 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'OVA Release version (e.g., X.Y.Z-rcN)'
+        description: "OVA Release version (e.g., X.Y.Z-rcN)"
         required: true
         type: string
       web_version:
-        description: 'Web/API version (leave empty to use version above)'
+        description: "Web/API version (leave empty to use version above)"
         required: false
         type: string
       vue_version:
-        description: 'Vue frontend version (leave empty to use version above)'
+        description: "Vue frontend version (leave empty to use version above)"
         required: false
         type: string
       traceroute_version:
-        description: 'Traceroute version (leave empty for latest)'
+        description: "Traceroute version (leave empty for latest)"
         required: false
         type: string
-        default: '0.7.3'
+        default: "0.7.3"
 
 jobs:
   create-ova-release:
@@ -34,7 +34,7 @@ jobs:
           WEB_VERSION="${{ inputs.web_version }}"
           VUE_VERSION="${{ inputs.vue_version }}"
           TRACEROUTE_VERSION="${{ inputs.traceroute_version }}"
-          
+
           # Use main version if specific versions not provided
           if [[ -z "$WEB_VERSION" ]]; then
             WEB_VERSION="$VERSION"
@@ -45,17 +45,17 @@ jobs:
           if [[ -z "$TRACEROUTE_VERSION" ]]; then
             TRACEROUTE_VERSION="0.7.3"
           fi
-          
+
           echo "🐳 Creating OVA release $VERSION with:"
           echo "  - Web/API: $WEB_VERSION"
           echo "  - Vue Frontend: $VUE_VERSION"
           echo "  - Traceroute: $TRACEROUTE_VERSION"
-          
+
           # Create the version-specific docker-compose file
           mkdir -p ova/versions
           cat > ova/versions/$VERSION.yaml << EOF
           version: "3.8"
-          
+
           services:
             caddy:
               image: caddy:2-alpine
@@ -66,7 +66,7 @@ jobs:
                 - ./certs:/certs:ro
               networks:
                 - ct
-          
+
             vue-web:
               image: "calltelemetry/vue:$VUE_VERSION"
               restart: "always"
@@ -74,7 +74,7 @@ jobs:
                 - "80"
               networks:
                 - ct
-          
+
             traceroute:
               image: "calltelemetry/traceroute:$TRACEROUTE_VERSION"
               user: root
@@ -82,9 +82,9 @@ jobs:
                 - "4100"
               networks:
                 - ct
-          
+
             db:
-              image: "bitnami/postgresql:14"
+              image: "bitnamilegacy/postgresql:14"
               user: root
               restart: "always"
               environment:
@@ -97,7 +97,7 @@ jobs:
                 - ./postgres-data:/bitnami/postgresql
               networks:
                 - ct
-          
+
             web:
               image: "calltelemetry/web:$WEB_VERSION"
               restart: "always"
@@ -134,7 +134,7 @@ jobs:
                   max-size: "100m"
                   max-file: "7"
                   compress: "true"
-          
+
             nats:
               image: "nats:latest"
               command: "-c /etc/nats/nats.conf"
@@ -144,46 +144,46 @@ jobs:
                 - "4222"
               networks:
                 - ct
-          
+
           networks:
             ct:
-          
+
           volumes:
             certs:
               driver: local
             traefik-logs:
               driver: local
           EOF
-          
+
           echo "✅ Generated ova/versions/$VERSION.yaml"
 
       - name: Commit and create release
         run: |
           VERSION="${{ inputs.version }}"
-          
+
           # Configure git
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          
+
           # Add and commit the new version file
           git add ova/versions/$VERSION.yaml
           git commit -m "feat: add OVA release $VERSION
 
           Docker compose configuration for OVA deployment.
-          
+
           🤖 Generated with [Claude Code](https://claude.ai/code)
-          
+
           Co-Authored-By: Claude <noreply@anthropic.com>"
-          
+
           # Push the commit
           git push
-          
+
           # Create GitHub release with the docker-compose file
           gh release create "$VERSION" \
             --title "CallTelemetry OVA $VERSION" \
             --notes "Docker compose configuration for OVA deployment with version-specific service images." \
             ova/versions/$VERSION.yaml
-          
+
           echo "✅ Created release $VERSION"
           echo "📦 Docker compose file: ova/versions/$VERSION.yaml"
         env:

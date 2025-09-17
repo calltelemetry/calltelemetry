@@ -9,7 +9,7 @@ services:
     networks:
       - ct
   db:
-    image: "bitnami/postgresql:14"
+    image: "bitnamilegacy/postgresql:14"
     user: root
     restart: "always"
     environment:
