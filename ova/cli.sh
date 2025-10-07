@@ -35,8 +35,10 @@ show_help() {
   echo
   echo "Options:"
   echo "  --help              Show this help message and exit."
-  echo "  update [version]    Update the docker-compose configuration to the specified version and restart the service."
+  echo "  update [version] [--force-upgrade]"
+  echo "                      Update the docker-compose configuration to the specified version and restart the service."
   echo "                      If no version is specified, the default latest version will be used."
+  echo "                      --force-upgrade bypasses the 10% disk space requirement check."
   echo "  rollback            Roll back to the previous docker-compose configuration."
   echo "  reset               Stop the application, remove data, and restart the application."
   echo "  compact             Prune Docker system and compact the PostgreSQL database."
@@ -44,6 +46,11 @@ show_help() {
   echo "  backup              Create a database backup and retain only the last 5 backups."
   echo "  restore             Restore the database from a specified backup file."
   echo "  migration_status    Check migration status and generate report."
+  echo "  sql_migration_status Show the last 10 migrations directly from the database."
+  echo "  sql_table_size [table1,table2,...] Show table sizes with row counts and disk usage."
+  echo "                      If no tables specified, shows all tables."
+  echo "  sql_purge_table <table> <days> Purge records older than X days from a table."
+  echo "                      Requires table to have an 'inserted_at' timestamp column."
   echo "  migration_run       Execute pending database migrations."
   echo "  migration_rollback [steps]  Rollback database migrations (default: 1 step)."
   echo "  set_logging level   Set the logging level (debug, info, warning, error)."
@@ -118,6 +125,19 @@ check_image_availability() {
   fi
 }
 
+# Function to check disk space
+check_disk_space() {
+  local required_percent=10
+  local available_percent=$(df -h / | awk 'NR==2 {print $5}' | sed 's/%//')
+  local used_percent=$available_percent
+  local free_percent=$((100 - used_percent))
+
+  if [ "$free_percent" -lt "$required_percent" ]; then
+    return 1
+  fi
+  return 0
+}
+
 # Function to get current version from docker-compose.yml
 get_current_version() {
   if [ -f "$ORIGINAL_FILE" ]; then
@@ -138,6 +158,16 @@ update() {
   cli_update  # Ensure the CLI script is up-to-date
 
   version=${1:-"latest"}
+  force_upgrade=false
+
+  # Check for --force-upgrade flag in any position
+  if [[ "$*" == *"--force-upgrade"* ]]; then
+    force_upgrade=true
+    # Remove --force-upgrade from arguments
+    set -- "${@/--force-upgrade/}"
+    version=${1:-"latest"}
+  fi
+
   if [ "$version" == "latest" ]; then
     url="https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/docker-compose.yml"
   else
@@ -149,6 +179,30 @@ update() {
   echo "Current version: $current_version"
   echo "Target version: $version"
   echo ""
+
+  # Check disk space unless --force-upgrade is specified
+  if [ "$force_upgrade" = false ]; then
+    echo "Checking disk space..."
+    df -h / | head -2
+
+    if ! check_disk_space; then
+      available_percent=$(df -h / | awk 'NR==2 {print $5}' | sed 's/%//')
+      free_percent=$((100 - ${available_percent%\%}))
+      echo ""
+      echo "❌ ERROR: Insufficient disk space for upgrade"
+      echo "   Available: ${free_percent}% free"
+      echo "   Required: 10% free minimum"
+      echo ""
+      echo "To proceed anyway, use: $0 update $version --force-upgrade"
+      echo "WARNING: Proceeding with low disk space may cause upgrade failures"
+      return 1
+    fi
+    echo "✅ Sufficient disk space available"
+    echo ""
+  else
+    echo "⚠️  WARNING: Skipping disk space check (--force-upgrade flag used)"
+    echo ""
+  fi
 
   # Check for CentOS Stream 8 and display warning
   if [ -f /etc/os-release ]; then
@@ -201,6 +255,22 @@ update() {
   fi
 
   echo ""
+  echo "Pulling Docker images..."
+  if ! docker-compose -f "$TEMP_FILE" pull; then
+    echo "❌ Failed to pull Docker images"
+    rm -f "$TEMP_FILE"
+    return 1
+  fi
+  echo "✅ All images pulled successfully"
+
+  # Extract and display the image versions
+  echo ""
+  echo "Image versions to be deployed:"
+  extract_images "$TEMP_FILE" | while read image; do
+    echo "  - $image"
+  done
+
+  echo ""
   echo "⚠️  You are about to upgrade from $current_version to $version"
   echo "This will:"
   echo "  - Stop all services"
@@ -208,17 +278,20 @@ update() {
   echo "  - Restart services"
   echo "  - Run automatic cleanup"
   echo ""
-  
+
   # Check if running in interactive mode (has proper stdin)
   if [[ -t 0 ]]; then
-    read -p "Proceed with upgrade? (y/N): " -n 1 -r
-    echo ""
-    
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    echo "Press any key within 5 seconds to abort, or wait to continue..."
+
+    # Read with timeout of 5 seconds
+    if read -t 5 -n 1 -s; then
+      echo ""
       echo "Upgrade cancelled by user"
       rm -f "$TEMP_FILE"
       return 0
     fi
+    echo ""
+    echo "No input received - proceeding with upgrade"
   else
     echo "Running in non-interactive mode - proceeding automatically"
     sleep 2
@@ -237,48 +310,42 @@ update() {
   wget -q "$CADDYFILE_URL" -O "$caddyfile_tmp"
 
   if [ -f "$TEMP_FILE" ] && [ -f "$nats_conf_file" ] && [ -f "$caddyfile_tmp" ]; then
-    if docker-compose -f "$TEMP_FILE" pull; then
-      mv "$TEMP_FILE" "$ORIGINAL_FILE"
-      echo "New docker-compose.yml moved to production."
-      echo "NATS configuration file downloaded."
-      echo "Caddyfile downloaded."
+    mv "$TEMP_FILE" "$ORIGINAL_FILE"
+    echo "New docker-compose.yml moved to production."
+    echo "NATS configuration file downloaded."
+    echo "Caddyfile downloaded."
 
-      if [ -f "./Caddyfile" ]; then
-        if ! diff "$caddyfile_tmp" "./Caddyfile" > /dev/null; then
-          echo "Update available for the Caddyfile. Updating now..."
-          cp "$caddyfile_tmp" "./Caddyfile"
-          echo "Caddyfile updated."
-        else
-          echo "Caddyfile is up-to-date."
-        fi
-      else
-        echo "Caddyfile not found. Installing new Caddyfile..."
+    if [ -f "./Caddyfile" ]; then
+      if ! diff "$caddyfile_tmp" "./Caddyfile" > /dev/null; then
+        echo "Update available for the Caddyfile. Updating now..."
         cp "$caddyfile_tmp" "./Caddyfile"
-        echo "Caddyfile installed."
-      fi
-
-      echo "Restarting Docker Compose service..."
-      systemctl restart docker-compose-app.service
-      echo "Docker Compose service restarted."
-      
-      echo "Cleaning up unused Docker resources..."
-      purge_docker
-      
-      echo "Monitoring service startup..."
-      wait_for_services
-      
-      if [ $? -eq 0 ]; then
-        echo "✅ Update complete! All services are running and ready."
+        echo "Caddyfile updated."
       else
-        echo "⚠️  Update complete, but some services may still be initializing."
-        echo "This is normal during major upgrades with SQL index rebuilds."
-        echo "Monitor progress with: docker-compose logs -f"
-        echo "Check CPU usage with: top (high postgresql CPU is normal during index rebuilds)"
+        echo "Caddyfile is up-to-date."
       fi
     else
-      echo "Docker image pull failed. Rolling back to previous configuration."
-      rollback
-      rm "$TEMP_FILE"
+      echo "Caddyfile not found. Installing new Caddyfile..."
+      cp "$caddyfile_tmp" "./Caddyfile"
+      echo "Caddyfile installed."
+    fi
+
+    echo "Restarting Docker Compose service..."
+    systemctl restart docker-compose-app.service
+    echo "Docker Compose service restarted."
+
+    echo "Cleaning up unused Docker resources..."
+    purge_docker
+
+    echo "Monitoring service startup..."
+    wait_for_services
+
+    if [ $? -eq 0 ]; then
+      echo "✅ Update complete! All services are running and ready."
+    else
+      echo "⚠️  Update complete, but some services may still be initializing."
+      echo "This is normal during major upgrades with SQL index rebuilds."
+      echo "Monitor progress with: docker-compose logs -f"
+      echo "Check CPU usage with: top (high postgresql CPU is normal during index rebuilds)"
     fi
   else
     echo "Failed to download new docker-compose.yml or other required files. No changes made."
@@ -359,22 +426,24 @@ compact_system() {
 # Function to wait for services to be ready
 wait_for_services() {
   echo "Waiting for services to start up..."
-  
+
   # Define expected services
   services=("caddy" "vue-web" "traceroute" "db" "web" "nats")
   max_wait=300  # 5 minutes
   wait_time=0
-  
+  db_ready=false
+  check_counter=0
+
   while [ $wait_time -lt $max_wait ]; do
     all_ready=true
-    
+
     echo "Checking service status (${wait_time}s elapsed)..."
-    
+
     for service in "${services[@]}"; do
       container=$(docker-compose ps -q $service 2>/dev/null)
       if [ -n "$container" ]; then
         status=$(docker inspect --format='{{.State.Status}}' $container 2>/dev/null)
-        
+
         if [ "$status" = "running" ]; then
           echo "  ✓ $service: running"
         else
@@ -386,31 +455,67 @@ wait_for_services() {
         all_ready=false
       fi
     done
-    
+
     # Service-specific readiness checks
     echo "Checking service readiness..."
-    
+
     # Database connectivity check
     if docker-compose exec -T db pg_isready -U calltelemetry -d calltelemetry_prod >/dev/null 2>&1; then
       echo "  ✓ Database: accepting connections"
+      db_ready=true
+
+      # Show migration status every 5 seconds (on multiples of 5)
+      if [ $((wait_time % 5)) -eq 0 ]; then
+        echo ""
+        echo "=== Database Migration Status ==="
+        migration_result=$(docker-compose exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -t -c \
+          "SELECT COUNT(*) FROM schema_migrations;" 2>/dev/null | tr -d ' ')
+
+        if [ -n "$migration_result" ]; then
+          echo "Total migrations applied: $migration_result"
+          echo ""
+          echo "Last 5 migrations:"
+          docker-compose exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -c \
+            "SELECT version, inserted_at FROM schema_migrations ORDER BY version DESC LIMIT 5;" 2>/dev/null || echo "Unable to fetch migration details"
+        else
+          echo "Unable to query migration status (migrations may still be running)"
+        fi
+        echo "================================"
+        echo ""
+      fi
     else
-      echo "  ⏳ Database: not ready (may be rebuilding indexes)"
+      echo "  ⏳ Database: not ready (may be rebuilding indexes or running migrations)"
       all_ready=false
+      db_ready=false
     fi
-    
+
     # Simple process check for web service - just verify it's running
     # No need to check internal ports since they're not externally accessible
     echo "  ✓ Services: containers running (internal connectivity not validated)"
-    
+
     if [ "$all_ready" = true ]; then
+      echo ""
       echo "✅ All services are running and ready!"
+
+      # Show final migration status
+      if [ "$db_ready" = true ]; then
+        echo ""
+        echo "=== Final Migration Status ==="
+        docker-compose exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -c \
+          "SELECT COUNT(*) as total_migrations FROM schema_migrations;"
+        echo ""
+        docker-compose exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -c \
+          "SELECT version, inserted_at FROM schema_migrations ORDER BY version DESC LIMIT 5;"
+        echo "=============================="
+      fi
+
       return 0
     fi
-    
-    sleep 10
-    wait_time=$((wait_time + 10))
+
+    sleep 5
+    wait_time=$((wait_time + 5))
   done
-  
+
   echo "⚠️  Some services may still be starting up after ${max_wait}s"
   echo "This is normal for database index rebuilds during major upgrades."
   echo "Monitor progress with: docker-compose logs -f"
@@ -623,6 +728,271 @@ EOF
   echo ""
   echo "✅ Migration status check completed"
   echo "Report saved to: $report_file"
+}
+
+# Function to show SQL migration status directly from database
+sql_migration_status() {
+  echo "Fetching migration status from database..."
+  echo ""
+
+  # Check if db container is running
+  db_container=$(docker-compose ps -q db 2>/dev/null)
+  if [ -z "$db_container" ]; then
+    echo "Error: Database container not found or not running."
+    echo "Please start the services with: sudo systemctl start docker-compose-app.service"
+    return 1
+  fi
+
+  container_status=$(docker inspect --format='{{.State.Status}}' $db_container 2>/dev/null)
+  if [ "$container_status" != "running" ]; then
+    echo "Error: Database container is not running (status: $container_status)"
+    echo "Please start the services with: sudo systemctl start docker-compose-app.service"
+    return 1
+  fi
+
+  # Check if database is ready
+  if ! docker-compose exec -T db pg_isready -U calltelemetry -d calltelemetry_prod >/dev/null 2>&1; then
+    echo "Error: Database is not ready to accept connections"
+    return 1
+  fi
+
+  echo "=== Last 10 Applied Migrations ==="
+  echo ""
+  docker-compose exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -c \
+    "SELECT version, inserted_at FROM schema_migrations ORDER BY version DESC LIMIT 10;"
+
+  echo ""
+  echo "=== Migration Count ==="
+  docker-compose exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -c \
+    "SELECT COUNT(*) as total_migrations FROM schema_migrations;"
+}
+
+# Function to show table sizes
+sql_table_size() {
+  echo "Fetching table size information from database..."
+  echo ""
+
+  # Check if db container is running
+  db_container=$(docker-compose ps -q db 2>/dev/null)
+  if [ -z "$db_container" ]; then
+    echo "Error: Database container not found or not running."
+    echo "Please start the services with: sudo systemctl start docker-compose-app.service"
+    return 1
+  fi
+
+  container_status=$(docker inspect --format='{{.State.Status}}' $db_container 2>/dev/null)
+  if [ "$container_status" != "running" ]; then
+    echo "Error: Database container is not running (status: $container_status)"
+    echo "Please start the services with: sudo systemctl start docker-compose-app.service"
+    return 1
+  fi
+
+  # Check if database is ready
+  if ! docker-compose exec -T db pg_isready -U calltelemetry -d calltelemetry_prod >/dev/null 2>&1; then
+    echo "Error: Database is not ready to accept connections"
+    return 1
+  fi
+
+  # Parse table list if provided
+  tables="$1"
+
+  if [ -z "$tables" ]; then
+    # Show all tables
+    echo "=== All Table Sizes ==="
+    echo ""
+    docker-compose exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -c "
+SELECT
+  table_name,
+  row_count,
+  pg_size_pretty(total_bytes) AS total_size,
+  pg_size_pretty(index_bytes) AS index_size,
+  pg_size_pretty(toast_bytes) AS toast_size,
+  pg_size_pretty(table_bytes) AS table_size
+FROM (
+  SELECT
+    c.relname AS table_name,
+    c.reltuples::BIGINT AS row_count,
+    pg_total_relation_size(c.oid) AS total_bytes,
+    pg_indexes_size(c.oid) AS index_bytes,
+    pg_total_relation_size(reltoastrelid) AS toast_bytes,
+    pg_relation_size(c.oid) AS table_bytes
+  FROM pg_class c
+  LEFT JOIN pg_namespace n ON n.oid = c.relnamespace
+  WHERE n.nspname = 'public'
+    AND c.relkind = 'r'
+) t
+ORDER BY total_bytes DESC;
+"
+  else
+    # Show specific tables
+    # Convert comma-separated list to SQL IN clause format
+    table_list=$(echo "$tables" | sed "s/,/','/g")
+
+    echo "=== Table Sizes for: $tables ==="
+    echo ""
+    docker-compose exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -c "
+SELECT
+  table_name,
+  row_count,
+  pg_size_pretty(total_bytes) AS total_size,
+  pg_size_pretty(index_bytes) AS index_size,
+  pg_size_pretty(toast_bytes) AS toast_size,
+  pg_size_pretty(table_bytes) AS table_size
+FROM (
+  SELECT
+    c.relname AS table_name,
+    c.reltuples::BIGINT AS row_count,
+    pg_total_relation_size(c.oid) AS total_bytes,
+    pg_indexes_size(c.oid) AS index_bytes,
+    pg_total_relation_size(reltoastrelid) AS toast_bytes,
+    pg_relation_size(c.oid) AS table_bytes
+  FROM pg_class c
+  LEFT JOIN pg_namespace n ON n.oid = c.relnamespace
+  WHERE n.nspname = 'public'
+    AND c.relname IN ('$table_list')
+) t
+ORDER BY total_bytes DESC;
+"
+  fi
+
+  echo ""
+  echo "=== Database Total Size ==="
+  docker-compose exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -c \
+    "SELECT pg_size_pretty(pg_database_size('calltelemetry_prod')) AS database_size;"
+}
+
+# Function to purge old records from a table
+sql_purge_table() {
+  local table_name="$1"
+  local days="$2"
+
+  # Validate parameters
+  if [ -z "$table_name" ] || [ -z "$days" ]; then
+    echo "Error: Missing required parameters"
+    echo "Usage: $0 sql_purge_table <table_name> <days>"
+    echo "Example: $0 sql_purge_table cube_event_logs 30"
+    return 1
+  fi
+
+  # Validate days is a number
+  if ! [[ "$days" =~ ^[0-9]+$ ]]; then
+    echo "Error: Days must be a positive number"
+    return 1
+  fi
+
+  echo "Preparing to purge records from table: $table_name"
+  echo "Records older than: $days days"
+  echo ""
+
+  # Check if db container is running
+  db_container=$(docker-compose ps -q db 2>/dev/null)
+  if [ -z "$db_container" ]; then
+    echo "Error: Database container not found or not running."
+    echo "Please start the services with: sudo systemctl start docker-compose-app.service"
+    return 1
+  fi
+
+  container_status=$(docker inspect --format='{{.State.Status}}' $db_container 2>/dev/null)
+  if [ "$container_status" != "running" ]; then
+    echo "Error: Database container is not running (status: $container_status)"
+    echo "Please start the services with: sudo systemctl start docker-compose-app.service"
+    return 1
+  fi
+
+  # Check if database is ready
+  if ! docker-compose exec -T db pg_isready -U calltelemetry -d calltelemetry_prod >/dev/null 2>&1; then
+    echo "Error: Database is not ready to accept connections"
+    return 1
+  fi
+
+  # Check if table exists
+  echo "Checking if table exists..."
+  table_exists=$(docker-compose exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -t -c \
+    "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = '$table_name');" | tr -d ' ')
+
+  if [ "$table_exists" != "t" ]; then
+    echo "Error: Table '$table_name' does not exist in the database"
+    return 1
+  fi
+
+  # Check if table has inserted_at column
+  echo "Checking for 'inserted_at' column..."
+  column_exists=$(docker-compose exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -t -c \
+    "SELECT EXISTS (SELECT FROM information_schema.columns WHERE table_schema = 'public' AND table_name = '$table_name' AND column_name = 'inserted_at');" | tr -d ' ')
+
+  if [ "$column_exists" != "t" ]; then
+    echo "Error: Table '$table_name' does not have an 'inserted_at' column"
+    echo "This command requires the table to have a timestamp column named 'inserted_at'"
+    return 1
+  fi
+
+  # Get count of records to be deleted
+  echo ""
+  echo "Counting records to be deleted..."
+  records_to_delete=$(docker-compose exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -t -c \
+    "SELECT COUNT(*) FROM $table_name WHERE inserted_at < NOW() - INTERVAL '$days days';" | tr -d ' ')
+
+  if [ -z "$records_to_delete" ] || [ "$records_to_delete" = "0" ]; then
+    echo "No records found older than $days days. Nothing to purge."
+    return 0
+  fi
+
+  echo "Found $records_to_delete records to delete (older than $days days)"
+  echo ""
+
+  # Show date cutoff
+  cutoff_date=$(docker-compose exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -t -c \
+    "SELECT (NOW() - INTERVAL '$days days')::timestamp(0);" | tr -d ' ')
+  echo "Cutoff date: $cutoff_date"
+  echo ""
+
+  # Confirm before deletion
+  if [[ -t 0 ]]; then
+    read -p "Are you sure you want to delete $records_to_delete records? (yes/NO): " -r
+    echo ""
+
+    if [[ ! $REPLY =~ ^[Yy][Ee][Ss]$ ]]; then
+      echo "Purge cancelled by user"
+      return 0
+    fi
+  else
+    echo "Running in non-interactive mode - skipping confirmation"
+    echo "Use interactive mode to confirm deletions"
+    return 1
+  fi
+
+  echo "Starting purge operation..."
+  echo ""
+
+  # Perform the deletion and show progress
+  start_time=$(date +%s)
+
+  delete_result=$(docker-compose exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -c \
+    "DELETE FROM $table_name WHERE inserted_at < NOW() - INTERVAL '$days days';" 2>&1)
+
+  end_time=$(date +%s)
+  duration=$((end_time - start_time))
+
+  echo "$delete_result"
+  echo ""
+  echo "✅ Purge completed in ${duration} seconds"
+  echo ""
+
+  # Show updated table size
+  echo "=== Updated Table Size ==="
+  docker-compose exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -c "
+SELECT
+  '$table_name' AS table_name,
+  COUNT(*) AS remaining_rows,
+  pg_size_pretty(pg_total_relation_size('$table_name')) AS total_size,
+  pg_size_pretty(pg_relation_size('$table_name')) AS table_size,
+  pg_size_pretty(pg_indexes_size('$table_name')) AS index_size
+FROM $table_name;
+"
+
+  echo ""
+  echo "💡 Tip: Run 'VACUUM FULL $table_name' to reclaim disk space"
+  echo "   Use: docker-compose exec -T db psql -U calltelemetry -d calltelemetry_prod -c 'VACUUM FULL $table_name;'"
 }
 
 # Function to run pending migrations using Elixir release
@@ -886,6 +1256,15 @@ case "$1" in
     ;;
   migration_status)
     migration_status
+    ;;
+  sql_migration_status)
+    sql_migration_status
+    ;;
+  sql_table_size)
+    sql_table_size "$2"
+    ;;
+  sql_purge_table)
+    sql_purge_table "$2" "$3"
     ;;
   migration_run)
     migration_run
