@@ -48,7 +48,7 @@ services:
     networks:
       - ct
   nats:
-    image: "nats:latest"
+    image: "nats:2.11"
     expose:
       - "4222"
     # ports:
