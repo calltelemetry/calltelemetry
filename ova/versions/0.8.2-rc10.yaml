@@ -93,7 +93,7 @@ services:
       - "traefik.http.services.web.loadbalancer.server.port=4000"
 
   nats:
-    image: "nats:latest"
+    image: "nats:2.11"
     expose:
       - "4222"
     networks:

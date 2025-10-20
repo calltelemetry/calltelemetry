@@ -84,7 +84,7 @@ services:
         compress: "true" # Compresses rotated files
 
   nats:
-    image: "nats:latest"
+    image: "nats:2.11"
     command: "-c /etc/nats/nats.conf"
     volumes:
       - ./nats.conf:/etc/nats/nats.conf

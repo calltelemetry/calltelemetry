@@ -97,7 +97,7 @@ services:
       - "traefik.http.services.web.loadbalancer.server.port=4000"
       - "traefik.http.routers.web.tls=true"
   nats:
-    image: "nats:latest"
+    image: "nats:2.11"
     command: "-c /etc/nats/nats.conf"
     volumes:
       - ./nats.conf:/etc/nats/nats.conf
