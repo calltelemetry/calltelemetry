@@ -142,7 +142,8 @@ check_ram() {
     return 1
   fi
 
-  echo "Detected RAM: ${total_ram_mb}MB ($(awk "BEGIN {printf \"%.1f\", $total_ram_mb/1024}")GB)"
+  total_ram_gb=$(echo "scale=1; $total_ram_mb/1024" | bc)
+  echo "Detected RAM: ${total_ram_mb}MB (${total_ram_gb}GB)"
 
   if [ "$total_ram_mb" -lt "$required_ram_mb" ]; then
     echo "Required RAM: ${required_ram_mb}MB (8GB)"
