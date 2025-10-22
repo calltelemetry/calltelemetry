@@ -127,7 +127,7 @@ check_image_availability() {
 
 # Function to check RAM availability
 check_ram() {
-  local required_ram_mb=8192  # 8GB in MB
+  local required_ram_mb=7168  # 7GB minimum (allowing some tolerance for 8GB systems)
 
   # Get total RAM in MB (works on Linux)
   if [ "$(uname)" == "Linux" ]; then
@@ -142,11 +142,13 @@ check_ram() {
     return 1
   fi
 
-  total_ram_gb=$(echo "scale=1; $total_ram_mb/1024" | bc)
-  echo "Detected RAM: ${total_ram_mb}MB (${total_ram_gb}GB)"
+  # Calculate GB using shell arithmetic (no bc needed)
+  total_ram_gb=$((total_ram_mb / 1024))
+  total_ram_gb_decimal=$((total_ram_mb * 10 / 1024 % 10))
+  echo "Detected RAM: ${total_ram_mb}MB (${total_ram_gb}.${total_ram_gb_decimal}GB)"
 
   if [ "$total_ram_mb" -lt "$required_ram_mb" ]; then
-    echo "Required RAM: ${required_ram_mb}MB (8GB)"
+    echo "Required RAM: Minimum 7GB (8GB recommended)"
     return 1
   fi
   return 0
@@ -253,13 +255,13 @@ update() {
       if ! check_ram; then
         echo ""
         echo "❌ ERROR: Insufficient RAM for version 0.8.4 and higher"
-        echo "   Version 0.8.4+ requires a minimum of 8GB RAM"
+        echo "   Version 0.8.4+ requires 8GB RAM (minimum 7GB detected)"
         echo ""
         echo "To proceed anyway, use: $0 update $version --force-upgrade"
         echo "WARNING: Proceeding with insufficient RAM may cause performance issues or failures"
         return 1
       fi
-      echo "✅ RAM requirement met"
+      echo "✅ RAM requirement met (8GB recommended for optimal performance)"
       echo ""
     else
       echo "⚠️  WARNING: Skipping RAM check (--force-upgrade flag used)"
