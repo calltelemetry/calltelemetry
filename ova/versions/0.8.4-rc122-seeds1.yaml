@@ -43,7 +43,7 @@ services:
       - ct
 
   web:
-    image: "calltelemetry/web:0.8.4-rc122-seeds1"
+    image: "calltelemetry/web:0.8.4-rc122-seed1m"
     restart: "always"
     user: root
     expose:
