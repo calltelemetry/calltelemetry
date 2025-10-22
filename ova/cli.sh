@@ -125,6 +125,32 @@ check_image_availability() {
   fi
 }
 
+# Function to check RAM availability
+check_ram() {
+  local required_ram_mb=8192  # 8GB in MB
+
+  # Get total RAM in MB (works on Linux)
+  if [ "$(uname)" == "Linux" ]; then
+    total_ram_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+    total_ram_mb=$((total_ram_kb / 1024))
+  elif [ "$(uname)" == "Darwin" ]; then
+    # For macOS (testing purposes)
+    total_ram_bytes=$(sysctl -n hw.memsize)
+    total_ram_mb=$((total_ram_bytes / 1024 / 1024))
+  else
+    echo "Error: Unable to detect RAM on this system"
+    return 1
+  fi
+
+  echo "Detected RAM: ${total_ram_mb}MB ($(awk "BEGIN {printf \"%.1f\", $total_ram_mb/1024}")GB)"
+
+  if [ "$total_ram_mb" -lt "$required_ram_mb" ]; then
+    echo "Required RAM: ${required_ram_mb}MB (8GB)"
+    return 1
+  fi
+  return 0
+}
+
 # Function to check disk space
 check_disk_space() {
   local required_percent=10
@@ -153,6 +179,34 @@ get_current_version() {
   fi
 }
 
+# Function to check if version is 0.8.4 or higher
+is_version_084_or_higher() {
+  local version="$1"
+
+  # Handle "latest" as 0.8.4+
+  if [ "$version" == "latest" ]; then
+    return 0
+  fi
+
+  # Extract major, minor, patch from version string (e.g., "0.8.4-rc128" -> 0, 8, 4)
+  if [[ "$version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
+    local major="${BASH_REMATCH[1]}"
+    local minor="${BASH_REMATCH[2]}"
+    local patch="${BASH_REMATCH[3]}"
+
+    # Check if version >= 0.8.4
+    if [ "$major" -gt 0 ]; then
+      return 0
+    elif [ "$major" -eq 0 ] && [ "$minor" -gt 8 ]; then
+      return 0
+    elif [ "$major" -eq 0 ] && [ "$minor" -eq 8 ] && [ "$patch" -ge 4 ]; then
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
 # Function to update the docker-compose configuration
 update() {
   cli_update  # Ensure the CLI script is up-to-date
@@ -179,6 +233,28 @@ update() {
   echo "Current version: $current_version"
   echo "Target version: $version"
   echo ""
+
+  # Check RAM requirement for version 0.8.4 and higher unless --force-upgrade is specified
+  if is_version_084_or_higher "$version"; then
+    if [ "$force_upgrade" = false ]; then
+      echo "Checking RAM requirements for version $version..."
+      if ! check_ram; then
+        echo ""
+        echo "❌ ERROR: Insufficient RAM for version 0.8.4 and higher"
+        echo "   Version 0.8.4+ requires a minimum of 8GB RAM"
+        echo ""
+        echo "To proceed anyway, use: $0 update $version --force-upgrade"
+        echo "WARNING: Proceeding with insufficient RAM may cause performance issues or failures"
+        return 1
+      fi
+      echo "✅ RAM requirement met"
+      echo ""
+    else
+      echo "⚠️  WARNING: Skipping RAM check (--force-upgrade flag used)"
+      echo "   Version 0.8.4+ requires 8GB RAM - proceeding with insufficient RAM may cause issues"
+      echo ""
+    fi
+  fi
 
   # Check disk space unless --force-upgrade is specified
   if [ "$force_upgrade" = false ]; then
