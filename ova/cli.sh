@@ -211,16 +211,27 @@ is_version_084_or_higher() {
 update() {
   cli_update  # Ensure the CLI script is up-to-date
 
-  version=${1:-"latest"}
+  version=""
   force_upgrade=false
 
-  # Check for --force-upgrade flag in any position
-  if [[ "$*" == *"--force-upgrade"* ]]; then
-    force_upgrade=true
-    # Remove --force-upgrade from arguments
-    set -- "${@/--force-upgrade/}"
-    version=${1:-"latest"}
-  fi
+  # Parse arguments
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --force-upgrade)
+        force_upgrade=true
+        shift
+        ;;
+      *)
+        if [ -z "$version" ]; then
+          version="$1"
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  # Set default version if not specified
+  version=${version:-"latest"}
 
   if [ "$version" == "latest" ]; then
     url="https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/docker-compose.yml"
@@ -1309,8 +1320,9 @@ case "$1" in
     show_help
     ;;
   update)
+    shift  # Remove 'update' from arguments
     generate_self_signed_certificates  # Ensure certificates are generated before update
-    update "$2"
+    update "$@"  # Pass all remaining arguments
     ;;
   rollback)
     rollback
