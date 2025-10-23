@@ -335,13 +335,21 @@ update() {
     return 1
   fi
 
-  # Check image availability before proceeding
-  if ! check_image_availability "$TEMP_FILE"; then
+  # Check image availability before proceeding unless --force-upgrade is specified
+  if [ "$force_upgrade" = false ]; then
+    if ! check_image_availability "$TEMP_FILE"; then
+      echo ""
+      echo "❌ Cannot proceed with upgrade - some images are not available"
+      echo "Please ensure all images are built and pushed to the registry"
+      echo ""
+      echo "To proceed anyway, use: $0 update $version --force-upgrade"
+      echo "WARNING: Proceeding without verifying image availability may cause upgrade failures"
+      rm -f "$TEMP_FILE"
+      return 1
+    fi
+  else
+    echo "⚠️  WARNING: Skipping image availability check (--force-upgrade flag used)"
     echo ""
-    echo "❌ Cannot proceed with upgrade - some images are not available"
-    echo "Please ensure all images are built and pushed to the registry"
-    rm -f "$TEMP_FILE"
-    return 1
   fi
 
   echo ""
