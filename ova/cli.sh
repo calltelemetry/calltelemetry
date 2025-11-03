@@ -545,7 +545,9 @@ wait_for_services() {
   db_ready=false
   migration_poll_interval=5
   release_bin=$(get_release_binary)
-  local port_map="caddy:443/tcp web:4080/tcp,3022/tcp traceroute:4100/tcp vue-web:80/tcp"
+  # Map services to host-published ports. Use an empty port list for internal-only services
+  # so we rely on their Docker healthchecks instead of pointless host probes.
+  local port_map=$'caddy:443/tcp\nweb:4080/tcp,3022/tcp\ntraceroute:\nvue-web:'
 
   while [ $wait_time -lt $max_wait ]; do
     all_ready=true
@@ -828,11 +830,26 @@ check_service_ports() {
     mapping=$(docker port "$container" "$port_proto" 2>/dev/null | head -n 1)
     if [ -n "$mapping" ]; then
       local host_port=${mapping##*:}
-      if command -v nc >/dev/null 2>&1 && nc -z 127.0.0.1 "$host_port" >/dev/null 2>&1; then
-        echo "    ✓ $service:$port (host port $host_port)"
+      if command -v nc >/dev/null 2>&1; then
+        local attempt
+        local max_attempts=3
+        local nc_ok=false
+        for ((attempt=1; attempt<=max_attempts; attempt++)); do
+          if nc -z 127.0.0.1 "$host_port" >/dev/null 2>&1; then
+            nc_ok=true
+            break
+          fi
+          sleep 1
+        done
+
+        if [ "$nc_ok" = true ]; then
+          echo "    ✓ $service:$port (host port $host_port)"
+        else
+          echo "    ✗ $service:$port unreachable on host port $host_port (after $max_attempts tries)"
+          service_ok=false
+        fi
       else
-        echo "    ✗ $service:$port unreachable on host port $host_port"
-        service_ok=false
+        echo "    ⚠️  $service:$port host port $host_port not probed (netcat not available)"
       fi
     else
       echo "    ⚠️  $service:$port not published to host; skipping port probe"
