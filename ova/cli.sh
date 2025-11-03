@@ -540,11 +540,12 @@ wait_for_services() {
   echo "Waiting for services to start up..."
 
   services=("caddy" "vue-web" "traceroute" "db" "web" "nats")
-  max_wait=30000
+  max_wait=300
   wait_time=0
   db_ready=false
   migration_poll_interval=5
   release_bin=$(get_release_binary)
+  local port_map="caddy:443/tcp web:4080/tcp,3022/tcp traceroute:4100/tcp vue-web:80/tcp"
 
   while [ $wait_time -lt $max_wait ]; do
     all_ready=true
@@ -590,9 +591,21 @@ wait_for_services() {
       migration_display=$(printf '%s\n' "$migration_raw" | sed '/::pending_count=/d')
       printf '%s\n' "$migration_display"
 
+      show_system_activity
+      if show_web_logs; then
+        web_log_status=0
+      else
+        web_log_status=1
+      fi
+
       if [[ "$pending_count" =~ ^[0-9]+$ ]]; then
         if [ "$pending_count" -gt 0 ]; then
           echo "Migrations are running (pending: $pending_count). Updating again in ${migration_poll_interval}s..."
+          if [ "$web_log_status" -eq 0 ]; then
+            echo "ℹ️  No web errors detected. Migrations are still processing; monitor schema_migrations for progress."
+          else
+            echo "⚠️  Web log errors detected. Review the entries above before proceeding."
+          fi
           all_ready=false
         else
           echo "Migrations are complete."
@@ -600,16 +613,40 @@ wait_for_services() {
       elif [ "$pending_count" = "error" ]; then
         echo "Unable to retrieve migration status via RPC; falling back to SQL snapshot."
         print_sql_migration_snapshot "Database Migration Status"
+        if [ "$web_log_status" -eq 0 ]; then
+          echo "ℹ️  Migrations may still be running even though RPC is unavailable."
+        else
+          echo "⚠️  Errors found in recent web logs. Investigate the entries above."
+        fi
         all_ready=false
       else
         echo "Migrations are running. Updating again in ${migration_poll_interval}s..."
         print_sql_migration_snapshot "Database Migration Status"
+        if [ "$web_log_status" -eq 0 ]; then
+          echo "ℹ️  No web errors detected. Pending migrations should reduce over time."
+        else
+          echo "⚠️  Errors detected in web logs. Examine the entries above."
+        fi
         all_ready=false
       fi
       echo ""
     fi
 
     echo "  ✓ Services: containers running (internal connectivity not validated)"
+
+    local port_health_ok=true
+    local entry
+    for entry in $port_map; do
+      local svc=${entry%%:*}
+      local ports_str=${entry#*:}
+      IFS=',' read -r -a port_array <<< "$ports_str"
+      check_service_ports "$svc" "${port_array[@]}" || port_health_ok=false
+      unset port_array
+    done
+    unset IFS
+    if [ "$port_health_ok" = false ]; then
+      all_ready=false
+    fi
 
     if [ "$all_ready" = true ]; then
       echo ""
@@ -742,6 +779,105 @@ print_sql_migration_snapshot() {
       echo "Unable to fetch recent migrations via SQL."
   echo "=============================="
   echo ""
+}
+
+show_system_activity() {
+  local os_name=$(uname -s)
+  local cpu_summary="CPU unavailable"
+  local mem_summary="MEM unavailable"
+  local disk_summary="DISK unavailable"
+
+  if command -v top >/dev/null 2>&1; then
+    if [ "$os_name" = "Darwin" ]; then
+      cpu_summary=$(top -l 1 | awk '/CPU usage/ {gsub(",",""); gsub("%",""); printf("CPU usr:%s%% sys:%s%% idle:%s%%", $3, $5, $7)}')
+      [ -z "$cpu_summary" ] && cpu_summary="CPU unavailable"
+      mem_summary=$(top -l 1 | awk '/PhysMem/ {gsub(",",""); printf("MEM used:%s free:%s", $2, $6)}')
+      [ -z "$mem_summary" ] && mem_summary="MEM unavailable"
+    else
+      cpu_summary=$(top -bn1 | awk -F'[ ,]+' '/Cpu\(s\)/ {gsub("%", "", $2); gsub("%", "", $4); gsub("%", "", $8); printf("CPU usr:%s%% sys:%s%% idle:%s%%", $2, $4, $8)}')
+      [ -z "$cpu_summary" ] && cpu_summary="CPU unavailable"
+      if command -v free >/dev/null 2>&1; then
+        mem_summary=$(free -h | awk 'NR==2 {printf("MEM used:%s/%s", $3, $2)}')
+      fi
+      [ -z "$mem_summary" ] && mem_summary="MEM unavailable"
+    fi
+  fi
+
+  disk_summary=$(df -h / 2>/dev/null | awk 'NR==2 {printf("DISK / %s/%s (%s used)", $3, $2, $5)}')
+  [ -z "$disk_summary" ] && disk_summary="DISK unavailable"
+
+  echo "📊 Appliance Stats | $cpu_summary | $mem_summary | $disk_summary"
+}
+
+check_service_ports() {
+  local service="$1"
+  shift
+  local ports=($@)
+  local container
+  container=$(docker-compose ps -q "$service" 2>/dev/null)
+  if [ -z "$container" ]; then
+    echo "    ⚠️  $service ports: container not found"
+    return 0
+  fi
+
+  local service_ok=true
+  local port_proto
+  for port_proto in "${ports[@]}"; do
+    local port=${port_proto%/*}
+    local mapping
+    mapping=$(docker port "$container" "$port_proto" 2>/dev/null | head -n 1)
+    if [ -n "$mapping" ]; then
+      local host_port=${mapping##*:}
+      if command -v nc >/dev/null 2>&1 && nc -z 127.0.0.1 "$host_port" >/dev/null 2>&1; then
+        echo "    ✓ $service:$port (host port $host_port)"
+      else
+        echo "    ✗ $service:$port unreachable on host port $host_port"
+        service_ok=false
+      fi
+    else
+      echo "    ⚠️  $service:$port not published to host; skipping port probe"
+    fi
+  done
+
+  $service_ok && return 0 || return 1
+}
+
+show_web_logs() {
+  local logs=""
+  if ! logs=$(docker-compose logs --tail 200 web 2>&1); then
+    echo "Unable to fetch web logs."
+    return 1
+  fi
+
+  echo "=== Recent Web Logs (last 10 lines) ==="
+  printf '%s\n' "$logs" | tail -n 10
+  echo "=============================="
+
+  local recent_errors
+  recent_errors=$(printf '%s\n' "$logs" | grep -iE "error|exception" 2>/dev/null | tail -n 5 || true)
+
+  local pending_migrations
+  pending_migrations=$(printf '%s\n' "$logs" | awk '/Pending migrations \(will run now\):/ {pending=1; next} pending && /^  - / {gsub(/^  - /, ""); print} pending && !/^  - / {pending=0}' || true)
+
+  if [ -n "$pending_migrations" ]; then
+    echo "📋 Pending migrations detected from logs:"
+    while IFS= read -r line; do
+      [ -n "$line" ] && printf '  • %s\n' "$line"
+    done <<< "$pending_migrations"
+    echo "ℹ️  Some migrations can take 1–2 hours on large datasets. Watch CPU/memory (top) and this list for progress; many migrations emit no logs while they run."
+    echo ""
+  fi
+
+  if [ -n "$recent_errors" ]; then
+    echo "⚠️  Detected recent error entries in web logs:"
+    echo "$recent_errors"
+    echo ""
+    return 1
+  else
+    echo "ℹ️  No errors detected in the last 200 web log lines." 
+    echo ""
+    return 0
+  fi
 }
 
 run_migration_status_rpc() {
