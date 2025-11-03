@@ -35,10 +35,11 @@ show_help() {
   echo
   echo "Options:"
   echo "  --help              Show this help message and exit."
-  echo "  update [version] [--force-upgrade]"
+  echo "  update [version] [--force-upgrade] [--no-cleanup]"
   echo "                      Update the docker-compose configuration to the specified version and restart the service."
   echo "                      If no version is specified, the default latest version will be used."
   echo "                      --force-upgrade bypasses the 10% disk space requirement check."
+  echo "                      --no-cleanup skips automatic image pruning after update."
   echo "  rollback            Roll back to the previous docker-compose configuration."
   echo "  reset               Stop the application, remove data, and restart the application."
   echo "  compact             Prune Docker system and compact the PostgreSQL database."
@@ -216,12 +217,17 @@ update() {
 
   version=""
   force_upgrade=false
+  skip_cleanup=false
 
   # Parse arguments
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --force-upgrade)
         force_upgrade=true
+        shift
+        ;;
+      --no-cleanup)
+        skip_cleanup=true
         shift
         ;;
       *)
@@ -374,7 +380,11 @@ update() {
   echo "  - Stop all services"
   echo "  - Update container images"
   echo "  - Restart services"
-  echo "  - Run automatic cleanup"
+  if [ "$skip_cleanup" = false ]; then
+    echo "  - Run automatic cleanup"
+  else
+    echo "  - Skip automatic cleanup (--no-cleanup)"
+  fi
   echo ""
 
   # Check if running in interactive mode (has proper stdin)
@@ -431,8 +441,12 @@ update() {
     systemctl restart docker-compose-app.service
     echo "Docker Compose service restarted."
 
-    echo "Cleaning up unused Docker resources..."
-    purge_docker
+    if [ "$skip_cleanup" = false ]; then
+      echo "Cleaning up unused Docker resources..."
+      purge_docker
+    else
+      echo "Skipping Docker cleanup (--no-cleanup flag used)..."
+    fi
 
     echo "Monitoring service startup..."
     wait_for_services
