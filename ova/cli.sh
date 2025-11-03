@@ -539,25 +539,28 @@ compact_system() {
 wait_for_services() {
   echo "Waiting for services to start up..."
 
-  # Define expected services
   services=("caddy" "vue-web" "traceroute" "db" "web" "nats")
-  max_wait=300  # 5 minutes
+  max_wait=30000
   wait_time=0
   db_ready=false
-  check_counter=0
+  migration_poll_interval=5
+  release_bin=$(get_release_binary)
 
   while [ $wait_time -lt $max_wait ]; do
     all_ready=true
 
     echo "Checking service status (${wait_time}s elapsed)..."
 
+    web_running=false
     for service in "${services[@]}"; do
       container=$(docker-compose ps -q $service 2>/dev/null)
       if [ -n "$container" ]; then
         status=$(docker inspect --format='{{.State.Status}}' $container 2>/dev/null)
-
         if [ "$status" = "running" ]; then
           echo "  ✓ $service: running"
+          if [ "$service" = "web" ]; then
+            web_running=true
+          fi
         else
           echo "  ✗ $service: $status"
           all_ready=false
@@ -568,57 +571,63 @@ wait_for_services() {
       fi
     done
 
-    # Service-specific readiness checks
     echo "Checking service readiness..."
 
-    # Database connectivity check
     if docker-compose exec -T db pg_isready -U calltelemetry -d calltelemetry_prod >/dev/null 2>&1; then
       echo "  ✓ Database: accepting connections"
       db_ready=true
-
-      # Show migration status every 5 seconds (on multiples of 5)
-      if [ $((wait_time % 5)) -eq 0 ]; then
-        echo ""
-        echo "=== Database Migration Status ==="
-        migration_result=$(docker-compose exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -t -c \
-          "SELECT COUNT(*) FROM schema_migrations;" 2>/dev/null | tr -d ' ')
-
-        if [ -n "$migration_result" ]; then
-          echo "Total migrations applied: $migration_result"
-          echo ""
-          echo "Last 5 migrations:"
-          docker-compose exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -c \
-            "SELECT version, inserted_at FROM schema_migrations ORDER BY version DESC LIMIT 5;" 2>/dev/null || echo "Unable to fetch migration details"
-        else
-          echo "Unable to query migration status (migrations may still be running)"
-        fi
-        echo "================================"
-        echo ""
-      fi
     else
       echo "  ⏳ Database: not ready (may be rebuilding indexes or running migrations)"
       all_ready=false
       db_ready=false
     fi
 
-    # Simple process check for web service - just verify it's running
-    # No need to check internal ports since they're not externally accessible
+    pending_count="unknown"
+    if [ "$web_running" = true ] && [ "$db_ready" = true ] && [ $((wait_time % migration_poll_interval)) -eq 0 ]; then
+      echo ""
+      migration_raw=$(run_migration_status_rpc "$release_bin")
+      pending_count=$(printf '%s\n' "$migration_raw" | awk -F= '/::pending_count=/{print $2; exit}')
+      migration_display=$(printf '%s\n' "$migration_raw" | sed '/::pending_count=/d')
+      printf '%s\n' "$migration_display"
+
+      if [[ "$pending_count" =~ ^[0-9]+$ ]]; then
+        if [ "$pending_count" -gt 0 ]; then
+          echo "Migrations are running (pending: $pending_count). Updating again in ${migration_poll_interval}s..."
+          all_ready=false
+        else
+          echo "Migrations are complete."
+        fi
+      elif [ "$pending_count" = "error" ]; then
+        echo "Unable to retrieve migration status via RPC; falling back to SQL snapshot."
+        print_sql_migration_snapshot "Database Migration Status"
+        all_ready=false
+      else
+        echo "Migrations are running. Updating again in ${migration_poll_interval}s..."
+        print_sql_migration_snapshot "Database Migration Status"
+        all_ready=false
+      fi
+      echo ""
+    fi
+
     echo "  ✓ Services: containers running (internal connectivity not validated)"
 
     if [ "$all_ready" = true ]; then
       echo ""
       echo "✅ All services are running and ready!"
 
-      # Show final migration status
-      if [ "$db_ready" = true ]; then
+      if [ "$db_ready" = true ] && [ "$web_running" = true ]; then
         echo ""
         echo "=== Final Migration Status ==="
-        docker-compose exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -c \
-          "SELECT COUNT(*) as total_migrations FROM schema_migrations;"
-        echo ""
-        docker-compose exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -c \
-          "SELECT version, inserted_at FROM schema_migrations ORDER BY version DESC LIMIT 5;"
-        echo "=============================="
+        final_raw=$(run_migration_status_rpc "$release_bin")
+        final_display=$(printf '%s\n' "$final_raw" | sed '/::pending_count=/d')
+        printf '%s\n' "$final_display"
+
+        final_pending=$(printf '%s\n' "$final_raw" | awk -F= '/::pending_count=/{print $2; exit}')
+        if [ "$final_pending" = "error" ] || [ -z "$final_pending" ]; then
+          print_sql_migration_snapshot "Final Migration Status"
+        fi
+      elif [ "$db_ready" = true ]; then
+        print_sql_migration_snapshot "Final Migration Status"
       fi
 
       return 0
@@ -720,126 +729,310 @@ get_release_binary() {
   echo "/home/app/onprem/bin/onprem"
 }
 
+print_sql_migration_snapshot() {
+  local title="${1:-Database Migration Status}"
+
+  echo "=== ${title} (SQL) ==="
+  docker-compose exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -c \
+    "SELECT COUNT(*) AS total_migrations FROM schema_migrations;" 2>/dev/null || \
+      echo "Unable to fetch total migrations via SQL."
+  echo ""
+  docker-compose exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -c \
+    "SELECT version, inserted_at FROM schema_migrations ORDER BY version DESC LIMIT 5;" 2>/dev/null || \
+      echo "Unable to fetch recent migrations via SQL."
+  echo "=============================="
+  echo ""
+}
+
+run_migration_status_rpc() {
+  local release_bin="$1"
+
+  docker-compose exec -T web "$release_bin" rpc '
+    alias Cdrcisco.Repo
+    import Ecto.Query
+
+    try do
+      migrations = Ecto.Migrator.migrations(Repo)
+      ordered = Enum.sort_by(migrations, fn {_, version, _} -> version end)
+
+      {applied, pending} =
+        Enum.split_with(ordered, fn {status, _, _} -> status == :up end)
+
+      total = length(ordered)
+      applied_count = length(applied)
+      pending_count = length(pending)
+
+      percent =
+        if total == 0 do
+          100.0
+        else
+          Float.round(applied_count / total * 100, 1)
+        end
+
+      format_dt = fn
+        %NaiveDateTime{} = dt ->
+          dt
+          |> NaiveDateTime.truncate(:second)
+          |> NaiveDateTime.to_string()
+
+        %DateTime{} = dt ->
+          dt
+          |> DateTime.truncate(:second)
+          |> DateTime.to_string()
+
+        other ->
+          inspect(other)
+      end
+
+      latest =
+        Repo.one(
+          from sm in "schema_migrations",
+            order_by: [desc: sm.version],
+            limit: 1,
+            select: %{version: sm.version, inserted_at: sm.inserted_at}
+        )
+
+      IO.puts("=== Migration Progress ===")
+
+      if total == 0 do
+        IO.puts("No migrations found!")
+      else
+        IO.puts("Applied migrations: #{applied_count}/#{total} (#{percent}%)")
+        IO.puts("Pending migrations: #{pending_count}")
+
+        case latest do
+          %{version: version, inserted_at: timestamp} ->
+            IO.puts("Latest applied: #{version} @ #{format_dt.(timestamp)}")
+
+          _ ->
+            IO.puts("Latest applied: none recorded")
+        end
+
+        IO.puts("")
+
+        if pending_count > 0 do
+          ordered_pending = pending
+          {_, next_version, next_name} = hd(ordered_pending)
+          IO.puts("Next pending: #{next_version} - #{next_name}")
+          IO.puts("")
+          IO.puts("=== Pending Queue ===")
+
+          Enum.with_index(ordered_pending, 1)
+          |> Enum.each(fn {{_, version, name}, idx} ->
+            IO.puts("[#{idx}/#{pending_count}] #{version} - #{name}")
+          end)
+
+          IO.puts("")
+        else
+          IO.puts("All migrations are up to date!")
+          IO.puts("")
+        end
+
+        applied_recent =
+          applied
+          |> Enum.reverse()
+          |> Enum.take(5)
+          |> Enum.reverse()
+
+        if applied_recent == [] do
+          IO.puts("=== Recent Applied ===")
+          IO.puts("None applied yet.")
+        else
+          IO.puts("=== Recent Applied (Last #{length(applied_recent)}) ===")
+
+          Enum.each(applied_recent, fn {_, version, name} ->
+            IO.puts("UP   #{version} #{name}")
+          end)
+        end
+      end
+
+      IO.puts("::pending_count=#{pending_count}")
+    rescue
+      e ->
+        IO.puts("Error checking migrations: #{inspect(e)}")
+        IO.puts("::pending_count=error")
+    end
+  ' 2>&1
+}
+
 # Function to check migration status using Elixir release
 migration_status() {
+  local watch_mode=false
+  local interval=5
+  local iterations_limit=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --watch|-w)
+        watch_mode=true
+        shift
+        ;;
+      --interval|-i)
+        if [[ -z "$2" ]]; then
+          echo "Error: --interval requires a value (seconds)."
+          return 1
+        fi
+        interval="$2"
+        if ! [[ "$interval" =~ ^[0-9]+$ ]] || [ "$interval" -le 0 ]; then
+          echo "Error: --interval must be a positive integer."
+          return 1
+        fi
+        shift 2
+        ;;
+      --iterations|-n)
+        if [[ -z "$2" ]]; then
+          echo "Error: --iterations requires a value."
+          return 1
+        fi
+        iterations_limit="$2"
+        if ! [[ "$iterations_limit" =~ ^[0-9]+$ ]] || [ "$iterations_limit" -le 0 ]; then
+          echo "Error: --iterations must be a positive integer."
+          return 1
+        fi
+        shift 2
+        ;;
+      --help|-h)
+        echo "Usage: $0 migration_status [--watch|-w] [--interval|-i seconds] [--iterations|-n count]"
+        echo ""
+        echo "Monitors the database migrations by comparing the release's migration list to the schema_migrations table."
+        echo "  --watch (-w)       Continuously refresh until pending migrations reach zero."
+        echo "  --interval (-i)    Seconds between refreshes in watch mode (default: 5)."
+        echo "  --iterations (-n)  Maximum refresh cycles before exiting watch mode."
+        return 0
+        ;;
+      *)
+        echo "Unknown option for migration_status: $1"
+        return 1
+        ;;
+    esac
+  done
+
   echo "Checking database migration status..."
-  
-  report_file="migrations-report.txt"
-  timestamp=$(date "+%Y-%m-%d %H:%M:%S")
-  
-  # Initialize report file
-  cat > "$report_file" << EOF
-Call Telemetry Database Migration Status Report
-Generated: $timestamp
-==========================================
 
-EOF
+  local report_file="migrations-report.txt"
 
-  # Check if web container is running
+  local web_container
   web_container=$(docker-compose ps -q web 2>/dev/null)
   if [ -z "$web_container" ]; then
     echo "Error: Web container not found or not running."
     echo "Please start the services with: sudo systemctl start docker-compose-app.service"
-    echo "ERROR: Web container not found at $timestamp" >> "$report_file"
     return 1
   fi
 
-  # Check if the web container is actually running (not just exists)
-  container_status=$(docker inspect --format='{{.State.Status}}' $web_container 2>/dev/null)
+  local container_status
+  container_status=$(docker inspect --format='{{.State.Status}}' "$web_container" 2>/dev/null)
   if [ "$container_status" != "running" ]; then
     echo "Error: Web container is not running (status: $container_status)"
     echo "Please start the services with: sudo systemctl start docker-compose-app.service"
-    echo "ERROR: Web container not running at $timestamp" >> "$report_file"
     return 1
   fi
 
-  # Test RPC connection
+  local release_bin
+  release_bin=$(get_release_binary)
+
   echo "Testing RPC connection..."
+  local rpc_test
   rpc_test=$(docker-compose exec -T web "$release_bin" rpc 'IO.puts("RPC connection successful")' 2>&1)
   if [[ "$rpc_test" == *"noconnection"* ]]; then
     echo "Error: Cannot connect to running application via RPC"
     echo "The application may still be starting up. Please wait and try again."
     echo "You can check logs with: docker-compose logs web"
-    echo "ERROR: RPC connection failed at $timestamp" >> "$report_file"
     return 1
   fi
 
-  echo "Web container found: $web_container" >> "$report_file"
-  echo "Finding release binary..." >> "$report_file"
+  echo "Using release binary: $release_bin"
 
-  echo "Using release binary: $release_bin" >> "$report_file"
-  echo "" >> "$report_file"
+  if [ "$watch_mode" = true ]; then
+    echo "Entering watch mode (interval: ${interval}s). Press Ctrl+C to stop."
+    if [ -n "$iterations_limit" ]; then
+      echo "Watch iteration limit: $iterations_limit"
+    fi
+    echo ""
+  fi
 
-  # Execute migration status check using Elixir
-  echo "Executing migration status check..."
-  migration_output=$(docker-compose exec -T web "$release_bin" rpc '
-    IO.puts("=== Migration Status ===")
-    
-    try do
-      migrations = Ecto.Migrator.migrations(Cdrcisco.Repo)
-      
-      if migrations == [] do
-        IO.puts("No migrations found!")
-      else
-        IO.puts("Status\tVersion\t\tName")
-        IO.puts("------\t-------\t\t----")
-        
-        # Force full output without truncation
-        Process.put(:iex_width, :infinity)
-        
-        Enum.each(migrations, fn {status, version, name} ->
-          status_str = case status do
-            :up -> "UP   "
-            :down -> "DOWN "
-          end
-          IO.puts("#{status_str}\t#{version}\t#{name}")
-          # Force flush to ensure no truncation
-          :io.format("~n", [])
-        end)
-        
-        pending = Enum.filter(migrations, fn {status, _, _} -> status == :down end)
-        applied = Enum.filter(migrations, fn {status, _, _} -> status == :up end)
-        
-        IO.puts("")
-        IO.puts("=== Summary ===")
-        IO.puts("Total migrations: #{length(migrations)}")
-        IO.puts("Applied migrations: #{length(applied)}")
-        IO.puts("Pending migrations: #{length(pending)}")
-        
-        if length(pending) > 0 do
-          IO.puts("")
-          IO.puts("WARNING: There are pending migrations!")
-          IO.puts("Run: ./ova/cli.sh migration_run")
-        else
-          IO.puts("")
-          IO.puts("All migrations are up to date!")
-        end
-        
-        # Show last 5 and first 5 for verification
-        IO.puts("")
-        IO.puts("=== Recent Migrations (Last 5) ===")
-        migrations |> Enum.take(-5) |> Enum.each(fn {status, version, name} ->
-          status_str = if status == :up, do: "UP", else: "DOWN"
-          IO.puts("#{status_str}\t#{version}\t#{name}")
-        end)
-      end
-    rescue
-      e -> 
-        IO.puts("Error checking migrations: #{inspect(e)}")
-    end
-  ' 2>&1)
+  local iteration=0
 
-  # Save output to report
-  echo "Migration Status Output:" >> "$report_file"
-  echo "$migration_output" >> "$report_file"
-  echo "" >> "$report_file"
-  echo "Migration status check completed at: $(date)" >> "$report_file"
+  while true; do
+    local timestamp
+    timestamp=$(date "+%Y-%m-%d %H:%M:%S")
 
-  # Display output to console
-  echo "$migration_output"
-  echo ""
-  echo "✅ Migration status check completed"
-  echo "Report saved to: $report_file"
+    local raw_output
+    raw_output=$(run_migration_status_rpc "$release_bin")
+    local rpc_status=$?
+
+    local pending_count
+    pending_count=$(printf '%s\n' "$raw_output" | awk -F= '/::pending_count=/{print $2; exit}')
+    if [ -z "$pending_count" ]; then
+      pending_count="unknown"
+    fi
+
+    local display_output
+    display_output=$(printf '%s\n' "$raw_output" | sed '/::pending_count=/d')
+
+    if [ $rpc_status -ne 0 ] && [ "$pending_count" = "unknown" ]; then
+      printf '%s\n' "$display_output"
+      echo "Error: Failed to retrieve migration status (exit code $rpc_status)."
+      return 1
+    fi
+
+    if [ "$watch_mode" = true ]; then
+      echo "[$timestamp]"
+    fi
+
+    printf '%s\n' "$display_output"
+
+    cat > "$report_file" <<EOF
+Call Telemetry Database Migration Status Report
+Generated: $timestamp
+Release binary: $release_bin
+==========================================
+
+$display_output
+
+EOF
+
+    if [ "$watch_mode" = true ]; then
+      echo "Last updated: $timestamp (report: $report_file)"
+    else
+      echo ""
+      echo "✅ Migration status check completed"
+      echo "Report saved to: $report_file"
+    fi
+
+    if [[ "$pending_count" =~ ^[0-9]+$ ]] && [ "$pending_count" -eq 0 ]; then
+      if [ "$watch_mode" = true ]; then
+        echo "All migrations are up to date. Exiting watch mode."
+      fi
+      break
+    fi
+
+    if [ "$watch_mode" = false ]; then
+      if [ "$pending_count" = "error" ]; then
+        return 1
+      fi
+      break
+    fi
+
+    if [ "$pending_count" = "error" ]; then
+      echo "Encountered an error while fetching migration status. Exiting watch mode."
+      return 1
+    fi
+
+    if [[ "$pending_count" =~ ^[0-9]+$ ]]; then
+      echo "Migrations are running (pending: $pending_count). Updating again in ${interval}s..."
+    else
+      echo "Migrations are running. Updating again in ${interval}s..."
+    fi
+
+    iteration=$((iteration + 1))
+    if [ -n "$iterations_limit" ] && [ "$iteration" -ge "$iterations_limit" ]; then
+      echo "Reached watch iteration limit ($iterations_limit)."
+      break
+    fi
+
+    sleep "$interval"
+    echo ""
+  done
 }
 
 # Function to show SQL migration status directly from database
@@ -1368,7 +1561,8 @@ case "$1" in
     restore "$2"
     ;;
   migration_status)
-    migration_status
+    shift
+    migration_status "$@"
     ;;
   sql_migration_status)
     sql_migration_status
