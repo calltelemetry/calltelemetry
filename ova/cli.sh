@@ -640,7 +640,7 @@ wait_for_services() {
       local svc=${entry%%:*}
       local ports_str=${entry#*:}
       IFS=',' read -r -a port_array <<< "$ports_str"
-      check_service_ports "$svc" "${port_array[@]}" || port_health_ok=false
+      report_service_health "$svc" "${port_array[@]}" || port_health_ok=false
       unset port_array
     done
     unset IFS
@@ -840,6 +840,50 @@ check_service_ports() {
   done
 
   $service_ok && return 0 || return 1
+}
+
+report_service_health() {
+  local service="$1"
+  shift
+  local ports=($@)
+  local container
+  container=$(docker-compose ps -q "$service" 2>/dev/null)
+  if [ -z "$container" ]; then
+    echo "    ⚠️  $service: container not found"
+    return 0
+  fi
+
+  local health
+  health=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$container" 2>/dev/null)
+
+  case "$health" in
+    healthy)
+      echo "    ✓ $service healthcheck: healthy"
+      return 0
+      ;;
+    starting)
+      echo "    ⏳ $service healthcheck: starting"
+      return 1
+      ;;
+    unhealthy)
+      echo "    ⚠️  $service healthcheck: unhealthy"
+      docker inspect --format '{{range .State.Health.Log}}{{println .Output}}{{end}}' "$container" 2>/dev/null | tail -n 3 | sed 's/^/      /'
+      return 1
+      ;;
+    none)
+      if [ ${#ports[@]} -gt 0 ]; then
+        check_service_ports "$service" "${ports[@]}"
+        return $?
+      else
+        echo "    ℹ️  $service healthcheck: not configured"
+        return 0
+      fi
+      ;;
+    *)
+      echo "    ⚠️  $service healthcheck: $health"
+      return 1
+      ;;
+  esac
 }
 
 show_web_logs() {
