@@ -103,6 +103,8 @@ services:
     image: prom/prometheus:v2.52.0
     restart: "always"
     user: root
+    expose:
+      - "9090"
     ports:
       - "9090:9090"
     command:
@@ -123,6 +125,8 @@ services:
     user: "472"
     depends_on:
       - prometheus
+    expose:
+      - "3000"
     ports:
       - "3000:3000"
     environment:
