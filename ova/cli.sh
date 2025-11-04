@@ -939,7 +939,7 @@ report_service_health() {
         check_service_ports "$service" "${ports[@]}"
         return $?
       else
-        echo "    ℹ️  $service healthcheck: not configured"
+        echo "    ℹ️  $service: no Docker healthcheck reported; host probe skipped"
         return 0
       fi
       ;;
