@@ -811,6 +811,60 @@ show_system_activity() {
   echo "📊 Appliance Stats | $cpu_summary | $mem_summary | $disk_summary"
 }
 
+probe_host_port() {
+  local host_port="$1"
+  local max_attempts="${2:-3}"
+
+  PROBE_LAST_METHOD=""
+  PROBE_LAST_ATTEMPTS=0
+
+  local nc_cmd=""
+  if command -v nc >/dev/null 2>&1; then
+    nc_cmd=$(command -v nc)
+  else
+    for candidate in /usr/bin/nc /bin/nc /usr/local/bin/nc; do
+      if [ -x "$candidate" ]; then
+        nc_cmd="$candidate"
+        break
+      fi
+    done
+  fi
+
+  local method
+  if [ -n "$nc_cmd" ]; then
+    method="nc"
+  else
+    method="bash-tcp"
+  fi
+
+  PROBE_LAST_METHOD="$method"
+
+  local attempt
+  for ((attempt=1; attempt<=max_attempts; attempt++)); do
+    case "$method" in
+      nc)
+        if "$nc_cmd" -z 127.0.0.1 "$host_port" >/dev/null 2>&1; then
+          PROBE_LAST_ATTEMPTS=$attempt
+          return 0
+        fi
+        ;;
+      bash-tcp)
+        if ( exec 3<>/dev/tcp/127.0.0.1/"$host_port" && exec 3>&- && exec 3<&- ) 2>/dev/null; then
+          PROBE_LAST_ATTEMPTS=$attempt
+          return 0
+        fi
+        ;;
+    esac
+
+    if [ "$attempt" -lt "$max_attempts" ]; then
+      sleep 1
+    fi
+  done
+
+  PROBE_LAST_ATTEMPTS=$max_attempts
+  return 1
+}
+
 check_service_ports() {
   local service="$1"
   shift
@@ -830,26 +884,19 @@ check_service_ports() {
     mapping=$(docker port "$container" "$port_proto" 2>/dev/null | head -n 1)
     if [ -n "$mapping" ]; then
       local host_port=${mapping##*:}
-      if command -v nc >/dev/null 2>&1; then
-        local attempt
-        local max_attempts=3
-        local nc_ok=false
-        for ((attempt=1; attempt<=max_attempts; attempt++)); do
-          if nc -z 127.0.0.1 "$host_port" >/dev/null 2>&1; then
-            nc_ok=true
-            break
-          fi
-          sleep 1
-        done
-
-        if [ "$nc_ok" = true ]; then
-          echo "    ✓ $service:$port (host port $host_port)"
-        else
-          echo "    ✗ $service:$port unreachable on host port $host_port (after $max_attempts tries)"
-          service_ok=false
-        fi
+      local max_attempts=3
+      if probe_host_port "$host_port" "$max_attempts"; then
+        echo "    ✓ $service:$port (host port $host_port)"
       else
-        echo "    ⚠️  $service:$port host port $host_port not probed (netcat not available)"
+        local probe_method_desc
+        case "$PROBE_LAST_METHOD" in
+          nc) probe_method_desc="nc" ;;
+          python3) probe_method_desc="python socket" ;;
+          bash-tcp) probe_method_desc="/dev/tcp" ;;
+          *) probe_method_desc="probe" ;;
+        esac
+        echo "    ✗ $service:$port unreachable on host port $host_port (after $max_attempts $probe_method_desc attempts)"
+        service_ok=false
       fi
     else
       echo "    ⚠️  $service:$port not published to host; skipping port probe"
