@@ -24,6 +24,15 @@ TEMP_FILE="temp-docker-compose.yml"
 SCRIPT_URL="https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/ova/cli.sh"
 CURRENT_SCRIPT_PATH="$0"
 PREP_SCRIPT_URL="https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/ova/prep.sh"
+PROMETHEUS_CONFIG_URL="https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/ova/versions/prometheus/prometheus.yml"
+GRAFANA_ASSETS_BASE_URL="https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/ova/versions"
+GRAFANA_ASSET_PATHS=(
+  "grafana/provisioning/datasources/calltelemetry.yml"
+  "grafana/provisioning/dashboards/calltelemetry.yaml"
+  "grafana/dashboards/calltelemetry-overview.json"
+  "grafana/dashboards/curri-observability.json"
+  "grafana/dashboards/caddy-overview.json"
+)
 
 # Ensure necessary directories exist and have correct permissions
 mkdir -p "$BACKUP_DIR"
@@ -124,6 +133,107 @@ check_image_availability() {
     echo -e "$unavailable_images"
     return 1
   fi
+}
+
+# Download Prometheus configuration when the compose file defines the service.
+download_prometheus_config() {
+  local compose_file="$1"
+
+  if ! grep -q 'prom/prometheus' "$compose_file"; then
+    return 0
+  fi
+
+  local mapping_line
+  mapping_line=$(grep -E '\./[^:]*prometheus\.yml:/etc/prometheus/prometheus\.yml' "$compose_file" | head -1 | sed 's/^[[:space:]-]*//')
+
+  local host_path
+  if [ -n "$mapping_line" ]; then
+    host_path=${mapping_line%%:*}
+  else
+    host_path="./prometheus/prometheus.yml"
+  fi
+
+  host_path=$(echo "$host_path" | tr -d '"')
+  local dest_path="${host_path#./}"
+  if [ -z "$dest_path" ]; then
+    dest_path="prometheus/prometheus.yml"
+  fi
+
+  local dest_dir
+  dest_dir=$(dirname "$dest_path")
+  if [ "$dest_dir" != "." ]; then
+    mkdir -p "$dest_dir"
+  fi
+
+  local tmp_file
+  tmp_file=$(mktemp)
+  if wget -q "$PROMETHEUS_CONFIG_URL" -O "$tmp_file"; then
+    mv "$tmp_file" "$dest_path"
+    echo "Prometheus configuration downloaded to $dest_path."
+  else
+    echo "⚠️  Failed to download Prometheus configuration from $PROMETHEUS_CONFIG_URL"
+    rm -f "$tmp_file"
+    return 1
+  fi
+}
+
+# Download Grafana provisioning and dashboard assets when Grafana is enabled.
+download_grafana_assets() {
+  local compose_file="$1"
+
+  if ! grep -q 'grafana/grafana' "$compose_file"; then
+    return 0
+  fi
+
+  local provisioning_mount
+  provisioning_mount=$(grep -E '\./[^:]*grafana/provisioning:/etc/grafana/provisioning' "$compose_file" | head -1 | sed 's/^[[:space:]-]*//')
+  if [ -z "$provisioning_mount" ]; then
+    provisioning_mount="./grafana/provisioning"
+  else
+    provisioning_mount=${provisioning_mount%%:*}
+  fi
+  provisioning_mount=${provisioning_mount%/}
+  provisioning_mount=${provisioning_mount#./}
+  if [ -z "$provisioning_mount" ]; then
+    provisioning_mount="grafana/provisioning"
+  fi
+
+  local dashboards_mount
+  dashboards_mount=$(grep -E '\./[^:]*grafana/dashboards:/var/lib/grafana/dashboards' "$compose_file" | head -1 | sed 's/^[[:space:]-]*//')
+  if [ -z "$dashboards_mount" ]; then
+    dashboards_mount="./grafana/dashboards"
+  else
+    dashboards_mount=${dashboards_mount%%:*}
+  fi
+  dashboards_mount=${dashboards_mount%/}
+  dashboards_mount=${dashboards_mount#./}
+  if [ -z "$dashboards_mount" ]; then
+    dashboards_mount="grafana/dashboards"
+  fi
+
+  local asset
+  for asset in "${GRAFANA_ASSET_PATHS[@]}"; do
+    local dest_path
+    if [[ "$asset" == grafana/provisioning/* ]]; then
+      dest_path="$provisioning_mount/${asset#grafana/provisioning/}"
+    elif [[ "$asset" == grafana/dashboards/* ]]; then
+      dest_path="$dashboards_mount/${asset#grafana/dashboards/}"
+    else
+      dest_path="$asset"
+    fi
+
+    mkdir -p "$(dirname "$dest_path")"
+
+    local tmp_file
+    tmp_file=$(mktemp)
+    if wget -q "${GRAFANA_ASSETS_BASE_URL}/${asset}" -O "$tmp_file"; then
+      mv "$tmp_file" "$dest_path"
+      echo "Grafana asset synced: $dest_path"
+    else
+      echo "⚠️  Failed to download Grafana asset: ${asset}"
+      rm -f "$tmp_file"
+    fi
+  done
 }
 
 # Function to check RAM availability
@@ -340,6 +450,12 @@ update() {
     rm -f "$TEMP_FILE"
     return 1
   fi
+
+  if ! download_prometheus_config "$TEMP_FILE"; then
+    echo "⚠️  Prometheus configuration download failed; continuing with existing file if present."
+  fi
+
+  download_grafana_assets "$TEMP_FILE"
 
   # Check image availability before proceeding unless --force-upgrade is specified
   if [ "$force_upgrade" = false ]; then
