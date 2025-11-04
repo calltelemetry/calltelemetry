@@ -1,0 +1,119 @@
+{
+  "id": null,
+  "uid": "missed-call-overview",
+  "title": "Missed Call Alerts Overview",
+  "tags": ["missed-call", "alerts"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Alerts Sent (last minute)",
+      "gridPos": {"x": 0, "y": 0, "w": 6, "h": 4},
+      "targets": [
+        {
+          "expr": "missed_call_alerts_sent_last_minute",
+          "legendFormat": "Sent last minute"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Alerts Failed (last minute)",
+      "gridPos": {"x": 6, "y": 0, "w": 6, "h": 4},
+      "targets": [
+        {
+          "expr": "missed_call_alerts_failed_last_minute",
+          "legendFormat": "Failed last minute"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Email Alerts (last minute)",
+      "gridPos": {"x": 12, "y": 0, "w": 6, "h": 4},
+      "targets": [
+        {
+          "expr": "missed_call_email_sent_last_minute",
+          "legendFormat": "Email sent"
+        },
+        {
+          "expr": "missed_call_email_failed_last_minute",
+          "legendFormat": "Email failed"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Webex Alerts (last minute)",
+      "gridPos": {"x": 18, "y": 0, "w": 6, "h": 4},
+      "targets": [
+        {
+          "expr": "missed_call_webex_sent_last_minute",
+          "legendFormat": "Webex sent"
+        },
+        {
+          "expr": "missed_call_webex_failed_last_minute",
+          "legendFormat": "Webex failed"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Alerts per Minute (last 24h)",
+      "gridPos": {"x": 0, "y": 4, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "missed_call_alerts_sent_last_minute"},
+        {"expr": "missed_call_alerts_failed_last_minute"},
+        {"expr": "missed_call_email_sent_last_minute"},
+        {"expr": "missed_call_webex_sent_last_minute"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Alerts per 24 Hours",
+      "gridPos": {"x": 12, "y": 4, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "missed_call_alerts_sent_last_24h"},
+        {"expr": "missed_call_alerts_failed_last_24h"},
+        {"expr": "missed_call_email_sent_last_24h"},
+        {"expr": "missed_call_webex_sent_last_24h"}
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Lifetime Totals (Sent/Failed)",
+      "gridPos": {"x": 0, "y": 12, "w": 6, "h": 5},
+      "targets": [
+        {"expr": "missed_call_alerts_sent_total", "legendFormat": "Sent total"},
+        {"expr": "missed_call_alerts_failed_total", "legendFormat": "Failed total"}
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Lifetime Totals (Email / Webex)",
+      "gridPos": {"x": 6, "y": 12, "w": 6, "h": 5},
+      "targets": [
+        {"expr": "missed_call_email_sent_total_gauge", "legendFormat": "Email sent"},
+        {"expr": "missed_call_email_failed_total_gauge", "legendFormat": "Email failed"},
+        {"expr": "missed_call_webex_sent_total_gauge", "legendFormat": "Webex sent"},
+        {"expr": "missed_call_webex_failed_total_gauge", "legendFormat": "Webex failed"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Per-Channel Totals",
+      "gridPos": {"x": 12, "y": 12, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "missed_call_email_sent_last_minute"},
+        {"expr": "missed_call_email_failed_last_minute"},
+        {"expr": "missed_call_webex_sent_last_minute"},
+        {"expr": "missed_call_webex_failed_last_minute"}
+      ]
+    }
+  ],
+  "templating": {"list": []},
+  "time": {"from": "now-24h", "to": "now"}
+}

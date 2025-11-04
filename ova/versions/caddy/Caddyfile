@@ -1,0 +1,15 @@
+# Caddyfile
+{
+    default_sni demo.calltelemetry.internal  # Replace with your default domain
+}
+
+:443 {
+    reverse_proxy /api* web:4000
+    reverse_proxy /* vue-web:80
+
+    # Add cache control headers
+    header /* Cache-Control "no-cache, no-store, must-revalidate, max-age=0"
+    header /assets/* Cache-Control "public, max-age=31536000, immutable"
+
+    tls /certs/appliance.crt /certs/appliance_key.pem  # Default certificate and key files
+}

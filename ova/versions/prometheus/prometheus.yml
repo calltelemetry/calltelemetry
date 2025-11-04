@@ -1,0 +1,53 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: caddy
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['caddy:2019']
+
+  - job_name: cdrcisco-web
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['web:4080']
+
+  - job_name: curri-policy
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['web:4080']
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: curri_.+
+        action: keep
+    relabel_configs:
+      - target_label: service
+        replacement: curri
+
+  - job_name: cdrcisco-repo
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['web:4080']
+
+  - job_name: remote_control_metrics
+    metrics_path: /api/metrics/remote_control
+    static_configs:
+      - targets: ['web:4080']
+
+  - job_name: ris_metrics
+    metrics_path: /api/metrics/ris
+    static_configs:
+      - targets: ['web:4080']
+
+  # Enable additional scrape targets by appending to static_configs or defining
+  # new jobs. For example, uncomment the following block once the web service
+  # exposes metrics at /metrics:
+  # - job_name: web
+  #   metrics_path: /metrics
+  #   static_configs:
+  #     - targets: ['web:4080']
