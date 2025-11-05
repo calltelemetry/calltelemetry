@@ -10,30 +10,14 @@ services:
       - ./certs:/certs:ro
     networks:
       - ct
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "wget -q --spider http://127.0.0.1:80 || wget -q --spider http://127.0.0.1:2019/metrics",
-        ]
-      interval: 30s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
 
   vue-web:
-    image: "calltelemetry/vue:0.8.4-rc144"
+    image: "calltelemetry/vue:0.8.4-rc146"
     restart: "always"
     expose:
       - "80"
     networks:
       - ct
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:80"]
-      interval: 30s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
 
   traceroute:
     image: "calltelemetry/traceroute:0.8.5-rc27"
@@ -42,22 +26,14 @@ services:
       - "4100"
     networks:
       - ct
-    healthcheck:
-      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/4100'"]
-      interval: 30s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
 
   db:
-    image: "bitnamilegacy/postgresql:14"
-    user: root
+    image: "calltelemetry/postgresql:14"
     restart: "always"
     environment:
       - POSTGRES_USER=calltelemetry
       - POSTGRES_PASSWORD=postgres
       - POSTGRES_DB=calltelemetry_prod
-      - POSTGRESQL_MAX_CONNECTIONS=300
     expose:
       - "5432"
     volumes:
@@ -66,7 +42,7 @@ services:
       - ct
 
   web:
-    image: "calltelemetry/web:0.8.4-rc144"
+    image: "calltelemetry/web:0.8.4-rc146"
     restart: "always"
     user: root
     expose:
@@ -126,16 +102,16 @@ services:
     image: prom/prometheus:v2.52.0
     restart: "always"
     user: root
+    expose:
+      - "9090"
     ports:
       - "9090:9090"
     command:
       - --config.file=/etc/prometheus/prometheus.yml
-      # Retain a modest retention window to cap disk usage.
       - --storage.tsdb.path=/prometheus
       - --storage.tsdb.retention.time=15d
       - --web.console.libraries=/usr/share/prometheus/console_libraries
       - --web.console.templates=/usr/share/prometheus/consoles
-      - --web.route-prefix=/prometheus
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
@@ -148,6 +124,8 @@ services:
     user: "472"
     depends_on:
       - prometheus
+    expose:
+      - "3000"
     ports:
       - "3000:3000"
     environment:
@@ -155,8 +133,6 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=${GF_ADMIN_PASSWORD:-calltelemetry}
       - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
       - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/calltelemetry-overview.json
-      - GF_SERVER_ROOT_URL=%(protocol)s://%(domain)s/grafana/
-      - GF_SERVER_SERVE_FROM_SUB_PATH=true
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
