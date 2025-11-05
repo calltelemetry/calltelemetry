@@ -34,6 +34,25 @@ GRAFANA_ASSET_PATHS=(
   "grafana/dashboards/caddy-overview.json"
 )
 
+ensure_grafana_permissions() {
+  local dirs=("$@")
+
+  for dir in "${dirs[@]}"; do
+    [ -n "$dir" ] || continue
+    [ -d "$dir" ] || continue
+
+    if sudo chown -R 472:472 "$dir" 2>/dev/null; then
+      sudo chmod -R u+rwX,go+rX "$dir" 2>/dev/null
+      echo "Grafana directory permissions normalized for $dir (uid/gid 472)."
+    elif sudo chmod -R a+rX "$dir" 2>/dev/null; then
+      echo "Grafana directory permissions relaxed for $dir (world-readable fallback)."
+    else
+      echo "⚠️  Unable to adjust permissions for $dir automatically."
+      echo "   Please run: sudo chown -R 472:472 '$dir' && sudo chmod -R u+rwX,go+rX '$dir'"
+    fi
+  done
+}
+
 # Ensure necessary directories exist and have correct permissions
 mkdir -p "$BACKUP_DIR"
 mkdir -p "$BACKUP_FOLDER_PATH"
@@ -234,6 +253,8 @@ download_grafana_assets() {
       rm -f "$tmp_file"
     fi
   done
+
+  ensure_grafana_permissions "$provisioning_mount" "$dashboards_mount"
 }
 
 # Function to check RAM availability

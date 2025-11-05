@@ -1,10 +1,24 @@
 # Caddyfile
-{
-    default_sni demo.calltelemetry.internal  # Replace with your default domain
-}
-
 :443 {
     reverse_proxy /api* web:4000
+    handle /grafana {
+        redir /grafana/ 308
+    }
+    route /grafana* {
+        reverse_proxy grafana:3000 {
+            header_up X-Forwarded-Prefix /grafana
+            header_up X-Forwarded-Proto https
+        }
+    }
+    handle /prometheus {
+        redir /prometheus/ 308
+    }
+    route /prometheus* {
+        reverse_proxy prometheus:9090 {
+            header_up X-Forwarded-Prefix /prometheus
+            header_up X-Forwarded-Proto https
+        }
+    }
     reverse_proxy /* vue-web:80
 
     # Add cache control headers
