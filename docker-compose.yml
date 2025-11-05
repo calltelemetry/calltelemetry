@@ -92,6 +92,9 @@ services:
       - LOG_PATH=/var/log
       - ERL_CRASH_DUMP=/tmp/crash-dumps/erl_crash.dump
       - ERL_CRASH_DUMP_NICE=1
+      - PROM_EX_UPLOAD_DASHBOARDS=${PROM_EX_UPLOAD_DASHBOARDS:-false}
+      - GRAFANA_HOST=${GRAFANA_HOST_INTERNAL:-http://grafana:3000/grafana}
+      - GRAFANA_TOKEN=${GRAFANA_TOKEN:-secret-token}
     tmpfs:
       - /var/log:rw,mode=0555,size=5000m
     networks:

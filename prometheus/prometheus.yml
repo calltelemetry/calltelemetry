@@ -4,18 +4,23 @@ global:
 
 scrape_configs:
   - job_name: prometheus
+    metrics_path: /prometheus/metrics
     static_configs:
       - targets: ['localhost:9090']
-
-  - job_name: caddy
-    metrics_path: /metrics
-    static_configs:
-      - targets: ['caddy:2019']
 
   - job_name: cdrcisco-web
     metrics_path: /metrics
     static_configs:
       - targets: ['web:4080']
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'curri_.*'
+        action: keep
+
+  - job_name: cdrcisco-api
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['web:4000']
 
   # Enable additional scrape targets by appending to static_configs or defining
   # new jobs. For example, uncomment the following block once the web service
