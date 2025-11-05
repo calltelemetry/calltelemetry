@@ -550,7 +550,7 @@ update() {
   wget "$nats_conf_url" -O "$nats_conf_file"
 
   # Download the Caddyfile
-  CADDYFILE_URL="https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/ova/Caddyfile"
+  CADDYFILE_URL="https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/ova/versions/caddy/Caddyfile"
   caddyfile_tmp=$(mktemp)
   wget -q "$CADDYFILE_URL" -O "$caddyfile_tmp"
 
