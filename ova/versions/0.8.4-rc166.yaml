@@ -1,0 +1,165 @@
+version: "3.8"
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - ./certs:/certs:ro
+    networks:
+      - ct
+
+  vue-web:
+    image: "calltelemetry/vue:0.8.4-rc166"
+    restart: "always"
+    expose:
+      - "80"
+    networks:
+      - ct
+
+  traceroute:
+    image: "calltelemetry/traceroute:0.8.4-rc147"
+    user: root
+    expose:
+      - "4100"
+    networks:
+      - ct
+
+  db:
+    image: "bitnamilegacy/postgresql:14"
+    user: root
+    restart: "always"
+    environment:
+      - POSTGRES_USER=calltelemetry
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=calltelemetry_prod
+    expose:
+      - "5432"
+    volumes:
+      - ./postgres-data:/bitnami/postgresql
+    networks:
+      - ct
+
+  web:
+    image: "calltelemetry/web:0.8.4-rc166"
+    restart: "always"
+    user: root
+    expose:
+      - 4000
+      - 4080
+    ports:
+      - "80:4080"
+      - "22:3022"
+    environment:
+      - DB_USER=calltelemetry
+      - DB_PASSWORD=postgres
+      - DB_HOSTNAME=db
+      - DB_NAME=calltelemetry_prod
+      - DB_PORT=5432
+      - EXTERNAL_IP=$DEFAULT_IPV4
+      - LOGGING_LEVEL=warning
+      - ADMIN_NODE=TRUE
+      - WORKER_NODE=TRUE
+      - CERT_KEY=/home/app/cert/appliance_key.pem
+      - CERT_PUBLIC=/home/app/cert/appliance.crt
+      # can be HACKNEY, IBROWSE, MINT, GUN or HTTPC.
+      - HTTP_ADAPTER=HACKNEY
+      - LOG_PATH=/var/log
+      - ERL_CRASH_DUMP=/tmp/crash-dumps/erl_crash.dump
+      - ERL_CRASH_DUMP_NICE=1
+      - PROM_EX_UPLOAD_DASHBOARDS=${PROM_EX_UPLOAD_DASHBOARDS:-false}
+      - GRAFANA_HOST=${GRAFANA_HOST_INTERNAL:-http://grafana:3000/grafana}
+      - GRAFANA_TOKEN=${GRAFANA_TOKEN:-secret-token}
+    tmpfs:
+      - /var/log:rw,mode=0555,size=5000m
+    networks:
+      - ct
+    volumes:
+      - ./certs:/home/app/cert:rw
+      - ./crash-dumps:/tmp/crash-dumps:rw
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "7" # Keeps 7 days of logs
+        compress: "true" # Compresses rotated files
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:4080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  nats:
+    image: "nats:2.11"
+    command: "-c /etc/nats/nats.conf"
+    volumes:
+      - ./nats.conf:/etc/nats/nats.conf
+    expose:
+      - "4222"
+    networks:
+      - ct
+
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    restart: "always"
+    user: root
+    expose:
+      - "9090"
+    ports:
+      - "9090:9090"
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --web.console.libraries=/usr/share/prometheus/console_libraries
+      - --web.console.templates=/usr/share/prometheus/consoles
+      - --web.external-url=/prometheus
+      - --web.route-prefix=/prometheus
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks:
+      - ct
+
+  grafana:
+    image: grafana/grafana:12.2.1
+    restart: "always"
+    user: "472"
+    depends_on:
+      - prometheus
+    expose:
+      - "3000"
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GF_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GF_ADMIN_PASSWORD:-calltelemetry}
+      - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/calltelemetry-overview.json
+      - GF_SERVER_ROOT_URL=/grafana
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    networks:
+      - ct
+
+networks:
+  ct:
+    # enable_ipv6: true
+
+volumes:
+  certs:
+    driver: local
+  crash-dumps:
+    driver: local
+  traefik-logs:
+    driver: local
+  prometheus-data:
+    driver: local
+  grafana-data:
+    driver: local
