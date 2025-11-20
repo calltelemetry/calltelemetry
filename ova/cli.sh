@@ -442,7 +442,7 @@ update() {
   # Check Docker version and update if needed
   echo "Checking Docker version..."
   docker_version=$(docker --version 2>/dev/null | grep -o '[0-9]\+\.[0-9]\+' | head -1 | cut -d. -f1)
-  
+
   if [ -z "$docker_version" ]; then
     echo "⚠️  WARNING: Docker not found or not responding"
   elif [ "$docker_version" -lt 26 ]; then
@@ -450,8 +450,31 @@ update() {
     echo "Docker is outdated, updating Docker packages..."
     echo "Running Docker package updates..."
     sudo dnf update -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-    echo "Docker package update completed. Continuing with upgrade..."
+    echo "Docker package update completed."
     echo ""
+
+    # Verify Docker version after update
+    echo "Verifying Docker version after update..."
+    updated_docker_version=$(docker --version 2>/dev/null | grep -o '[0-9]\+\.[0-9]\+' | head -1 | cut -d. -f1)
+
+    if [ -z "$updated_docker_version" ]; then
+      echo "❌ ERROR: Docker update failed - Docker is not responding"
+      echo "   Docker 26+ is required to continue"
+      echo "   Please manually update Docker and try again"
+      return 1
+    elif [ "$updated_docker_version" -lt 26 ]; then
+      echo "❌ ERROR: Docker update failed - Docker is still on version $updated_docker_version"
+      echo "   Docker 26+ is required to continue"
+      echo "   Current version: $updated_docker_version"
+      echo "   Required version: 26 or higher"
+      echo ""
+      echo "   Please manually update Docker to version 26+ and try again"
+      echo "   You may need to check your repository configuration or available packages"
+      return 1
+    else
+      echo "✅ Docker successfully updated to version $updated_docker_version"
+      echo ""
+    fi
   else
     echo "✅ Docker version $docker_version is supported"
   fi
@@ -1099,7 +1122,7 @@ show_web_logs() {
   echo "=============================="
 
   local recent_errors
-  recent_errors=$(printf '%s\n' "$logs" | grep -iE "error|exception" 2>/dev/null | tail -n 5 || true)
+  recent_errors=$(printf '%s\n' "$logs" | grep -iE "error|exception" 2>/dev/null | grep -v "metrics" | tail -n 5 || true)
 
   local pending_migrations
   pending_migrations=$(printf '%s\n' "$logs" | awk '/Pending migrations \(will run now\):/ {pending=1; next} pending && /^  - / {gsub(/^  - /, ""); print} pending && !/^  - / {pending=0}' || true)
@@ -1109,17 +1132,17 @@ show_web_logs() {
     while IFS= read -r line; do
       [ -n "$line" ] && printf '  • %s\n' "$line"
     done <<< "$pending_migrations"
-    echo "ℹ️  Some migrations can take 1–2 hours on large datasets. Watch CPU/memory (top) and this list for progress; many migrations emit no logs while they run."
+    echo "Some migrations can take 1–2 hours on large datasets. Watch CPU/memory (top) and this list for progress; many migrations emit no logs while they run."
     echo ""
   fi
 
   if [ -n "$recent_errors" ]; then
-    echo "⚠️  Detected recent error entries in web logs:"
+    echo "Detected recent error entries in web logs:"
     echo "$recent_errors"
     echo ""
     return 1
   else
-    echo "ℹ️  No errors detected in the last 200 web log lines." 
+    echo "No errors detected in the last 200 web log lines." 
     echo ""
     return 0
   fi
