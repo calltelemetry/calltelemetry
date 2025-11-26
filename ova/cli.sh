@@ -999,8 +999,9 @@ wait_for_services() {
   fi
 
   # Check for startup issues in logs
-  local scheduler_errors=$(docker-compose logs --tail 100 web 2>&1 | grep -c "not started: invalid task function" || echo "0")
-  if [ "$scheduler_errors" -gt 0 ]; then
+  local scheduler_errors=$(docker-compose logs --tail 100 web 2>&1 | grep -c "not started: invalid task function" 2>/dev/null | tail -1 || echo "0")
+  scheduler_errors=${scheduler_errors:-0}
+  if [ "$scheduler_errors" -gt 0 ] 2>/dev/null; then
     echo "  ⚠️  $scheduler_errors scheduler jobs failed (non-fatal)"
   fi
 
