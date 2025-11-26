@@ -93,7 +93,13 @@ show_help() {
   echo
   echo "Maintenance Commands:"
   echo "  selfupdate          Update CLI script to latest version"
+  echo "  docker              Show Docker status (containers, images, networks)"
+  echo "  docker network      Show detailed network configuration"
   echo "  docker prune        Remove unused Docker resources"
+  echo
+  echo "Diagnostic Commands:"
+  echo "  diag tesla <ipv4|ipv6> <url>    Test TCP + HTTP connectivity"
+  echo "  diag raw_tcp <ipv4|ipv6> <url>  Test raw TCP socket only"
   echo
   echo "Advanced Commands:"
   echo "  build-appliance     Download and execute the prep script"
@@ -2554,8 +2560,275 @@ case "$1" in
       prune)
         purge_docker
         ;;
+      network)
+        echo "Running: docker network inspect \$(docker network ls -q -f name=ct)"
+        echo ""
+        docker network inspect $(docker network ls -q -f name=ct) 2>/dev/null || echo "Network 'ct' not found"
+        ;;
+      ""|status)
+        echo "=== Docker Status ==="
+        echo ""
+        echo "Containers:"
+        docker-compose ps
+        echo ""
+        echo "Images:"
+        docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}" | grep -E "calltelemetry|REPOSITORY"
+        echo ""
+        echo "Networks:"
+        docker network ls --filter name=ct --format "table {{.Name}}\t{{.Driver}}\t{{.Scope}}"
+        echo ""
+        echo "Commands: cli.sh docker <prune|network|status>"
+        ;;
       *)
-        echo "Usage: cli.sh docker prune"
+        echo "Unknown docker command: $2"
+        echo ""
+        echo "Usage: cli.sh docker <command>"
+        echo ""
+        echo "Commands:"
+        echo "  status    Show Docker status (default)"
+        echo "  network   Show detailed network configuration"
+        echo "  prune     Remove unused Docker resources"
+        ;;
+    esac
+    ;;
+
+  # Diagnostic commands
+  diag)
+    case "$2" in
+      tesla)
+        local ip_mode="$3"
+        local url="$4"
+
+        if [ -z "$ip_mode" ] || [ -z "$url" ]; then
+          echo "Usage: cli.sh diag tesla <ipv4|ipv6> <url>"
+          echo ""
+          echo "Test TCP and HTTP connectivity to an endpoint using Tesla HTTP client."
+          echo ""
+          echo "Options:"
+          echo "  ipv4    Test IPv4 connection"
+          echo "  ipv6    Test IPv6 connection"
+          echo ""
+          echo "Examples:"
+          echo "  cli.sh diag tesla ipv6 http://[dead:beef:cafe:1::11]:8090"
+          echo "  cli.sh diag tesla ipv4 http://192.168.1.100:8090"
+          return 1
+        fi
+
+        if [[ ! "$ip_mode" =~ ^(ipv4|ipv6)$ ]]; then
+          echo "Error: Invalid mode '$ip_mode'. Use ipv4 or ipv6."
+          return 1
+        fi
+
+        # Parse URL to extract host and port
+        local host port
+        if [[ "$url" =~ http://\[([^\]]+)\]:([0-9]+) ]]; then
+          # IPv6 format: http://[host]:port
+          host="${BASH_REMATCH[1]}"
+          port="${BASH_REMATCH[2]}"
+        elif [[ "$url" =~ http://([^:/]+):([0-9]+) ]]; then
+          # IPv4/hostname format: http://host:port
+          host="${BASH_REMATCH[1]}"
+          port="${BASH_REMATCH[2]}"
+        else
+          echo "Error: Could not parse URL. Expected format:"
+          echo "  http://[ipv6-address]:port"
+          echo "  http://ipv4-address:port"
+          return 1
+        fi
+
+        echo "=== Tesla Connectivity Test ==="
+        echo ""
+        echo "URL:  $url"
+        echo "Host: $host"
+        echo "Port: $port"
+        echo "Mode: $ip_mode"
+        echo ""
+
+        # Get current image tag
+        local image_tag=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep "calltelemetry/web" | head -1)
+        if [ -z "$image_tag" ]; then
+          image_tag="calltelemetry/web:latest"
+        fi
+
+        echo "Using image: $image_tag"
+        echo ""
+
+        # Build Elixir code based on mode
+        local elixir_code="Application.ensure_all_started(:hackney)"
+
+        if [ "$ip_mode" = "ipv4" ]; then
+          elixir_code="$elixir_code
+
+IO.puts(\"=== IPv4 TCP Connection Test ===\")
+case :gen_tcp.connect(~c\"$host\", $port, [:inet], 5000) do
+  {:ok, sock} ->
+    :gen_tcp.close(sock)
+    IO.puts(\"TCP CONNECT (IPv4): SUCCESS\")
+  {:error, e} ->
+    IO.puts(\"TCP CONNECT (IPv4): FAILED - #{inspect(e)}\")
+end
+
+IO.puts(\"\")
+IO.puts(\"=== IPv4 HTTP POST Test ===\")
+case Tesla.post(\"http://$host:$port/cisco_xcc\", \"\") do
+  {:ok, resp} -> IO.puts(\"HTTP POST (IPv4): SUCCESS - status #{resp.status}\")
+  {:error, e} -> IO.puts(\"HTTP POST (IPv4): FAILED - #{inspect(e)}\")
+end
+"
+        elif [ "$ip_mode" = "ipv6" ]; then
+          # Convert IPv6 to Erlang tuple format
+          local ipv6_tuple=$(echo "$host" | python3 -c "
+import sys
+import ipaddress
+addr = ipaddress.ip_address(sys.stdin.read().strip())
+parts = [hex(int(x, 16)) for x in addr.exploded.split(':')]
+print('{' + ','.join(parts) + '}')
+" 2>/dev/null || echo "")
+
+          if [ -z "$ipv6_tuple" ]; then
+            echo "Error: Could not parse IPv6 address. Ensure python3 is installed."
+            return 1
+          fi
+
+          elixir_code="$elixir_code
+
+IO.puts(\"=== IPv6 TCP Connection Test ===\")
+case :gen_tcp.connect($ipv6_tuple, $port, [:inet6], 5000) do
+  {:ok, sock} ->
+    :gen_tcp.close(sock)
+    IO.puts(\"TCP CONNECT (IPv6): SUCCESS\")
+  {:error, e} ->
+    IO.puts(\"TCP CONNECT (IPv6): FAILED - #{inspect(e)}\")
+end
+
+IO.puts(\"\")
+IO.puts(\"=== IPv6 HTTP POST Test ===\")
+case Tesla.post(\"http://[$host]:$port/cisco_xcc\", \"\") do
+  {:ok, resp} -> IO.puts(\"HTTP POST (IPv6): SUCCESS - status #{resp.status}\")
+  {:error, e} -> IO.puts(\"HTTP POST (IPv6): FAILED - #{inspect(e)}\")
+end
+"
+        fi
+
+        echo "Running connectivity test..."
+        echo ""
+        docker run --rm --network host "$image_tag" /home/app/onprem/bin/onprem eval "$elixir_code"
+        ;;
+      raw_tcp)
+        local ip_mode="$3"
+        local url="$4"
+
+        if [ -z "$ip_mode" ] || [ -z "$url" ]; then
+          echo "Usage: cli.sh diag raw_tcp <ipv4|ipv6> <url>"
+          echo ""
+          echo "Test raw TCP socket connectivity to an endpoint."
+          echo ""
+          echo "Options:"
+          echo "  ipv4    Test IPv4 connection"
+          echo "  ipv6    Test IPv6 connection"
+          echo ""
+          echo "Examples:"
+          echo "  cli.sh diag raw_tcp ipv6 http://[dead:beef:cafe:1::11]:8090"
+          echo "  cli.sh diag raw_tcp ipv4 http://192.168.1.100:8090"
+          return 1
+        fi
+
+        if [[ ! "$ip_mode" =~ ^(ipv4|ipv6)$ ]]; then
+          echo "Error: Invalid mode '$ip_mode'. Use ipv4 or ipv6."
+          return 1
+        fi
+
+        # Parse URL to extract host and port
+        local host port
+        if [[ "$url" =~ http://\[([^\]]+)\]:([0-9]+) ]]; then
+          host="${BASH_REMATCH[1]}"
+          port="${BASH_REMATCH[2]}"
+        elif [[ "$url" =~ http://([^:/]+):([0-9]+) ]]; then
+          host="${BASH_REMATCH[1]}"
+          port="${BASH_REMATCH[2]}"
+        else
+          echo "Error: Could not parse URL. Expected format:"
+          echo "  http://[ipv6-address]:port"
+          echo "  http://ipv4-address:port"
+          return 1
+        fi
+
+        echo "=== Raw TCP Connectivity Test ==="
+        echo ""
+        echo "URL:  $url"
+        echo "Host: $host"
+        echo "Port: $port"
+        echo "Mode: $ip_mode"
+        echo ""
+
+        # Get current image tag
+        local image_tag=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep "calltelemetry/web" | head -1)
+        if [ -z "$image_tag" ]; then
+          image_tag="calltelemetry/web:latest"
+        fi
+
+        echo "Using image: $image_tag"
+        echo ""
+
+        local elixir_code=""
+
+        if [ "$ip_mode" = "ipv4" ]; then
+          elixir_code="
+IO.puts(\"=== IPv4 TCP Connection Test ===\")
+case :gen_tcp.connect(~c\"$host\", $port, [:inet], 5000) do
+  {:ok, sock} ->
+    :gen_tcp.close(sock)
+    IO.puts(\"TCP CONNECT (IPv4): SUCCESS\")
+  {:error, e} ->
+    IO.puts(\"TCP CONNECT (IPv4): FAILED - #{inspect(e)}\")
+end
+"
+        elif [ "$ip_mode" = "ipv6" ]; then
+          local ipv6_tuple=$(echo "$host" | python3 -c "
+import sys
+import ipaddress
+addr = ipaddress.ip_address(sys.stdin.read().strip())
+parts = [hex(int(x, 16)) for x in addr.exploded.split(':')]
+print('{' + ','.join(parts) + '}')
+" 2>/dev/null || echo "")
+
+          if [ -z "$ipv6_tuple" ]; then
+            echo "Error: Could not parse IPv6 address. Ensure python3 is installed."
+            return 1
+          fi
+
+          elixir_code="
+IO.puts(\"=== IPv6 TCP Connection Test ===\")
+case :gen_tcp.connect($ipv6_tuple, $port, [:inet6], 5000) do
+  {:ok, sock} ->
+    :gen_tcp.close(sock)
+    IO.puts(\"TCP CONNECT (IPv6): SUCCESS\")
+  {:error, e} ->
+    IO.puts(\"TCP CONNECT (IPv6): FAILED - #{inspect(e)}\")
+end
+"
+        fi
+
+        echo "Running connectivity test..."
+        echo ""
+        docker run --rm --network host "$image_tag" /home/app/onprem/bin/onprem eval "$elixir_code"
+        ;;
+      ""|help)
+        echo "Usage: cli.sh diag <command>"
+        echo ""
+        echo "Diagnostic commands:"
+        echo "  tesla <ipv4|ipv6> <url>    Test TCP + HTTP connectivity"
+        echo "  raw_tcp <ipv4|ipv6> <url>  Test raw TCP socket only"
+        echo ""
+        echo "Examples:"
+        echo "  cli.sh diag tesla ipv6 http://[dead:beef:cafe:1::11]:8090"
+        echo "  cli.sh diag tesla ipv4 http://192.168.1.100:8090"
+        echo "  cli.sh diag raw_tcp ipv6 http://[dead:beef:cafe:1::11]:8090"
+        echo "  cli.sh diag raw_tcp ipv4 http://192.168.1.100:8090"
+        ;;
+      *)
+        echo "Unknown diag command: $2"
+        echo "Run 'cli.sh diag' for available commands."
         ;;
     esac
     ;;
