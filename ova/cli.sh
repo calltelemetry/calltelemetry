@@ -22,7 +22,13 @@ POSTGRES_DATA_DIR="postgres-data"
 ORIGINAL_FILE="docker-compose.yml"
 TEMP_FILE="temp-docker-compose.yml"
 SCRIPT_URL="https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/ova/cli.sh"
-CURRENT_SCRIPT_PATH="$0"
+CLI_INSTALL_PATH="/home/calltelemetry/cli.sh"
+# Detect if running from a pipe (curl ... | sh) vs local file
+if [ -f "$0" ] && [ "$0" != "sh" ] && [ "$0" != "bash" ] && [ "$0" != "-bash" ]; then
+  CURRENT_SCRIPT_PATH="$0"
+else
+  CURRENT_SCRIPT_PATH="$CLI_INSTALL_PATH"
+fi
 PREP_SCRIPT_URL="https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/ova/prep.sh"
 PROMETHEUS_CONFIG_URL="https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/ova/versions/prometheus/prometheus.yml"
 GRAFANA_ASSETS_BASE_URL="https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/ova/versions"
@@ -112,26 +118,47 @@ show_help() {
 cli_update() {
   echo "Checking for script updates..."
   tmp_file=$(mktemp)
-  wget -q "$SCRIPT_URL" -O "$tmp_file"
 
-  if [ $? -eq 0 ]; then
-    if [ -f "$CURRENT_SCRIPT_PATH" ]; then
-      if ! diff "$tmp_file" "$CURRENT_SCRIPT_PATH" > /dev/null; then
-        echo "Update available for the CLI script. Updating now..."
-        cp "$tmp_file" "$CURRENT_SCRIPT_PATH"
-        chmod +x "$CURRENT_SCRIPT_PATH"
-        echo "CLI script updated."
-      else
-        echo "CLI script is up-to-date."
-      fi
-    else
-      echo "Current script path not found: $CURRENT_SCRIPT_PATH. Installing new script..."
-      cp "$tmp_file" "$CURRENT_SCRIPT_PATH"
-      chmod +x "$CURRENT_SCRIPT_PATH"
-      echo "CLI script installed."
+  # Download the latest script
+  if ! wget -q "$SCRIPT_URL" -O "$tmp_file"; then
+    echo "Failed to download CLI update. Please check your internet connection."
+    rm -f "$tmp_file"
+    return 1
+  fi
+
+  # Verify download succeeded and file has content
+  if [ ! -s "$tmp_file" ]; then
+    echo "Downloaded file is empty. Update failed."
+    rm -f "$tmp_file"
+    return 1
+  fi
+
+  # Ensure the target directory exists
+  target_dir=$(dirname "$CURRENT_SCRIPT_PATH")
+  if [ ! -d "$target_dir" ]; then
+    echo "Creating directory: $target_dir"
+    mkdir -p "$target_dir"
+  fi
+
+  # Check if update is needed
+  if [ -f "$CURRENT_SCRIPT_PATH" ]; then
+    if diff "$tmp_file" "$CURRENT_SCRIPT_PATH" > /dev/null 2>&1; then
+      echo "CLI script is up-to-date."
+      rm -f "$tmp_file"
+      return 0
     fi
+    echo "Update available for the CLI script. Updating now..."
   else
-    echo "Failed to check for updates. Please check your internet connection."
+    echo "Installing CLI script to: $CURRENT_SCRIPT_PATH"
+  fi
+
+  # Install/update the script
+  if cp "$tmp_file" "$CURRENT_SCRIPT_PATH" && chmod +x "$CURRENT_SCRIPT_PATH"; then
+    echo "CLI script updated: $CURRENT_SCRIPT_PATH"
+  else
+    echo "Failed to install CLI script to: $CURRENT_SCRIPT_PATH"
+    rm -f "$tmp_file"
+    return 1
   fi
 
   rm -f "$tmp_file"
