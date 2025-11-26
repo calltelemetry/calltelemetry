@@ -739,150 +739,172 @@ compact_system() {
 }
 
 # Function to wait for services to be ready
+# Flow: 1) Wait for containers 2) Wait for DB 3) Wait for migrations 4) Health check
 wait_for_services() {
-  echo "Waiting for services to start up..."
+  local max_wait=600
+  local poll_interval=5
+  local wait_time=0
+  local release_bin=$(get_release_binary)
+  local services=("db" "web" "caddy" "vue-web" "traceroute" "nats")
 
-  services=("caddy" "vue-web" "traceroute" "db" "web" "nats")
-  max_wait=300
+  echo ""
+  echo "Starting services..."
+  echo ""
+
+  # Phase 1: Wait for containers to be running
+  echo "Phase 1: Waiting for containers..."
+  while [ $wait_time -lt 120 ]; do
+    local all_running=true
+    local status_line=""
+
+    for service in "${services[@]}"; do
+      local container=$(docker-compose ps -q $service 2>/dev/null)
+      if [ -n "$container" ]; then
+        local status=$(docker inspect --format='{{.State.Status}}' $container 2>/dev/null)
+        if [ "$status" = "running" ]; then
+          status_line="$status_line ✓$service"
+        else
+          status_line="$status_line ⏳$service"
+          all_running=false
+        fi
+      else
+        status_line="$status_line ✗$service"
+        all_running=false
+      fi
+    done
+
+    printf "\r  Containers:%s" "$status_line"
+
+    if [ "$all_running" = true ]; then
+      echo ""
+      echo "  ✓ All containers running"
+      break
+    fi
+
+    sleep 3
+    wait_time=$((wait_time + 3))
+  done
+  echo ""
+
+  # Phase 2: Wait for database to accept connections
+  echo "Phase 2: Waiting for database..."
   wait_time=0
-  db_ready=false
-  migration_poll_interval=5
-  release_bin=$(get_release_binary)
-  # Map services to host-published ports. Use an empty port list for internal-only services
-  # so we rely on their Docker healthchecks instead of pointless host probes.
-  local port_map=$'caddy:443/tcp\nweb:4080/tcp,3022/tcp\ntraceroute:\nvue-web:'
+  while [ $wait_time -lt 120 ]; do
+    if docker-compose exec -T db pg_isready -U calltelemetry -d calltelemetry_prod >/dev/null 2>&1; then
+      echo "  ✓ Database accepting connections"
+      break
+    fi
+    printf "\r  Database: connecting... (%ds)" "$wait_time"
+    sleep 3
+    wait_time=$((wait_time + 3))
+  done
+  echo ""
+
+  # Phase 3: Wait for migrations to complete
+  echo "Phase 3: Waiting for migrations..."
+  wait_time=0
+  local last_migration=""
+  local migrations_complete=false
 
   while [ $wait_time -lt $max_wait ]; do
-    all_ready=true
+    # Try RPC first for accurate count
+    local migration_raw=$(run_migration_status_rpc "$release_bin" 2>/dev/null)
+    local pending_count=$(printf '%s\n' "$migration_raw" | awk -F= '/::pending_count=/{print $2; exit}')
+    local applied_count=$(printf '%s\n' "$migration_raw" | grep -oP 'Applied migrations: \K[0-9]+' || echo "")
+    local total_count=$(printf '%s\n' "$migration_raw" | grep -oP 'Applied migrations: [0-9]+/\K[0-9]+' || echo "")
 
-    echo "Checking service status (${wait_time}s elapsed)..."
+    # If RPC fails, fall back to SQL
+    if [ -z "$pending_count" ] || [ "$pending_count" = "error" ]; then
+      # Get counts from database directly
+      applied_count=$(docker-compose exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -t -c \
+        "SELECT COUNT(*) FROM schema_migrations;" 2>/dev/null | tr -d ' ')
+      last_migration=$(docker-compose exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -t -c \
+        "SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1;" 2>/dev/null | tr -d ' ')
 
-    web_running=false
-    for service in "${services[@]}"; do
-      container=$(docker-compose ps -q $service 2>/dev/null)
-      if [ -n "$container" ]; then
-        status=$(docker inspect --format='{{.State.Status}}' $container 2>/dev/null)
-        if [ "$status" = "running" ]; then
-          echo "  ✓ $service: running"
-          if [ "$service" = "web" ]; then
-            web_running=true
-          fi
-        else
-          echo "  ✗ $service: $status"
-          all_ready=false
-        fi
+      # Check logs for migration completion
+      if docker-compose logs --tail 50 web 2>&1 | grep -q "All migrations completed successfully"; then
+        migrations_complete=true
+        pending_count=0
       else
-        echo "  ✗ $service: container not found"
-        all_ready=false
+        # Check if app is still starting
+        if docker-compose logs --tail 20 web 2>&1 | grep -qE "Running migrations|Pending migrations"; then
+          pending_count="running"
+        else
+          pending_count="checking"
+        fi
       fi
-    done
+    fi
 
-    echo "Checking service readiness..."
-
-    if docker-compose exec -T db pg_isready -U calltelemetry -d calltelemetry_prod >/dev/null 2>&1; then
-      echo "  ✓ Database: accepting connections"
-      db_ready=true
+    # Display status
+    if [[ "$pending_count" =~ ^[0-9]+$ ]]; then
+      if [ "$pending_count" -eq 0 ]; then
+        echo "  ✓ Migrations complete ($applied_count/$total_count)"
+        migrations_complete=true
+        break
+      else
+        printf "\r  Migrations: %s/%s applied, %s pending...    " "$applied_count" "$total_count" "$pending_count"
+      fi
+    elif [ "$pending_count" = "running" ]; then
+      printf "\r  Migrations: %s applied, running... (latest: %s)    " "${applied_count:-?}" "${last_migration:-?}"
     else
-      echo "  ⏳ Database: not ready (may be rebuilding indexes or running migrations)"
-      all_ready=false
-      db_ready=false
+      printf "\r  Migrations: %s applied, waiting for status...    " "${applied_count:-?}"
     fi
 
-    pending_count="unknown"
-    if [ "$web_running" = true ] && [ "$db_ready" = true ] && [ $((wait_time % migration_poll_interval)) -eq 0 ]; then
-      echo ""
-      migration_raw=$(run_migration_status_rpc "$release_bin")
-      pending_count=$(printf '%s\n' "$migration_raw" | awk -F= '/::pending_count=/{print $2; exit}')
-      migration_display=$(printf '%s\n' "$migration_raw" | sed '/::pending_count=/d')
-      printf '%s\n' "$migration_display"
-
-      show_system_activity
-      if show_web_logs; then
-        web_log_status=0
-      else
-        web_log_status=1
-      fi
-
-      if [[ "$pending_count" =~ ^[0-9]+$ ]]; then
-        if [ "$pending_count" -gt 0 ]; then
-          echo "Migrations are running (pending: $pending_count). Updating again in ${migration_poll_interval}s..."
-          if [ "$web_log_status" -eq 0 ]; then
-            echo "ℹ️  No web errors detected. Migrations are still processing; monitor schema_migrations for progress."
-          else
-            echo "⚠️  Web log errors detected. Review the entries above before proceeding."
-          fi
-          all_ready=false
-        else
-          echo "Migrations are complete."
-        fi
-      elif [ "$pending_count" = "error" ]; then
-        echo "Unable to retrieve migration status via RPC; falling back to SQL snapshot."
-        print_sql_migration_snapshot "Database Migration Status"
-        if [ "$web_log_status" -eq 0 ]; then
-          echo "ℹ️  Migrations may still be running even though RPC is unavailable."
-        else
-          echo "⚠️  Errors found in recent web logs. Investigate the entries above."
-        fi
-        all_ready=false
-      else
-        echo "Migrations are running. Updating again in ${migration_poll_interval}s..."
-        print_sql_migration_snapshot "Database Migration Status"
-        if [ "$web_log_status" -eq 0 ]; then
-          echo "ℹ️  No web errors detected. Pending migrations should reduce over time."
-        else
-          echo "⚠️  Errors detected in web logs. Examine the entries above."
-        fi
-        all_ready=false
-      fi
-      echo ""
-    fi
-
-    echo "  ✓ Services: containers running (internal connectivity not validated)"
-
-    local port_health_ok=true
-    local entry
-    for entry in $port_map; do
-      local svc=${entry%%:*}
-      local ports_str=${entry#*:}
-      IFS=',' read -r -a port_array <<< "$ports_str"
-      report_service_health "$svc" "${port_array[@]}" || port_health_ok=false
-      unset port_array
-    done
-    unset IFS
-    if [ "$port_health_ok" = false ]; then
-      all_ready=false
-    fi
-
-    if [ "$all_ready" = true ]; then
-      echo ""
-      echo "✅ All services are running and ready!"
-
-      if [ "$db_ready" = true ] && [ "$web_running" = true ]; then
-        echo ""
-        echo "=== Final Migration Status ==="
-        final_raw=$(run_migration_status_rpc "$release_bin")
-        final_display=$(printf '%s\n' "$final_raw" | sed '/::pending_count=/d')
-        printf '%s\n' "$final_display"
-
-        final_pending=$(printf '%s\n' "$final_raw" | awk -F= '/::pending_count=/{print $2; exit}')
-        if [ "$final_pending" = "error" ] || [ -z "$final_pending" ]; then
-          print_sql_migration_snapshot "Final Migration Status"
-        fi
-      elif [ "$db_ready" = true ]; then
-        print_sql_migration_snapshot "Final Migration Status"
-      fi
-
-      return 0
-    fi
-
-    sleep 5
-    wait_time=$((wait_time + 5))
+    sleep $poll_interval
+    wait_time=$((wait_time + poll_interval))
   done
 
-  echo "⚠️  Some services may still be starting up after ${max_wait}s"
-  echo "This is normal for database index rebuilds during major upgrades."
-  echo "Monitor progress with: docker-compose logs -f"
-  return 1
+  if [ "$migrations_complete" != true ]; then
+    echo ""
+    echo "  ⚠️  Migration status unclear after ${max_wait}s"
+    echo "  Check logs: docker-compose logs -f web"
+  fi
+  echo ""
+
+  # Phase 4: Health checks (only after migrations complete)
+  echo "Phase 4: Health checks..."
+
+  # Check web endpoint
+  local web_healthy=false
+  for i in {1..10}; do
+    if docker-compose exec -T web wget -q --spider http://127.0.0.1:4080/healthz 2>/dev/null; then
+      web_healthy=true
+      break
+    fi
+    sleep 2
+  done
+
+  if [ "$web_healthy" = true ]; then
+    echo "  ✓ Web application healthy"
+  else
+    echo "  ⚠️  Web health check pending"
+  fi
+
+  # Check for startup issues in logs
+  local scheduler_errors=$(docker-compose logs --tail 100 web 2>&1 | grep -c "not started: invalid task function" || echo "0")
+  if [ "$scheduler_errors" -gt 0 ]; then
+    echo "  ⚠️  $scheduler_errors scheduler jobs failed (non-fatal)"
+  fi
+
+  # RPC check
+  local rpc_ok=$(docker-compose exec -T web "$release_bin" rpc 'IO.puts("ok")' 2>&1)
+  if [[ "$rpc_ok" == *"ok"* ]]; then
+    echo "  ✓ Application RPC responding"
+  else
+    echo "  ⚠️  Application RPC not ready"
+  fi
+
+  echo ""
+  show_system_activity
+  echo ""
+
+  if [ "$migrations_complete" = true ] && [ "$web_healthy" = true ]; then
+    echo "✅ Startup complete!"
+    return 0
+  else
+    echo "⚠️  Startup complete with warnings. Run 'cli.sh app_status' for details."
+    return 0
+  fi
 }
 
 # Function to purge unused Docker resources
