@@ -86,7 +86,11 @@ show_help() {
   echo "                      Requires table to have an 'inserted_at' timestamp column."
   echo "  migration_run       Execute pending database migrations."
   echo "  migration_rollback [steps]  Rollback database migrations (default: 1 step)."
-  echo "  set_logging level   Set the logging level (debug, info, warning, error)."
+  echo "  logging [level]     Show or set logging level (debug, info, warning, error)."
+  echo "                      No argument shows current level. Restarts services on change."
+  echo "  ipv6 <enable|disable> Enable or disable IPv6 support and restart services."
+  echo "                      enable: Uses DEFAULT_IPV6 for EXTERNAL_IP, enables IPv6 in Docker network."
+  echo "                      disable: Uses DEFAULT_IPV4 for EXTERNAL_IP (default)."
   echo "  cli_update          Update the CLI script to the latest version from the repository."
   echo "  build-appliance     Download and execute the prep script to build the appliance."
   echo "  prep-cluster-node   Prepare the cluster node with necessary tools."
@@ -347,6 +351,71 @@ configure_ipv6() {
     # Ensure EXTERNAL_IP uses DEFAULT_IPV4
     sed -i 's/EXTERNAL_IP=\$DEFAULT_IPV6/EXTERNAL_IP=\$DEFAULT_IPV4/' "$compose_file"
   fi
+}
+
+# Function to get current IPv6 status
+get_ipv6_status() {
+  if [ ! -f "$ORIGINAL_FILE" ]; then
+    echo "unknown"
+    return
+  fi
+
+  if grep -q 'EXTERNAL_IP=\$DEFAULT_IPV6' "$ORIGINAL_FILE"; then
+    echo "enabled"
+  else
+    echo "disabled"
+  fi
+}
+
+# Function to toggle IPv6 on/off
+ipv6_toggle() {
+  local action="$1"
+
+  if [ -z "$action" ]; then
+    # Show current status
+    local current_status=$(get_ipv6_status)
+    echo "IPv6 Status: $current_status"
+    echo ""
+    echo "Usage: cli.sh ipv6 <enable|disable>"
+    return 0
+  fi
+
+  case "$action" in
+    enable)
+      echo "Enabling IPv6..."
+      configure_ipv6 "$ORIGINAL_FILE" true
+      echo ""
+      echo "Restarting Docker Compose service..."
+      systemctl restart docker-compose-app.service
+      echo "Docker Compose service restarted."
+      echo ""
+      wait_for_services
+      ;;
+    disable)
+      echo "Disabling IPv6..."
+      configure_ipv6 "$ORIGINAL_FILE" false
+      echo ""
+      echo "Restarting Docker Compose service..."
+      systemctl restart docker-compose-app.service
+      echo "Docker Compose service restarted."
+      echo ""
+      wait_for_services
+      ;;
+    status)
+      local current_status=$(get_ipv6_status)
+      echo "IPv6 Status: $current_status"
+      if [ "$current_status" = "enabled" ]; then
+        echo "  EXTERNAL_IP is set to \$DEFAULT_IPV6"
+      else
+        echo "  EXTERNAL_IP is set to \$DEFAULT_IPV4"
+      fi
+      ;;
+    *)
+      echo "Error: Invalid action '$action'"
+      echo "Usage: cli.sh ipv6 <enable|disable|status>"
+      return 1
+      ;;
+  esac
 }
 
 # Function to check if version is 0.8.4 or higher
@@ -2054,20 +2123,63 @@ app_status() {
   echo ""
 }
 
-# Function to set the logging level in docker-compose.yml
-set_logging() {
-  if [[ -z "$1" || ! "$1" =~ ^(debug|info|warning|error)$ ]]; then
-    echo "Error: Invalid logging level. Please use 'debug', 'info', 'warning', or 'error'."
-    return 1
+# Function to get current logging level
+get_logging_level() {
+  if [ ! -f "$ORIGINAL_FILE" ]; then
+    echo "unknown"
+    return
   fi
 
-  new_level=$1
-  sed -i -E "s/^(.*LOGGING_LEVEL=).*$/\1$new_level/" "$ORIGINAL_FILE"
-  echo "Logging level set to $new_level in $ORIGINAL_FILE."
+  local level=$(grep -oP 'LOGGING_LEVEL=\K[a-z]+' "$ORIGINAL_FILE" 2>/dev/null || \
+                grep 'LOGGING_LEVEL=' "$ORIGINAL_FILE" | sed 's/.*LOGGING_LEVEL=//' | tr -d ' "')
+  echo "${level:-warning}"
+}
 
-  echo "Restarting Docker Compose service..."
-  systemctl restart docker-compose-app.service
-  echo "Docker Compose service restarted."
+# Function to toggle/show logging level
+logging_toggle() {
+  local level="$1"
+
+  if [ -z "$level" ]; then
+    # Show current status
+    local current_level=$(get_logging_level)
+    echo "Logging Level: $current_level"
+    echo ""
+    echo "Available levels: debug, info, warning, error"
+    echo "Usage: cli.sh logging <level>"
+    return 0
+  fi
+
+  case "$level" in
+    debug|info|warning|error)
+      local current_level=$(get_logging_level)
+      echo "Changing logging level: $current_level -> $level"
+      sed -i -E "s/^(.*LOGGING_LEVEL=).*$/\1$level/" "$ORIGINAL_FILE"
+      echo "Logging level set to $level"
+      echo ""
+      echo "Restarting Docker Compose service..."
+      systemctl restart docker-compose-app.service
+      echo "Docker Compose service restarted."
+      echo ""
+      wait_for_services
+      ;;
+    status)
+      local current_level=$(get_logging_level)
+      echo "Logging Level: $current_level"
+      echo ""
+      echo "Available levels:"
+      echo "  debug   - Verbose debugging information"
+      echo "  info    - General information messages"
+      echo "  warning - Warning messages only (default)"
+      echo "  error   - Error messages only"
+      ;;
+    *)
+      echo "Error: Invalid logging level '$level'"
+      echo ""
+      echo "Available levels: debug, info, warning, error"
+      echo "Usage: cli.sh logging <level>"
+      return 1
+      ;;
+  esac
 }
 
 # Function to build the appliance by fetching and executing the prep script
@@ -2195,8 +2307,11 @@ case "$1" in
   migration_rollback)
     migration_rollback "$2"
     ;;
-  set_logging)
-    set_logging "$2"
+  logging)
+    logging_toggle "$2"
+    ;;
+  ipv6)
+    ipv6_toggle "$2"
     ;;
   cli_update)
     cli_update
