@@ -59,42 +59,47 @@ mkdir -p "$BACKUP_FOLDER_PATH"
 
 # Function to display help
 show_help() {
-  echo "Usage: script_name.sh [option] [parameter]"
+  echo "Usage: cli.sh <command> [options]"
   echo
-  echo "Options:"
-  echo "  --help              Show this help message and exit."
-  echo "  update [version] [--force-upgrade] [--no-cleanup] [--ipv6]"
-  echo "                      Update the docker-compose configuration to the specified version and restart the service."
-  echo "                      If no version is specified, the default latest version will be used."
-  echo "                      --force-upgrade bypasses the 10% disk space requirement check."
-  echo "                      --no-cleanup skips automatic image pruning after update."
-  echo "                      --ipv6 enables IPv6 support (uses DEFAULT_IPV6 for EXTERNAL_IP)."
-  echo "  rollback            Roll back to the previous docker-compose configuration."
-  echo "  reset               Stop the application, remove data, and restart the application."
-  echo "  compact             Prune Docker system and compact the PostgreSQL database."
-  echo "  purge               Remove unused Docker images, containers, networks, and volumes."
-  echo "  backup              Create a database backup and retain only the last 5 backups."
-  echo "  restore             Restore the database from a specified backup file."
-  echo "  app_status (status) Show comprehensive application status and diagnostics."
-  echo "                      Includes container status, DB connectivity, RPC health,"
-  echo "                      migration status, scheduler errors, and system resources."
-  echo "  migration_status    Check migration status and generate report."
-  echo "  sql_migration_status Show the last 10 migrations directly from the database."
-  echo "  sql_table_size [table1,table2,...] Show table sizes with row counts and disk usage."
-  echo "                      If no tables specified, shows all tables."
-  echo "  sql_purge_table <table> <days> Purge records older than X days from a table."
-  echo "                      Requires table to have an 'inserted_at' timestamp column."
-  echo "  migration_run       Execute pending database migrations."
-  echo "  migration_rollback [steps]  Rollback database migrations (default: 1 step)."
-  echo "  logging [level]     Show or set logging level (debug, info, warning, error)."
-  echo "                      No argument shows current level. Restarts services on change."
-  echo "  ipv6 <enable|disable> Enable or disable IPv6 support and restart services."
-  echo "                      enable: Uses DEFAULT_IPV6 for EXTERNAL_IP, enables IPv6 in Docker network."
-  echo "                      disable: Uses DEFAULT_IPV4 for EXTERNAL_IP (default)."
-  echo "  cli_update          Update the CLI script to the latest version from the repository."
-  echo "  build-appliance     Download and execute the prep script to build the appliance."
-  echo "  prep-cluster-node   Prepare the cluster node with necessary tools."
-  echo "  reset_certs         Delete all files in the certs folder and generate new self-signed certificates."
+  echo "Application Commands:"
+  echo "  status              Show application status and diagnostics"
+  echo "  update [version]    Update to specified version (default: latest)"
+  echo "                      Options: --force-upgrade, --no-cleanup, --ipv6"
+  echo "  rollback            Roll back to previous docker-compose configuration"
+  echo "  reset               Stop application, remove data, and restart"
+  echo
+  echo "Database Commands:"
+  echo "  db                  Show database status (default)"
+  echo "  db backup           Create a database backup"
+  echo "  db restore <file>   Restore from a backup file"
+  echo "  db list             List available backups"
+  echo "  db compact          Vacuum and compact the database"
+  echo "  db tables [name]    Show table sizes"
+  echo "  db purge <tbl> <d>  Purge records older than <d> days from table"
+  echo "  db size             Show database size"
+  echo
+  echo "Migration Commands:"
+  echo "  migrate             Show migration status (default)"
+  echo "  migrate run         Run pending migrations"
+  echo "  migrate rollback [n] Rollback n migrations (default: 1)"
+  echo "  migrate history     Show last 10 migrations from database"
+  echo "  migrate watch       Watch migration progress continuously"
+  echo
+  echo "Configuration Commands:"
+  echo "  logging [level]     Show or set logging level (debug/info/warning/error)"
+  echo "  ipv6 [enable|disable] Show or toggle IPv6 support"
+  echo "  certs               Show certificate status and expiry"
+  echo "  certs reset         Delete and regenerate self-signed certificates"
+  echo
+  echo "Maintenance Commands:"
+  echo "  selfupdate          Update CLI script to latest version"
+  echo "  docker prune        Remove unused Docker resources"
+  echo
+  echo "Advanced Commands:"
+  echo "  build-appliance     Download and execute the prep script"
+  echo "  prep-cluster-node   Prepare cluster node with necessary tools"
+  echo
+  echo "Use 'cli.sh <command> --help' for more information on a command."
 }
 
 # Function to update the CLI script
@@ -1068,6 +1073,97 @@ restore() {
   echo "Database restored from $backup_file."
 }
 
+# Function to list available backups
+list_backups() {
+  echo "Available backups in $BACKUP_FOLDER_PATH:"
+  echo ""
+  if [ -d "$BACKUP_FOLDER_PATH" ] && [ "$(ls -A $BACKUP_FOLDER_PATH/*.sql 2>/dev/null)" ]; then
+    ls -lh "$BACKUP_FOLDER_PATH"/*.sql 2>/dev/null | awk '{print "  " $9 " (" $5 ")"}'
+  else
+    echo "  No backups found"
+  fi
+}
+
+# Consolidated database command
+db_cmd() {
+  local action="$1"
+  shift
+
+  case "$action" in
+    backup)
+      backup
+      ;;
+    restore)
+      if [ -z "$1" ]; then
+        echo "Error: No backup file specified."
+        echo ""
+        list_backups
+        echo ""
+        echo "Usage: cli.sh db restore <backup-file>"
+        return 1
+      fi
+      restore "$1"
+      ;;
+    list)
+      list_backups
+      ;;
+    compact)
+      compact_system
+      ;;
+    tables)
+      sql_table_size "$1"
+      ;;
+    purge)
+      if [ -z "$1" ] || [ -z "$2" ]; then
+        echo "Error: Missing required parameters"
+        echo "Usage: cli.sh db purge <table> <days>"
+        echo ""
+        echo "Example: cli.sh db purge cube_event_logs 30"
+        return 1
+      fi
+      sql_purge_table "$1" "$2"
+      ;;
+    size)
+      echo "=== Database Size ==="
+      docker-compose exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -c \
+        "SELECT pg_size_pretty(pg_database_size('calltelemetry_prod')) AS database_size;"
+      ;;
+    ""|status)
+      echo "=== Database Status ==="
+      if docker-compose exec -T db pg_isready -U calltelemetry -d calltelemetry_prod >/dev/null 2>&1; then
+        echo "✓ Database: accepting connections"
+      else
+        echo "✗ Database: not accepting connections"
+        return 1
+      fi
+      echo ""
+      echo "=== Database Size ==="
+      docker-compose exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -c \
+        "SELECT pg_size_pretty(pg_database_size('calltelemetry_prod')) AS database_size;"
+      echo ""
+      list_backups
+      echo ""
+      echo "Commands: cli.sh db <backup|restore|list|compact|tables|purge|size>"
+      ;;
+    *)
+      echo "Unknown db command: $action"
+      echo ""
+      echo "Usage: cli.sh db <command>"
+      echo ""
+      echo "Commands:"
+      echo "  status          Show database status (default)"
+      echo "  backup          Create a database backup"
+      echo "  restore <file>  Restore from a backup file"
+      echo "  list            List available backups"
+      echo "  compact         Vacuum and compact the database"
+      echo "  tables [name]   Show table sizes (optionally filter by name)"
+      echo "  purge <t> <d>   Purge records older than <d> days from table <t>"
+      echo "  size            Show database size"
+      return 1
+      ;;
+  esac
+}
+
 # Function to get the release binary path
 get_release_binary() {
   echo "/home/app/onprem/bin/onprem"
@@ -2005,6 +2101,43 @@ migration_rollback() {
   fi
 }
 
+# Consolidated migration command
+migrate_cmd() {
+  local action="$1"
+  shift
+
+  case "$action" in
+    run)
+      migration_run
+      ;;
+    rollback)
+      migration_rollback "${1:-1}"
+      ;;
+    history)
+      sql_migration_status
+      ;;
+    watch)
+      migration_status --watch "$@"
+      ;;
+    ""|status)
+      migration_status "$@"
+      ;;
+    *)
+      echo "Unknown migrate command: $action"
+      echo ""
+      echo "Usage: cli.sh migrate <command>"
+      echo ""
+      echo "Commands:"
+      echo "  status            Show migration status (default)"
+      echo "  run               Run pending migrations"
+      echo "  rollback [n]      Rollback n migrations (default: 1)"
+      echo "  history           Show last 10 migrations from database"
+      echo "  watch             Watch migration progress continuously"
+      return 1
+      ;;
+  esac
+}
+
 # Function to show comprehensive application status and diagnostics
 app_status() {
   echo "============================================"
@@ -2257,15 +2390,127 @@ reset_certs() {
   echo "New self-signed certificates generated."
 }
 
+# Function to show certificate status
+certs_status() {
+  local cert_dir="./certs"
+  local cert_file="$cert_dir/appliance.crt"
+  local key_file="$cert_dir/appliance_key.pem"
+
+  echo "=== Certificate Status ==="
+  echo ""
+
+  if [ ! -d "$cert_dir" ]; then
+    echo "✗ Certificate directory not found: $cert_dir"
+    return 1
+  fi
+
+  echo "Certificate directory: $cert_dir"
+  echo ""
+
+  # Check certificate file
+  if [ -f "$cert_file" ]; then
+    echo "✓ Certificate file: $cert_file"
+
+    # Get certificate details using openssl
+    if command -v openssl >/dev/null 2>&1; then
+      echo ""
+      echo "  Subject:    $(openssl x509 -in "$cert_file" -noout -subject 2>/dev/null | sed 's/subject=//')"
+
+      local end_date=$(openssl x509 -in "$cert_file" -noout -enddate 2>/dev/null | sed 's/notAfter=//')
+      echo "  Expires:    $end_date"
+
+      # Check if expired
+      if openssl x509 -in "$cert_file" -noout -checkend 0 >/dev/null 2>&1; then
+        # Check if expiring within 30 days
+        if openssl x509 -in "$cert_file" -noout -checkend 2592000 >/dev/null 2>&1; then
+          echo "  Status:     ✓ Valid"
+        else
+          echo "  Status:     ⚠️  Expiring soon (within 30 days)"
+        fi
+      else
+        echo "  Status:     ✗ EXPIRED"
+      fi
+
+      local issuer=$(openssl x509 -in "$cert_file" -noout -issuer 2>/dev/null | sed 's/issuer=//')
+      echo "  Issuer:     $issuer"
+
+      # Check if self-signed
+      local subject=$(openssl x509 -in "$cert_file" -noout -subject 2>/dev/null)
+      local issuer_check=$(openssl x509 -in "$cert_file" -noout -issuer 2>/dev/null)
+      if [ "$subject" = "$issuer_check" ]; then
+        echo "  Type:       Self-signed"
+      else
+        echo "  Type:       CA-signed"
+      fi
+    fi
+  else
+    echo "✗ Certificate file not found: $cert_file"
+  fi
+
+  echo ""
+
+  # Check key file
+  if [ -f "$key_file" ]; then
+    echo "✓ Private key: $key_file"
+
+    # Verify key matches certificate
+    if [ -f "$cert_file" ] && command -v openssl >/dev/null 2>&1; then
+      local cert_modulus=$(openssl x509 -in "$cert_file" -noout -modulus 2>/dev/null | md5sum)
+      local key_modulus=$(openssl rsa -in "$key_file" -noout -modulus 2>/dev/null | md5sum)
+      if [ "$cert_modulus" = "$key_modulus" ]; then
+        echo "  Key match:  ✓ Key matches certificate"
+      else
+        echo "  Key match:  ✗ Key does NOT match certificate"
+      fi
+    fi
+  else
+    echo "✗ Private key not found: $key_file"
+  fi
+
+  echo ""
+
+  # List all files in cert directory
+  echo "Files in $cert_dir:"
+  ls -la "$cert_dir" 2>/dev/null | tail -n +2 | awk '{print "  " $0}'
+}
+
+# Consolidated certificate command
+certs_cmd() {
+  local action="$1"
+
+  case "$action" in
+    reset)
+      reset_certs
+      ;;
+    generate)
+      generate_self_signed_certificates
+      ;;
+    ""|status)
+      certs_status
+      ;;
+    *)
+      echo "Unknown certs command: $action"
+      echo ""
+      echo "Usage: cli.sh certs <command>"
+      echo ""
+      echo "Commands:"
+      echo "  status      Show certificate status and expiry (default)"
+      echo "  reset       Delete and regenerate self-signed certificates"
+      echo "  generate    Generate certificates if missing"
+      return 1
+      ;;
+  esac
+}
+
 # Main script logic
 case "$1" in
-  --help)
+  --help|-h|help)
     show_help
     ;;
   update)
-    shift  # Remove 'update' from arguments
-    generate_self_signed_certificates  # Ensure certificates are generated before update
-    update "$@"  # Pass all remaining arguments
+    shift
+    generate_self_signed_certificates
+    update "$@"
     ;;
   rollback)
     rollback
@@ -2273,60 +2518,61 @@ case "$1" in
   reset)
     reset_app
     ;;
-  compact)
-    compact_system
-    ;;
-  purge)
-    purge_docker
-    ;;
-  backup)
-    backup
-    ;;
-  restore)
-    restore "$2"
-    ;;
-  migration_status)
-    shift
-    migration_status "$@"
-    ;;
-  app_status|status)
+  status)
     app_status
     ;;
-  sql_migration_status)
-    sql_migration_status
+
+  # Database commands
+  db)
+    shift
+    db_cmd "$@"
     ;;
-  sql_table_size)
-    sql_table_size "$2"
+
+  # Migration commands
+  migrate)
+    shift
+    migrate_cmd "$@"
     ;;
-  sql_purge_table)
-    sql_purge_table "$2" "$3"
-    ;;
-  migration_run)
-    migration_run
-    ;;
-  migration_rollback)
-    migration_rollback "$2"
-    ;;
+
+  # Configuration commands
   logging)
     logging_toggle "$2"
     ;;
   ipv6)
     ipv6_toggle "$2"
     ;;
-  cli_update)
+  certs)
+    certs_cmd "$2"
+    ;;
+
+  # Maintenance commands
+  selfupdate)
     cli_update
     ;;
+  docker)
+    case "$2" in
+      prune)
+        purge_docker
+        ;;
+      *)
+        echo "Usage: cli.sh docker prune"
+        ;;
+    esac
+    ;;
+
+  # Advanced commands
   build-appliance)
     build_appliance
     ;;
   prep-cluster-node)
     prep_cluster_node
     ;;
-  reset_certs)
-    reset_certs
+
+  "")
+    show_help
     ;;
   *)
-    echo "Invalid option: $1"
-    echo "Use --help to see the list of available commands."
+    echo "Unknown command: $1"
+    echo "Run 'cli.sh --help' for usage information."
     ;;
 esac
