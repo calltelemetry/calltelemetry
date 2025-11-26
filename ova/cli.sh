@@ -75,6 +75,9 @@ show_help() {
   echo "  purge               Remove unused Docker images, containers, networks, and volumes."
   echo "  backup              Create a database backup and retain only the last 5 backups."
   echo "  restore             Restore the database from a specified backup file."
+  echo "  app_status (status) Show comprehensive application status and diagnostics."
+  echo "                      Includes container status, DB connectivity, RPC health,"
+  echo "                      migration status, scheduler errors, and system resources."
   echo "  migration_status    Check migration status and generate report."
   echo "  sql_migration_status Show the last 10 migrations directly from the database."
   echo "  sql_table_size [table1,table2,...] Show table sizes with row counts and disk usage."
@@ -1161,8 +1164,15 @@ show_web_logs() {
   printf '%s\n' "$logs" | tail -n 10
   echo "=============================="
 
+  # Check if migrations completed successfully
+  if printf '%s\n' "$logs" | grep -q "All migrations completed successfully"; then
+    echo "✓ Migrations completed successfully (from logs)"
+    echo ""
+  fi
+
   local recent_errors
-  recent_errors=$(printf '%s\n' "$logs" | grep -iE "error|exception" 2>/dev/null | grep -v "metrics" | tail -n 5 || true)
+  # Filter out scheduler warnings which are non-fatal
+  recent_errors=$(printf '%s\n' "$logs" | grep -iE "error|exception" 2>/dev/null | grep -v "metrics" | grep -v "invalid task function" | tail -n 5 || true)
 
   local pending_migrations
   pending_migrations=$(printf '%s\n' "$logs" | awk '/Pending migrations \(will run now\):/ {pending=1; next} pending && /^  - / {gsub(/^  - /, ""); print} pending && !/^  - / {pending=0}' || true)
@@ -1176,13 +1186,21 @@ show_web_logs() {
     echo ""
   fi
 
+  # Check for scheduler warnings (non-fatal but worth noting)
+  local scheduler_warnings
+  scheduler_warnings=$(printf '%s\n' "$logs" | grep "not started: invalid task function" | wc -l)
+  if [ "$scheduler_warnings" -gt 0 ]; then
+    echo "⚠️  Note: $scheduler_warnings scheduler jobs have invalid task functions (non-fatal)"
+    echo ""
+  fi
+
   if [ -n "$recent_errors" ]; then
     echo "Detected recent error entries in web logs:"
     echo "$recent_errors"
     echo ""
     return 1
   else
-    echo "No errors detected in the last 200 web log lines." 
+    echo "No critical errors detected in the last 200 web log lines."
     echo ""
     return 0
   fi
@@ -1199,7 +1217,7 @@ run_migration_status_rpc() {
       migrations = Ecto.Migrator.migrations(Repo)
       ordered = Enum.sort_by(migrations, fn {_, version, _} -> version end)
 
-      {applied, pending} =`
+      {applied, pending} =
         Enum.split_with(ordered, fn {status, _, _} -> status == :up end)
 
       total = length(ordered)
@@ -1885,6 +1903,124 @@ migration_rollback() {
   fi
 }
 
+# Function to show comprehensive application status and diagnostics
+app_status() {
+  echo "============================================"
+  echo "     Call Telemetry Application Status"
+  echo "============================================"
+  echo ""
+
+  # Container status
+  echo "=== Container Status ==="
+  docker-compose ps
+  echo ""
+
+  # Check if web container is running
+  web_container=$(docker-compose ps -q web 2>/dev/null)
+  if [ -z "$web_container" ]; then
+    echo "❌ Web container not running"
+    return 1
+  fi
+
+  container_status=$(docker inspect --format='{{.State.Status}}' "$web_container" 2>/dev/null)
+  if [ "$container_status" != "running" ]; then
+    echo "❌ Web container status: $container_status"
+    return 1
+  fi
+
+  # Database connectivity
+  echo "=== Database Status ==="
+  if docker-compose exec -T db pg_isready -U calltelemetry -d calltelemetry_prod >/dev/null 2>&1; then
+    echo "✓ Database: accepting connections"
+
+    # Get migration count from DB
+    migration_count=$(docker-compose exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -t -c \
+      "SELECT COUNT(*) FROM schema_migrations;" 2>/dev/null | tr -d ' ')
+    echo "✓ Migrations in database: $migration_count"
+
+    # Get latest migration
+    latest=$(docker-compose exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -t -c \
+      "SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1;" 2>/dev/null | tr -d ' ')
+    echo "✓ Latest migration: $latest"
+  else
+    echo "❌ Database: not accepting connections"
+  fi
+  echo ""
+
+  # RPC status check
+  echo "=== Application RPC Status ==="
+  release_bin=$(get_release_binary)
+  rpc_test=$(docker-compose exec -T web "$release_bin" rpc 'IO.puts("ok")' 2>&1)
+  if [[ "$rpc_test" == *"ok"* ]]; then
+    echo "✓ RPC connection: working"
+
+    # Get app-side migration status
+    echo ""
+    echo "=== Migration Status (from application) ==="
+    docker-compose exec -T web "$release_bin" rpc '
+      alias Cdrcisco.Repo
+      try do
+        migrations = Ecto.Migrator.migrations(Repo)
+        {applied, pending} = Enum.split_with(migrations, fn {status, _, _} -> status == :up end)
+        IO.puts("Applied: #{length(applied)}")
+        IO.puts("Pending: #{length(pending)}")
+        if length(pending) > 0 do
+          IO.puts("")
+          IO.puts("Pending migrations:")
+          Enum.each(pending, fn {_, version, name} -> IO.puts("  - #{version}: #{name}") end)
+        else
+          IO.puts("✓ All migrations complete!")
+        end
+      rescue
+        e -> IO.puts("Error: #{inspect(e)}")
+      end
+    ' 2>&1
+  else
+    echo "❌ RPC connection: failed"
+    echo "   Application may still be starting up"
+    echo "   Error: $rpc_test"
+  fi
+  echo ""
+
+  # Check for scheduler/startup errors
+  echo "=== Recent Startup Messages ==="
+  docker-compose logs --tail 50 web 2>&1 | grep -E "(Migration|completed|scheduler|not started|error|Error|started)" | tail -15
+  echo ""
+
+  # Check for specific issues
+  echo "=== Issue Detection ==="
+  recent_logs=$(docker-compose logs --tail 100 web 2>&1)
+
+  # Check for migration completion
+  if echo "$recent_logs" | grep -q "All migrations completed successfully"; then
+    echo "✓ Migrations: completed successfully"
+  elif echo "$recent_logs" | grep -q "Pending migrations"; then
+    echo "⏳ Migrations: still running"
+  else
+    echo "? Migrations: status unknown from logs"
+  fi
+
+  # Check for scheduler errors
+  scheduler_errors=$(echo "$recent_logs" | grep "not started: invalid task function" | wc -l)
+  if [ "$scheduler_errors" -gt 0 ]; then
+    echo "⚠️  Scheduler: $scheduler_errors jobs failed to start (invalid task function)"
+    echo "   This may indicate version mismatch or missing modules"
+    echo "$recent_logs" | grep "not started: invalid task function" | head -5 | sed 's/^/   /'
+  else
+    echo "✓ Scheduler: no startup errors detected"
+  fi
+
+  # Check for NATS connectivity
+  if echo "$recent_logs" | grep -q "WorkflowNatsSupervisor"; then
+    echo "✓ NATS: supervisor initialized"
+  fi
+  echo ""
+
+  # System resources
+  show_system_activity
+  echo ""
+}
+
 # Function to set the logging level in docker-compose.yml
 set_logging() {
   if [[ -z "$1" || ! "$1" =~ ^(debug|info|warning|error)$ ]]; then
@@ -2007,6 +2143,9 @@ case "$1" in
   migration_status)
     shift
     migration_status "$@"
+    ;;
+  app_status|status)
+    app_status
     ;;
   sql_migration_status)
     sql_migration_status
