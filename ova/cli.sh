@@ -63,11 +63,12 @@ show_help() {
   echo
   echo "Options:"
   echo "  --help              Show this help message and exit."
-  echo "  update [version] [--force-upgrade] [--no-cleanup]"
+  echo "  update [version] [--force-upgrade] [--no-cleanup] [--ipv6]"
   echo "                      Update the docker-compose configuration to the specified version and restart the service."
   echo "                      If no version is specified, the default latest version will be used."
   echo "                      --force-upgrade bypasses the 10% disk space requirement check."
   echo "                      --no-cleanup skips automatic image pruning after update."
+  echo "                      --ipv6 enables IPv6 support (uses DEFAULT_IPV6 for EXTERNAL_IP)."
   echo "  rollback            Roll back to the previous docker-compose configuration."
   echo "  reset               Stop the application, remove data, and restart the application."
   echo "  compact             Prune Docker system and compact the PostgreSQL database."
@@ -314,6 +315,37 @@ get_current_version() {
   fi
 }
 
+# Function to configure IPv6 settings in docker-compose.yml
+configure_ipv6() {
+  local compose_file="$1"
+  local enable_ipv6="$2"
+
+  if [ ! -f "$compose_file" ]; then
+    echo "Error: Compose file not found: $compose_file"
+    return 1
+  fi
+
+  if [ "$enable_ipv6" = true ]; then
+    echo "Enabling IPv6 support..."
+    # Enable IPv6 in networks section
+    sed -i 's/# enable_ipv6: true/enable_ipv6: true/' "$compose_file"
+    # Also handle case where it might not have the comment
+    if ! grep -q "enable_ipv6: true" "$compose_file"; then
+      # Add enable_ipv6 under the ct network
+      sed -i '/^  ct:$/a\    enable_ipv6: true' "$compose_file"
+    fi
+    # Change EXTERNAL_IP to use DEFAULT_IPV6
+    sed -i 's/EXTERNAL_IP=\$DEFAULT_IPV4/EXTERNAL_IP=\$DEFAULT_IPV6/' "$compose_file"
+    echo "IPv6 support enabled. Using DEFAULT_IPV6 for EXTERNAL_IP."
+  else
+    echo "Using IPv4 (default)..."
+    # Ensure IPv6 is disabled (comment it out if present)
+    sed -i 's/^[[:space:]]*enable_ipv6: true/    # enable_ipv6: true/' "$compose_file"
+    # Ensure EXTERNAL_IP uses DEFAULT_IPV4
+    sed -i 's/EXTERNAL_IP=\$DEFAULT_IPV6/EXTERNAL_IP=\$DEFAULT_IPV4/' "$compose_file"
+  fi
+}
+
 # Function to check if version is 0.8.4 or higher
 is_version_084_or_higher() {
   local version="$1"
@@ -349,6 +381,7 @@ update() {
   version=""
   force_upgrade=false
   skip_cleanup=false
+  enable_ipv6=false
 
   # Parse arguments
   while [[ $# -gt 0 ]]; do
@@ -359,6 +392,10 @@ update() {
         ;;
       --no-cleanup)
         skip_cleanup=true
+        shift
+        ;;
+      --ipv6)
+        enable_ipv6=true
         shift
         ;;
       *)
@@ -582,6 +619,9 @@ update() {
     echo "New docker-compose.yml moved to production."
     echo "NATS configuration file downloaded."
     echo "Caddyfile downloaded."
+
+    # Configure IPv6 settings based on --ipv6 flag
+    configure_ipv6 "$ORIGINAL_FILE" "$enable_ipv6"
 
     if [ -f "./Caddyfile" ]; then
       if ! diff "$caddyfile_tmp" "./Caddyfile" > /dev/null; then
@@ -1159,7 +1199,7 @@ run_migration_status_rpc() {
       migrations = Ecto.Migrator.migrations(Repo)
       ordered = Enum.sort_by(migrations, fn {_, version, _} -> version end)
 
-      {applied, pending} =
+      {applied, pending} =`
         Enum.split_with(ordered, fn {status, _, _} -> status == :up end)
 
       total = length(ordered)
