@@ -810,11 +810,13 @@ wait_for_services() {
     # Try RPC first for accurate count
     local migration_raw=$(run_migration_status_rpc "$release_bin" 2>/dev/null)
     local pending_count=$(printf '%s\n' "$migration_raw" | awk -F= '/::pending_count=/{print $2; exit}')
-    local applied_count=$(printf '%s\n' "$migration_raw" | grep -oP 'Applied migrations: \K[0-9]+' || echo "")
-    local total_count=$(printf '%s\n' "$migration_raw" | grep -oP 'Applied migrations: [0-9]+/\K[0-9]+' || echo "")
 
-    # If RPC fails, fall back to SQL
-    if [ -z "$pending_count" ] || [ "$pending_count" = "error" ]; then
+    # Parse "Applied migrations: X/Y (Z%)" - use awk for portability
+    local applied_count=$(printf '%s\n' "$migration_raw" | awk '/Applied migrations:/ {split($3, a, "/"); print a[1]}')
+    local total_count=$(printf '%s\n' "$migration_raw" | awk '/Applied migrations:/ {split($3, a, "/"); print a[2]}')
+
+    # If RPC fails or returns no data, fall back to SQL
+    if [ -z "$pending_count" ] || [ "$pending_count" = "error" ] || [ -z "$applied_count" ]; then
       # Get counts from database directly
       applied_count=$(docker-compose exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -t -c \
         "SELECT COUNT(*) FROM schema_migrations;" 2>/dev/null | tr -d ' ')
@@ -825,6 +827,7 @@ wait_for_services() {
       if docker-compose logs --tail 50 web 2>&1 | grep -q "All migrations completed successfully"; then
         migrations_complete=true
         pending_count=0
+        total_count="$applied_count"
       else
         # Check if app is still starting
         if docker-compose logs --tail 20 web 2>&1 | grep -qE "Running migrations|Pending migrations"; then
@@ -835,10 +838,18 @@ wait_for_services() {
       fi
     fi
 
+    # Calculate total if we have applied and pending
+    if [ -z "$total_count" ] && [[ "$pending_count" =~ ^[0-9]+$ ]] && [[ "$applied_count" =~ ^[0-9]+$ ]]; then
+      total_count=$((applied_count + pending_count))
+    fi
+
     # Display status
     if [[ "$pending_count" =~ ^[0-9]+$ ]]; then
       if [ "$pending_count" -eq 0 ]; then
-        echo "  ✓ Migrations complete ($applied_count/$total_count)"
+        # Use applied_count as total if total is missing
+        local display_total="${total_count:-$applied_count}"
+        echo ""
+        echo "  ✓ Migrations complete ($applied_count/$display_total)"
         migrations_complete=true
         break
       else
