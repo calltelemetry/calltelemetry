@@ -106,6 +106,7 @@ show_help() {
   echo "Diagnostic Commands:"
   echo "  diag tesla <ipv4|ipv6> <url>    Test TCP + HTTP connectivity"
   echo "  diag raw_tcp <ipv4|ipv6> <url>  Test raw TCP socket only"
+  echo "  diag capture <secs> [filter] [file]  Capture packets with tcpdump"
   echo
   echo "Advanced Commands:"
   echo "  build-appliance     Download and execute the prep script"
@@ -2841,18 +2842,106 @@ end
         echo ""
         docker run --rm --network host "$image_tag" /home/app/onprem/bin/onprem eval "$elixir_code"
         ;;
+      capture)
+        local duration="$3"
+        local filter="$4"
+        local output_file="$5"
+
+        if [ -z "$duration" ]; then
+          echo "Usage: cli.sh diag capture <duration> [filter] [output.pcap]"
+          echo ""
+          echo "Capture network packets using tcpdump for the specified duration."
+          echo ""
+          echo "Arguments:"
+          echo "  duration     Capture duration in seconds (required)"
+          echo "  filter       Optional tcpdump filter expression (e.g., 'port 5060')"
+          echo "  output.pcap  Optional output file (default: capture-TIMESTAMP.pcap)"
+          echo ""
+          echo "Examples:"
+          echo "  cli.sh diag capture 30"
+          echo "  cli.sh diag capture 60 'port 5060'"
+          echo "  cli.sh diag capture 120 'port 5060 or port 5061' sip-traffic.pcap"
+          echo "  cli.sh diag capture 30 'host 192.168.1.100' debug.pcap"
+          return 1
+        fi
+
+        # Validate duration is a positive integer
+        if ! [[ "$duration" =~ ^[0-9]+$ ]] || [ "$duration" -eq 0 ]; then
+          echo "Error: Duration must be a positive integer (seconds)."
+          return 1
+        fi
+
+        # Set default output file if not provided
+        if [ -z "$output_file" ]; then
+          output_file="capture-$(date '+%Y%m%d-%H%M%S').pcap"
+        fi
+
+        # Ensure output file has .pcap extension
+        if [[ "$output_file" != *.pcap ]]; then
+          output_file="${output_file}.pcap"
+        fi
+
+        # Check if tcpdump is available
+        if ! command -v tcpdump &> /dev/null; then
+          echo "Error: tcpdump is not installed."
+          echo "Install with: sudo apt-get install tcpdump"
+          return 1
+        fi
+
+        echo "=== Packet Capture ==="
+        echo ""
+        echo "Duration:    ${duration} seconds"
+        echo "Filter:      ${filter:-none}"
+        echo "Output file: ${output_file}"
+        echo ""
+
+        # Build tcpdump command
+        local tcpdump_cmd="sudo tcpdump -w '$output_file'"
+        if [ -n "$filter" ]; then
+          tcpdump_cmd="$tcpdump_cmd $filter"
+        fi
+
+        echo "Starting capture..."
+        echo "Command: $tcpdump_cmd"
+        echo ""
+
+        # Run tcpdump with timeout
+        if [ -n "$filter" ]; then
+          sudo timeout "$duration" tcpdump -w "$output_file" $filter 2>&1 || true
+        else
+          sudo timeout "$duration" tcpdump -w "$output_file" 2>&1 || true
+        fi
+
+        echo ""
+        if [ -f "$output_file" ]; then
+          local file_size=$(ls -lh "$output_file" | awk '{print $5}')
+          local packet_count=$(sudo tcpdump -r "$output_file" 2>/dev/null | wc -l)
+          echo "Capture complete!"
+          echo "  File:    $output_file"
+          echo "  Size:    $file_size"
+          echo "  Packets: $packet_count"
+          echo ""
+          echo "To analyze: tcpdump -r $output_file"
+          echo "Or copy to your machine and open with Wireshark."
+        else
+          echo "Warning: No packets captured or capture failed."
+        fi
+        ;;
       ""|help)
         echo "Usage: cli.sh diag <command>"
         echo ""
         echo "Diagnostic commands:"
         echo "  tesla <ipv4|ipv6> <url>    Test TCP + HTTP connectivity"
         echo "  raw_tcp <ipv4|ipv6> <url>  Test raw TCP socket only"
+        echo "  capture <secs> [filter] [file]  Capture packets with tcpdump"
         echo ""
         echo "Examples:"
         echo "  cli.sh diag tesla ipv6 http://[dead:beef:cafe:1::11]:8090"
         echo "  cli.sh diag tesla ipv4 http://192.168.1.100:8090"
         echo "  cli.sh diag raw_tcp ipv6 http://[dead:beef:cafe:1::11]:8090"
         echo "  cli.sh diag raw_tcp ipv4 http://192.168.1.100:8090"
+        echo "  cli.sh diag capture 30"
+        echo "  cli.sh diag capture 60 'port 5060' sip.pcap"
         ;;
       *)
         echo "Unknown diag command: $2"
