@@ -63,6 +63,34 @@ ensure_grafana_permissions() {
 mkdir -p "$BACKUP_DIR"
 mkdir -p "$BACKUP_FOLDER_PATH"
 
+# Detect docker compose command (modern plugin vs legacy standalone)
+# Modern: docker compose (plugin, API 1.44+)
+# Legacy: docker-compose (standalone binary, older API)
+detect_docker_compose() {
+  # First check if docker compose plugin is available and works
+  if docker compose version >/dev/null 2>&1; then
+    echo "docker compose"
+    return 0
+  fi
+  # Fall back to legacy docker-compose if available
+  if command -v docker-compose >/dev/null 2>&1; then
+    echo "docker-compose"
+    return 0
+  fi
+  # Neither available
+  echo ""
+  return 1
+}
+
+# Set the docker compose command to use throughout the script
+DOCKER_COMPOSE_CMD=$(detect_docker_compose)
+if [ -z "$DOCKER_COMPOSE_CMD" ]; then
+  echo "Error: Neither 'docker compose' nor 'docker-compose' is available."
+  echo "Please install Docker with the compose plugin:"
+  echo "  https://docs.docker.com/compose/install/"
+  exit 1
+fi
+
 # Function to display help
 show_help() {
   echo "Usage: cli.sh <command> [options]"
@@ -669,7 +697,7 @@ update() {
 
   echo ""
   echo "Pulling Docker images..."
-  if ! docker-compose -f "$TEMP_FILE" pull; then
+  if ! $DOCKER_COMPOSE_CMD -f "$TEMP_FILE" pull; then
     echo "❌ Failed to pull Docker images"
     rm -f "$TEMP_FILE"
     return 1
@@ -768,7 +796,7 @@ update() {
     else
       echo "⚠️  Update complete, but some services may still be initializing."
       echo "This is normal during major upgrades with SQL index rebuilds."
-      echo "Monitor progress with: docker-compose logs -f"
+      echo "Monitor progress with: $DOCKER_COMPOSE_CMD logs -f"
       echo "Check CPU usage with: top (high postgresql CPU is normal during index rebuilds)"
     fi
   else
@@ -825,19 +853,19 @@ compact_system() {
   docker system prune --all -f
 
   echo "Starting Docker Compose database service..."
-  sudo docker-compose up -d db
+  sudo $DOCKER_COMPOSE_CMD up -d db
 
   echo "Waiting for the database service to be fully operational..."
   sleep 15
 
   echo "Verifying database connectivity..."
-  if ! sudo docker-compose exec -T db pg_isready -U calltelemetry -d calltelemetry_prod >/dev/null 2>&1; then
+  if ! sudo $DOCKER_COMPOSE_CMD exec -T db pg_isready -U calltelemetry -d calltelemetry_prod >/dev/null 2>&1; then
     echo "Error: Database is not ready. Cannot perform vacuum."
     return 1
   fi
 
   echo "Compacting PostgreSQL database (this may take several minutes)..."
-  if sudo docker-compose exec -e PGPASSWORD=postgres -T db psql -d calltelemetry_prod -U calltelemetry -c 'VACUUM FULL;'; then
+  if sudo $DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db psql -d calltelemetry_prod -U calltelemetry -c 'VACUUM FULL;'; then
     echo "✅ Database vacuum completed successfully."
   else
     echo "❌ Database vacuum failed."
@@ -867,7 +895,7 @@ wait_for_services() {
     local status_line=""
 
     for service in "${services[@]}"; do
-      local container=$(docker-compose ps -q $service 2>/dev/null)
+      local container=$($DOCKER_COMPOSE_CMD ps -q $service 2>/dev/null)
       if [ -n "$container" ]; then
         local status=$(docker inspect --format='{{.State.Status}}' $container 2>/dev/null)
         if [ "$status" = "running" ]; then
@@ -899,7 +927,7 @@ wait_for_services() {
   echo "Phase 2: Waiting for database..."
   wait_time=0
   while [ $wait_time -lt 120 ]; do
-    if docker-compose exec -T db pg_isready -U calltelemetry -d calltelemetry_prod >/dev/null 2>&1; then
+    if $DOCKER_COMPOSE_CMD exec -T db pg_isready -U calltelemetry -d calltelemetry_prod >/dev/null 2>&1; then
       echo "  ✓ Database accepting connections"
       break
     fi
@@ -927,19 +955,19 @@ wait_for_services() {
     # If RPC fails or returns no data, fall back to SQL
     if [ -z "$pending_count" ] || [ "$pending_count" = "error" ] || [ -z "$applied_count" ]; then
       # Get counts from database directly
-      applied_count=$(docker-compose exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -t -c \
+      applied_count=$($DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -t -c \
         "SELECT COUNT(*) FROM schema_migrations;" 2>/dev/null | tr -d ' ')
-      last_migration=$(docker-compose exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -t -c \
+      last_migration=$($DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -t -c \
         "SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1;" 2>/dev/null | tr -d ' ')
 
       # Check logs for migration completion
-      if docker-compose logs --tail 50 web 2>&1 | grep -q "All migrations completed successfully"; then
+      if $DOCKER_COMPOSE_CMD logs --tail 50 web 2>&1 | grep -q "All migrations completed successfully"; then
         migrations_complete=true
         pending_count=0
         total_count="$applied_count"
       else
         # Check if app is still starting
-        if docker-compose logs --tail 20 web 2>&1 | grep -qE "Running migrations|Pending migrations"; then
+        if $DOCKER_COMPOSE_CMD logs --tail 20 web 2>&1 | grep -qE "Running migrations|Pending migrations"; then
           pending_count="running"
         else
           pending_count="checking"
@@ -977,7 +1005,7 @@ wait_for_services() {
   if [ "$migrations_complete" != true ]; then
     echo ""
     echo "  ⚠️  Migration status unclear after ${max_wait}s"
-    echo "  Check logs: docker-compose logs -f web"
+    echo "  Check logs: $DOCKER_COMPOSE_CMD logs -f web"
   fi
   echo ""
 
@@ -987,7 +1015,7 @@ wait_for_services() {
   # Check web endpoint
   local web_healthy=false
   for i in {1..10}; do
-    if docker-compose exec -T web wget -q --spider http://127.0.0.1:4080/healthz 2>/dev/null; then
+    if $DOCKER_COMPOSE_CMD exec -T web wget -q --spider http://127.0.0.1:4080/healthz 2>/dev/null; then
       web_healthy=true
       break
     fi
@@ -1001,14 +1029,14 @@ wait_for_services() {
   fi
 
   # Check for startup issues in logs
-  local scheduler_errors=$(docker-compose logs --tail 100 web 2>&1 | grep -c "not started: invalid task function" 2>/dev/null | tail -1 || echo "0")
+  local scheduler_errors=$($DOCKER_COMPOSE_CMD logs --tail 100 web 2>&1 | grep -c "not started: invalid task function" 2>/dev/null | tail -1 || echo "0")
   scheduler_errors=${scheduler_errors:-0}
   if [ "$scheduler_errors" -gt 0 ] 2>/dev/null; then
     echo "  ⚠️  $scheduler_errors scheduler jobs failed (non-fatal)"
   fi
 
   # RPC check
-  local rpc_ok=$(docker-compose exec -T web "$release_bin" rpc 'IO.puts("ok")' 2>&1)
+  local rpc_ok=$($DOCKER_COMPOSE_CMD exec -T web "$release_bin" rpc 'IO.puts("ok")' 2>&1)
   if [[ "$rpc_ok" == *"ok"* ]]; then
     echo "  ✓ Application RPC responding"
   else
@@ -1069,7 +1097,7 @@ backup() {
 
   backup_file=${backup_folder_path}/${file_name}
 
-  docker-compose exec -e PGPASSWORD=postgres -T db pg_dump -U ${username} -d ${dbname} > ${backup_file}
+  $DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db pg_dump -U ${username} -d ${dbname} > ${backup_file}
 
   echo "Dump successful: ${backup_file}"
 
@@ -1161,12 +1189,12 @@ db_cmd() {
       ;;
     size)
       echo "=== Database Size ==="
-      docker-compose exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -c \
+      $DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -c \
         "SELECT pg_size_pretty(pg_database_size('calltelemetry_prod')) AS database_size;"
       ;;
     ""|status)
       echo "=== Database Status ==="
-      if docker-compose exec -T db pg_isready -U calltelemetry -d calltelemetry_prod >/dev/null 2>&1; then
+      if $DOCKER_COMPOSE_CMD exec -T db pg_isready -U calltelemetry -d calltelemetry_prod >/dev/null 2>&1; then
         echo "✓ Database: accepting connections"
       else
         echo "✗ Database: not accepting connections"
@@ -1174,7 +1202,7 @@ db_cmd() {
       fi
       echo ""
       echo "=== Database Size ==="
-      docker-compose exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -c \
+      $DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -c \
         "SELECT pg_size_pretty(pg_database_size('calltelemetry_prod')) AS database_size;"
       echo ""
       list_backups
@@ -1209,11 +1237,11 @@ print_sql_migration_snapshot() {
   local title="${1:-Database Migration Status}"
 
   echo "=== ${title} (SQL) ==="
-  docker-compose exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -c \
+  $DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -c \
     "SELECT COUNT(*) AS total_migrations FROM schema_migrations;" 2>/dev/null || \
       echo "Unable to fetch total migrations via SQL."
   echo ""
-  docker-compose exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -c \
+  $DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -c \
     "SELECT version, inserted_at FROM schema_migrations ORDER BY version DESC LIMIT 5;" 2>/dev/null || \
       echo "Unable to fetch recent migrations via SQL."
   echo "=============================="
@@ -1307,7 +1335,7 @@ check_service_ports() {
   shift
   local ports=($@)
   local container
-  container=$(docker-compose ps -q "$service" 2>/dev/null)
+  container=$($DOCKER_COMPOSE_CMD ps -q "$service" 2>/dev/null)
   if [ -z "$container" ]; then
     echo "    ⚠️  $service ports: container not found"
     return 0
@@ -1348,7 +1376,7 @@ report_service_health() {
   shift
   local ports=($@)
   local container
-  container=$(docker-compose ps -q "$service" 2>/dev/null)
+  container=$($DOCKER_COMPOSE_CMD ps -q "$service" 2>/dev/null)
   if [ -z "$container" ]; then
     echo "    ⚠️  $service: container not found"
     return 0
@@ -1389,7 +1417,7 @@ report_service_health() {
 
 show_web_logs() {
   local logs=""
-  if ! logs=$(docker-compose logs --tail 200 web 2>&1); then
+  if ! logs=$($DOCKER_COMPOSE_CMD logs --tail 200 web 2>&1); then
     echo "Unable to fetch web logs."
     return 1
   fi
@@ -1443,7 +1471,7 @@ show_web_logs() {
 run_migration_status_rpc() {
   local release_bin="$1"
 
-  docker-compose exec -T web "$release_bin" rpc '
+  $DOCKER_COMPOSE_CMD exec -T web "$release_bin" rpc '
     alias Cdrcisco.Repo
     import Ecto.Query
 
@@ -1608,7 +1636,7 @@ migration_status() {
   local report_file="migrations-report.txt"
 
   local web_container
-  web_container=$(docker-compose ps -q web 2>/dev/null)
+  web_container=$($DOCKER_COMPOSE_CMD ps -q web 2>/dev/null)
   if [ -z "$web_container" ]; then
     echo "Error: Web container not found or not running."
     echo "Please start the services with: sudo systemctl start docker-compose-app.service"
@@ -1628,11 +1656,11 @@ migration_status() {
 
   echo "Testing RPC connection..."
   local rpc_test
-  rpc_test=$(docker-compose exec -T web "$release_bin" rpc 'IO.puts("RPC connection successful")' 2>&1)
+  rpc_test=$($DOCKER_COMPOSE_CMD exec -T web "$release_bin" rpc 'IO.puts("RPC connection successful")' 2>&1)
   if [[ "$rpc_test" == *"noconnection"* ]]; then
     echo "Error: Cannot connect to running application via RPC"
     echo "The application may still be starting up. Please wait and try again."
-    echo "You can check logs with: docker-compose logs web"
+    echo "You can check logs with: $DOCKER_COMPOSE_CMD logs web"
     return 1
   fi
 
@@ -1737,7 +1765,7 @@ sql_migration_status() {
   echo ""
 
   # Check if db container is running
-  db_container=$(docker-compose ps -q db 2>/dev/null)
+  db_container=$($DOCKER_COMPOSE_CMD ps -q db 2>/dev/null)
   if [ -z "$db_container" ]; then
     echo "Error: Database container not found or not running."
     echo "Please start the services with: sudo systemctl start docker-compose-app.service"
@@ -1752,19 +1780,19 @@ sql_migration_status() {
   fi
 
   # Check if database is ready
-  if ! docker-compose exec -T db pg_isready -U calltelemetry -d calltelemetry_prod >/dev/null 2>&1; then
+  if ! $DOCKER_COMPOSE_CMD exec -T db pg_isready -U calltelemetry -d calltelemetry_prod >/dev/null 2>&1; then
     echo "Error: Database is not ready to accept connections"
     return 1
   fi
 
   echo "=== Last 10 Applied Migrations ==="
   echo ""
-  docker-compose exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -c \
+  $DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -c \
     "SELECT version, inserted_at FROM schema_migrations ORDER BY version DESC LIMIT 10;"
 
   echo ""
   echo "=== Migration Count ==="
-  docker-compose exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -c \
+  $DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -c \
     "SELECT COUNT(*) as total_migrations FROM schema_migrations;"
 }
 
@@ -1774,7 +1802,7 @@ sql_table_size() {
   echo ""
 
   # Check if db container is running
-  db_container=$(docker-compose ps -q db 2>/dev/null)
+  db_container=$($DOCKER_COMPOSE_CMD ps -q db 2>/dev/null)
   if [ -z "$db_container" ]; then
     echo "Error: Database container not found or not running."
     echo "Please start the services with: sudo systemctl start docker-compose-app.service"
@@ -1789,7 +1817,7 @@ sql_table_size() {
   fi
 
   # Check if database is ready
-  if ! docker-compose exec -T db pg_isready -U calltelemetry -d calltelemetry_prod >/dev/null 2>&1; then
+  if ! $DOCKER_COMPOSE_CMD exec -T db pg_isready -U calltelemetry -d calltelemetry_prod >/dev/null 2>&1; then
     echo "Error: Database is not ready to accept connections"
     return 1
   fi
@@ -1801,7 +1829,7 @@ sql_table_size() {
     # Show all tables
     echo "=== All Table Sizes ==="
     echo ""
-    docker-compose exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -c "
+    $DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -c "
 SELECT
   table_name,
   row_count,
@@ -1831,7 +1859,7 @@ ORDER BY total_bytes DESC;
 
     echo "=== Table Sizes for: $tables ==="
     echo ""
-    docker-compose exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -c "
+    $DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -c "
 SELECT
   table_name,
   row_count,
@@ -1858,7 +1886,7 @@ ORDER BY total_bytes DESC;
 
   echo ""
   echo "=== Database Total Size ==="
-  docker-compose exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -c \
+  $DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -c \
     "SELECT pg_size_pretty(pg_database_size('calltelemetry_prod')) AS database_size;"
 }
 
@@ -1886,7 +1914,7 @@ sql_purge_table() {
   echo ""
 
   # Check if db container is running
-  db_container=$(docker-compose ps -q db 2>/dev/null)
+  db_container=$($DOCKER_COMPOSE_CMD ps -q db 2>/dev/null)
   if [ -z "$db_container" ]; then
     echo "Error: Database container not found or not running."
     echo "Please start the services with: sudo systemctl start docker-compose-app.service"
@@ -1901,14 +1929,14 @@ sql_purge_table() {
   fi
 
   # Check if database is ready
-  if ! docker-compose exec -T db pg_isready -U calltelemetry -d calltelemetry_prod >/dev/null 2>&1; then
+  if ! $DOCKER_COMPOSE_CMD exec -T db pg_isready -U calltelemetry -d calltelemetry_prod >/dev/null 2>&1; then
     echo "Error: Database is not ready to accept connections"
     return 1
   fi
 
   # Check if table exists
   echo "Checking if table exists..."
-  table_exists=$(docker-compose exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -t -c \
+  table_exists=$($DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -t -c \
     "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = '$table_name');" | tr -d ' ')
 
   if [ "$table_exists" != "t" ]; then
@@ -1918,7 +1946,7 @@ sql_purge_table() {
 
   # Check if table has inserted_at column
   echo "Checking for 'inserted_at' column..."
-  column_exists=$(docker-compose exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -t -c \
+  column_exists=$($DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -t -c \
     "SELECT EXISTS (SELECT FROM information_schema.columns WHERE table_schema = 'public' AND table_name = '$table_name' AND column_name = 'inserted_at');" | tr -d ' ')
 
   if [ "$column_exists" != "t" ]; then
@@ -1930,7 +1958,7 @@ sql_purge_table() {
   # Get count of records to be deleted
   echo ""
   echo "Counting records to be deleted..."
-  records_to_delete=$(docker-compose exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -t -c \
+  records_to_delete=$($DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -t -c \
     "SELECT COUNT(*) FROM $table_name WHERE inserted_at < NOW() - INTERVAL '$days days';" | tr -d ' ')
 
   if [ -z "$records_to_delete" ] || [ "$records_to_delete" = "0" ]; then
@@ -1942,7 +1970,7 @@ sql_purge_table() {
   echo ""
 
   # Show date cutoff
-  cutoff_date=$(docker-compose exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -t -c \
+  cutoff_date=$($DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -t -c \
     "SELECT (NOW() - INTERVAL '$days days')::timestamp(0);" | tr -d ' ')
   echo "Cutoff date: $cutoff_date"
   echo ""
@@ -1968,7 +1996,7 @@ sql_purge_table() {
   # Perform the deletion and show progress
   start_time=$(date +%s)
 
-  delete_result=$(docker-compose exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -c \
+  delete_result=$($DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -c \
     "DELETE FROM $table_name WHERE inserted_at < NOW() - INTERVAL '$days days';" 2>&1)
 
   end_time=$(date +%s)
@@ -1981,7 +2009,7 @@ sql_purge_table() {
 
   # Show updated table size
   echo "=== Updated Table Size ==="
-  docker-compose exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -c "
+  $DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -c "
 SELECT
   '$table_name' AS table_name,
   COUNT(*) AS remaining_rows,
@@ -1993,7 +2021,7 @@ FROM $table_name;
 
   echo ""
   echo "💡 Tip: Run 'VACUUM FULL $table_name' to reclaim disk space"
-  echo "   Use: docker-compose exec -T db psql -U calltelemetry -d calltelemetry_prod -c 'VACUUM FULL $table_name;'"
+  echo "   Use: $DOCKER_COMPOSE_CMD exec -T db psql -U calltelemetry -d calltelemetry_prod -c 'VACUUM FULL $table_name;'"
 }
 
 # Function to run pending migrations using Elixir release
@@ -2001,7 +2029,7 @@ migration_run() {
   echo "Running pending database migrations..."
   
   # Check if web container is running and application is ready
-  web_container=$(docker-compose ps -q web 2>/dev/null)
+  web_container=$($DOCKER_COMPOSE_CMD ps -q web 2>/dev/null)
   if [ -z "$web_container" ]; then
     echo "Error: Web container not found or not running."
     echo "Please start the services with: sudo systemctl start docker-compose-app.service"
@@ -2017,7 +2045,7 @@ migration_run() {
 
   # Test RPC connection
   release_bin=$(get_release_binary)
-  rpc_test=$(docker-compose exec -T web "$release_bin" rpc 'IO.puts("RPC connection successful")' 2>&1)
+  rpc_test=$($DOCKER_COMPOSE_CMD exec -T web "$release_bin" rpc 'IO.puts("RPC connection successful")' 2>&1)
   if [[ "$rpc_test" == *"noconnection"* ]]; then
     echo "Error: Cannot connect to running application via RPC"
     echo "The application may still be starting up. Please wait and try again."
@@ -2028,7 +2056,7 @@ migration_run() {
   
   # Execute migrations
   echo "Executing migrations..."
-  migration_output=$(docker-compose exec -T web "$release_bin" rpc '
+  migration_output=$($DOCKER_COMPOSE_CMD exec -T web "$release_bin" rpc '
     IO.puts("=== Running Migrations ===")
     
     try do
@@ -2072,7 +2100,7 @@ migration_rollback() {
   echo "Rolling back $steps migration(s)..."
   
   # Check if web container is running and application is ready
-  web_container=$(docker-compose ps -q web 2>/dev/null)
+  web_container=$($DOCKER_COMPOSE_CMD ps -q web 2>/dev/null)
   if [ -z "$web_container" ]; then
     echo "Error: Web container not found or not running."
     echo "Please start the services with: sudo systemctl start docker-compose-app.service"
@@ -2088,7 +2116,7 @@ migration_rollback() {
 
   # Test RPC connection
   release_bin=$(get_release_binary)
-  rpc_test=$(docker-compose exec -T web "$release_bin" rpc 'IO.puts("RPC connection successful")' 2>&1)
+  rpc_test=$($DOCKER_COMPOSE_CMD exec -T web "$release_bin" rpc 'IO.puts("RPC connection successful")' 2>&1)
   if [[ "$rpc_test" == *"noconnection"* ]]; then
     echo "Error: Cannot connect to running application via RPC"
     echo "The application may still be starting up. Please wait and try again."
@@ -2099,7 +2127,7 @@ migration_rollback() {
   
   # Execute rollback
   echo "Executing rollback..."
-  rollback_output=$(docker-compose exec -T web "$release_bin" rpc "
+  rollback_output=$($DOCKER_COMPOSE_CMD exec -T web "$release_bin" rpc "
     IO.puts(\"=== Rolling Back Migrations ===\")
     
     try do
@@ -2183,11 +2211,11 @@ app_status() {
 
   # Container status
   echo "=== Container Status ==="
-  docker-compose ps
+  $DOCKER_COMPOSE_CMD ps
   echo ""
 
   # Check if web container is running
-  web_container=$(docker-compose ps -q web 2>/dev/null)
+  web_container=$($DOCKER_COMPOSE_CMD ps -q web 2>/dev/null)
   if [ -z "$web_container" ]; then
     echo "❌ Web container not running"
     return 1
@@ -2201,16 +2229,16 @@ app_status() {
 
   # Database connectivity
   echo "=== Database Status ==="
-  if docker-compose exec -T db pg_isready -U calltelemetry -d calltelemetry_prod >/dev/null 2>&1; then
+  if $DOCKER_COMPOSE_CMD exec -T db pg_isready -U calltelemetry -d calltelemetry_prod >/dev/null 2>&1; then
     echo "✓ Database: accepting connections"
 
     # Get migration count from DB
-    migration_count=$(docker-compose exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -t -c \
+    migration_count=$($DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -t -c \
       "SELECT COUNT(*) FROM schema_migrations;" 2>/dev/null | tr -d ' ')
     echo "✓ Migrations in database: $migration_count"
 
     # Get latest migration
-    latest=$(docker-compose exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -t -c \
+    latest=$($DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -t -c \
       "SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1;" 2>/dev/null | tr -d ' ')
     echo "✓ Latest migration: $latest"
   else
@@ -2221,14 +2249,14 @@ app_status() {
   # RPC status check
   echo "=== Application RPC Status ==="
   release_bin=$(get_release_binary)
-  rpc_test=$(docker-compose exec -T web "$release_bin" rpc 'IO.puts("ok")' 2>&1)
+  rpc_test=$($DOCKER_COMPOSE_CMD exec -T web "$release_bin" rpc 'IO.puts("ok")' 2>&1)
   if [[ "$rpc_test" == *"ok"* ]]; then
     echo "✓ RPC connection: working"
 
     # Get app-side migration status
     echo ""
     echo "=== Migration Status (from application) ==="
-    docker-compose exec -T web "$release_bin" rpc '
+    $DOCKER_COMPOSE_CMD exec -T web "$release_bin" rpc '
       alias Cdrcisco.Repo
       try do
         migrations = Ecto.Migrator.migrations(Repo)
@@ -2255,12 +2283,12 @@ app_status() {
 
   # Check for scheduler/startup errors
   echo "=== Recent Startup Messages ==="
-  docker-compose logs --tail 50 web 2>&1 | grep -E "(Migration|completed|scheduler|not started|error|Error|started)" | tail -15
+  $DOCKER_COMPOSE_CMD logs --tail 50 web 2>&1 | grep -E "(Migration|completed|scheduler|not started|error|Error|started)" | tail -15
   echo ""
 
   # Check for specific issues
   echo "=== Issue Detection ==="
-  recent_logs=$(docker-compose logs --tail 100 web 2>&1)
+  recent_logs=$($DOCKER_COMPOSE_CMD logs --tail 100 web 2>&1)
 
   # Check for migration completion
   if echo "$recent_logs" | grep -q "All migrations completed successfully"; then
@@ -2599,7 +2627,7 @@ case "$1" in
         echo "=== Docker Status ==="
         echo ""
         echo "Containers:"
-        docker-compose ps
+        $DOCKER_COMPOSE_CMD ps
         echo ""
         echo "Images:"
         docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}" | grep -E "calltelemetry|REPOSITORY"
