@@ -107,6 +107,7 @@ show_help() {
   echo "  diag tesla <ipv4|ipv6> <url>    Test TCP + HTTP connectivity"
   echo "  diag raw_tcp <ipv4|ipv6> <url>  Test raw TCP socket only"
   echo "  diag capture <secs> [filter] [file]  Capture packets with tcpdump"
+  echo "  diag database               Run comprehensive database diagnostics"
   echo
   echo "Advanced Commands:"
   echo "  build-appliance     Download and execute the prep script"
@@ -2927,6 +2928,60 @@ end
           echo "Warning: No packets captured or capture failed."
         fi
         ;;
+      database|db)
+        echo "=== Database Diagnostics ==="
+        echo ""
+
+        echo "--- 1. Container CPU/Memory Usage ---"
+        docker stats --no-stream
+        echo ""
+
+        echo "--- 2. Active Running Queries (consuming CPU now) ---"
+        docker exec calltelemetry-db-1 env PGPASSWORD=postgres psql -U calltelemetry -d calltelemetry_prod -c "SELECT pid, now() - pg_stat_activity.query_start AS duration, query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE state <> 'idle' AND query NOT ILIKE '%pg_stat_activity%' ORDER BY duration DESC LIMIT 20;"
+        echo ""
+
+        echo "--- 3. All Connections & Long-Running Queries ---"
+        docker exec calltelemetry-db-1 env PGPASSWORD=postgres psql -U calltelemetry -d calltelemetry_prod -c "SELECT pid, usename, application_name, client_addr, now() - query_start AS duration, state, LEFT(query, 100) as query_preview FROM pg_stat_activity WHERE query_start IS NOT NULL ORDER BY query_start ASC LIMIT 20;"
+        echo ""
+
+        echo "--- 4. Blocked Queries (lock contention) ---"
+        docker exec calltelemetry-db-1 env PGPASSWORD=postgres psql -U calltelemetry -d calltelemetry_prod -c "SELECT blocked_locks.pid AS blocked_pid, blocked_activity.usename AS blocked_user, blocking_locks.pid AS blocking_pid, blocking_activity.usename AS blocking_user, LEFT(blocked_activity.query,50) AS blocked_stmt, LEFT(blocking_activity.query,50) AS blocking_stmt FROM pg_catalog.pg_locks blocked_locks JOIN pg_catalog.pg_stat_activity blocked_activity ON blocked_activity.pid = blocked_locks.pid JOIN pg_catalog.pg_locks blocking_locks ON blocking_locks.locktype = blocked_locks.locktype AND blocking_locks.database IS NOT DISTINCT FROM blocked_locks.database AND blocking_locks.relation IS NOT DISTINCT FROM blocked_locks.relation AND blocking_locks.pid <> blocked_locks.pid JOIN pg_catalog.pg_stat_activity blocking_activity ON blocking_activity.pid = blocking_locks.pid WHERE NOT blocked_locks.granted;"
+        echo ""
+
+        echo "--- 5. Tables with High Sequential Scans (missing indexes) ---"
+        docker exec calltelemetry-db-1 env PGPASSWORD=postgres psql -U calltelemetry -d calltelemetry_prod -c "SELECT relname, seq_scan, seq_tup_read, idx_scan, idx_tup_fetch, n_tup_ins, n_tup_upd, n_tup_del FROM pg_stat_user_tables ORDER BY seq_scan DESC LIMIT 15;"
+        echo ""
+
+        echo "--- 6. Connection Count by State ---"
+        docker exec calltelemetry-db-1 env PGPASSWORD=postgres psql -U calltelemetry -d calltelemetry_prod -c "SELECT count(*) as total_connections, state, usename FROM pg_stat_activity GROUP BY state, usename ORDER BY count(*) DESC;"
+        echo ""
+
+        echo "--- 7. Dead Tuples (needs vacuum) ---"
+        docker exec calltelemetry-db-1 env PGPASSWORD=postgres psql -U calltelemetry -d calltelemetry_prod -c "SELECT schemaname, relname, n_dead_tup, n_live_tup, last_vacuum, last_autovacuum FROM pg_stat_user_tables WHERE n_dead_tup > 1000 ORDER BY n_dead_tup DESC LIMIT 10;"
+        echo ""
+
+        echo "--- 8. Active MV Refreshes, Index Builds, Vacuum, Analyze ---"
+        docker exec calltelemetry-db-1 env PGPASSWORD=postgres psql -U calltelemetry -d calltelemetry_prod -c "SELECT pid, now() - query_start AS duration, state, wait_event_type, LEFT(query, 80) as operation FROM pg_stat_activity WHERE query ILIKE '%REFRESH MATERIALIZED%' OR query ILIKE '%CREATE INDEX%' OR query ILIKE '%REINDEX%' OR query ILIKE '%VACUUM%' OR query ILIKE '%ANALYZE%';"
+        echo ""
+
+        echo "--- 9. Index Creation Progress ---"
+        docker exec calltelemetry-db-1 env PGPASSWORD=postgres psql -U calltelemetry -d calltelemetry_prod -c "SELECT p.pid, p.datname, p.command, p.phase, p.blocks_total, p.blocks_done, ROUND(100.0 * p.blocks_done / NULLIF(p.blocks_total, 0), 2) AS pct_done, LEFT(a.query, 60) as query FROM pg_stat_progress_create_index p JOIN pg_stat_activity a ON p.pid = a.pid;"
+        echo ""
+
+        echo "--- 10. Vacuum Progress ---"
+        docker exec calltelemetry-db-1 env PGPASSWORD=postgres psql -U calltelemetry -d calltelemetry_prod -c "SELECT p.pid, p.datname, p.relid::regclass AS table_name, p.phase, p.heap_blks_total, p.heap_blks_scanned, ROUND(100.0 * p.heap_blks_scanned / NULLIF(p.heap_blks_total, 0), 2) AS pct_done FROM pg_stat_progress_vacuum p;"
+        echo ""
+
+        echo "--- 11. List All Materialized Views ---"
+        docker exec calltelemetry-db-1 env PGPASSWORD=postgres psql -U calltelemetry -d calltelemetry_prod -c "SELECT matviewname, hasindexes, ispopulated FROM pg_matviews ORDER BY matviewname;"
+        echo ""
+
+        echo "--- 12. Autovacuum Workers Active ---"
+        docker exec calltelemetry-db-1 env PGPASSWORD=postgres psql -U calltelemetry -d calltelemetry_prod -c "SELECT pid, datname, relid::regclass AS table_name, phase, heap_blks_total, heap_blks_scanned, index_vacuum_count FROM pg_stat_progress_vacuum WHERE datname IS NOT NULL;"
+        echo ""
+
+        echo "=== Database Diagnostics Complete ==="
+        ;;
       ""|help)
         echo "Usage: cli.sh diag <command>"
         echo ""
@@ -2934,6 +2989,7 @@ end
         echo "  tesla <ipv4|ipv6> <url>    Test TCP + HTTP connectivity"
         echo "  raw_tcp <ipv4|ipv6> <url>  Test raw TCP socket only"
         echo "  capture <secs> [filter] [file]  Capture packets with tcpdump"
+        echo "  database                   Run comprehensive database diagnostics"
         echo ""
         echo "Examples:"
         echo "  cli.sh diag tesla ipv6 http://[dead:beef:cafe:1::11]:8090"
@@ -2942,6 +2998,7 @@ end
         echo "  cli.sh diag raw_tcp ipv4 http://192.168.1.100:8090"
         echo "  cli.sh diag capture 30"
         echo "  cli.sh diag capture 60 'port 5060' sip.pcap"
+        echo "  cli.sh diag database"
         ;;
       *)
         echo "Unknown diag command: $2"
