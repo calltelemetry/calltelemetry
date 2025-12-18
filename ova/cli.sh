@@ -91,6 +91,49 @@ if [ -z "$DOCKER_COMPOSE_CMD" ]; then
   exit 1
 fi
 
+# Auto-fix systemd service file to match detected docker compose command
+# This ensures the service uses the same command syntax as the CLI
+fix_systemd_service_if_needed() {
+  local SERVICE_FILE="/etc/systemd/system/docker-compose-app.service"
+
+  [ -f "$SERVICE_FILE" ] || return 0
+
+  local needs_update=false
+  local current_cmd=""
+  local target_cmd=""
+
+  # Detect what the service file currently uses
+  if grep -q "/usr/bin/docker-compose" "$SERVICE_FILE"; then
+    current_cmd="docker-compose"
+  elif grep -q "/usr/bin/docker compose" "$SERVICE_FILE"; then
+    current_cmd="docker compose"
+  else
+    return 0  # Unknown format, don't touch
+  fi
+
+  # Determine what it should use based on what's available
+  if [ "$DOCKER_COMPOSE_CMD" = "docker compose" ]; then
+    target_cmd="docker compose"
+  else
+    target_cmd="docker-compose"
+  fi
+
+  # Update if mismatch
+  if [ "$current_cmd" != "$target_cmd" ]; then
+    echo "Updating systemd service to use '$target_cmd'..."
+    sudo cp "$SERVICE_FILE" "${SERVICE_FILE}.backup" 2>/dev/null
+
+    if [ "$target_cmd" = "docker compose" ]; then
+      sudo sed -i 's|/usr/bin/docker-compose|/usr/bin/docker compose|g' "$SERVICE_FILE"
+    else
+      sudo sed -i 's|/usr/bin/docker compose|/usr/bin/docker-compose|g' "$SERVICE_FILE"
+    fi
+
+    sudo systemctl daemon-reload
+    echo "Systemd service updated to use '$target_cmd'."
+  fi
+}
+
 # Function to display help
 show_help() {
   echo "Usage: cli.sh <command> [options]"
@@ -454,6 +497,7 @@ ipv6_toggle() {
       echo "Enabling IPv6..."
       configure_ipv6 "$ORIGINAL_FILE" true
       echo ""
+      fix_systemd_service_if_needed
       echo "Restarting Docker Compose service..."
       systemctl restart docker-compose-app.service
       echo "Docker Compose service restarted."
@@ -464,6 +508,7 @@ ipv6_toggle() {
       echo "Disabling IPv6..."
       configure_ipv6 "$ORIGINAL_FILE" false
       echo ""
+      fix_systemd_service_if_needed
       echo "Restarting Docker Compose service..."
       systemctl restart docker-compose-app.service
       echo "Docker Compose service restarted."
@@ -778,6 +823,7 @@ update() {
       echo "Caddyfile installed."
     fi
 
+    fix_systemd_service_if_needed
     echo "Restarting Docker Compose service..."
     systemctl restart docker-compose-app.service
     echo "Docker Compose service restarted."
@@ -815,6 +861,7 @@ rollback() {
   if [ -f "$BACKUP_FILE" ];then
     cp "$BACKUP_FILE" "$ORIGINAL_FILE"
     echo "Rolled back to the previous docker-compose configuration from $BACKUP_FILE."
+    fix_systemd_service_if_needed
     echo "Restarting Docker Compose service..."
     systemctl restart docker-compose-app.service
     echo "Docker Compose service restarted."
@@ -2354,6 +2401,7 @@ logging_toggle() {
       sed -i -E "s/^(.*LOGGING_LEVEL=).*$/\1$level/" "$ORIGINAL_FILE"
       echo "Logging level set to $level"
       echo ""
+      fix_systemd_service_if_needed
       echo "Restarting Docker Compose service..."
       systemctl restart docker-compose-app.service
       echo "Docker Compose service restarted."

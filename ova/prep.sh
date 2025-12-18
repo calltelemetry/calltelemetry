@@ -34,10 +34,23 @@ fi
 
 sudo chown -R calltelemetry /home/calltelemetry
 
-# Setup Docker compose
-sudo curl -L "https://github.com/docker/compose/releases/download/$(curl -s https://api.github.com/repos/docker/compose/releases/latest | grep -Po '"tag_name": "\K.*?(?=")')/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-sudo chmod +x /usr/local/bin/docker-compose
-sudo ln -sf /usr/local/bin/docker-compose /usr/bin/docker-compose
+# Detect docker compose command (prefer modern plugin over standalone)
+detect_docker_compose_cmd() {
+  if docker compose version >/dev/null 2>&1; then
+    echo "/usr/bin/docker compose"
+  elif command -v docker-compose >/dev/null 2>&1; then
+    echo "/usr/bin/docker-compose"
+  else
+    # Fallback: install standalone as backup
+    sudo curl -L "https://github.com/docker/compose/releases/download/$(curl -s https://api.github.com/repos/docker/compose/releases/latest | grep -Po '"tag_name": "\K.*?(?=")')/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+    sudo chmod +x /usr/local/bin/docker-compose
+    sudo ln -sf /usr/local/bin/docker-compose /usr/bin/docker-compose
+    echo "/usr/bin/docker-compose"
+  fi
+}
+
+DOCKER_COMPOSE_CMD=$(detect_docker_compose_cmd)
+echo "Using docker compose command: $DOCKER_COMPOSE_CMD"
 
 # Setup Call Telemetry Home
 cd /home/calltelemetry/
@@ -82,12 +95,8 @@ Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory=/home/calltelemetry
 EnvironmentFile=/etc/network-environment
-# ExecStartPre=/usr/bin/docker-compose pull --quiet --ignore-pull-failures
-# ExecStartPre=/usr/bin/docker-compose build --pull
-ExecStart=/usr/bin/docker-compose up -d --remove-orphans
-ExecStop=/usr/bin/docker-compose down
-# ExecReload=/usr/bin/docker-compose pull --quiet --ignore-pull-failures
-# ExecReload=/usr/bin/docker-compose build --pull
+ExecStart=${DOCKER_COMPOSE_CMD} up -d --remove-orphans
+ExecStop=${DOCKER_COMPOSE_CMD} down
 TimeoutStartSec=0
 
 [Install]
