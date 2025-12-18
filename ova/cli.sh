@@ -127,6 +127,7 @@ show_help() {
   echo
   echo "Maintenance Commands:"
   echo "  selfupdate          Update CLI script to latest version"
+  echo "  fix-service         Update systemd service to use modern docker compose"
   echo "  docker              Show Docker status (containers, images, networks)"
   echo "  docker network      Show detailed network configuration"
   echo "  docker prune        Remove unused Docker resources"
@@ -2612,6 +2613,38 @@ case "$1" in
   # Maintenance commands
   selfupdate)
     cli_update
+    ;;
+  fix-service)
+    echo "Updating systemd service to use modern docker compose..."
+    SERVICE_FILE="/etc/systemd/system/docker-compose-app.service"
+
+    if [ ! -f "$SERVICE_FILE" ]; then
+      echo "Error: Service file not found at $SERVICE_FILE"
+      return 1
+    fi
+
+    # Check if already using modern syntax
+    if grep -q "/usr/bin/docker compose" "$SERVICE_FILE"; then
+      echo "Service file already uses modern 'docker compose' syntax."
+      return 0
+    fi
+
+    # Backup existing service file
+    sudo cp "$SERVICE_FILE" "${SERVICE_FILE}.backup"
+    echo "Backed up existing service to ${SERVICE_FILE}.backup"
+
+    # Update the service file to use modern docker compose
+    sudo sed -i 's|/usr/bin/docker-compose|/usr/bin/docker compose|g' "$SERVICE_FILE"
+
+    echo "Updated service file."
+    echo ""
+    echo "Reloading systemd daemon..."
+    sudo systemctl daemon-reload
+
+    echo ""
+    echo "Service file updated successfully."
+    echo "To apply changes, restart the service with:"
+    echo "  sudo systemctl restart docker-compose-app.service"
     ;;
   docker)
     case "$2" in
