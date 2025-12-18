@@ -63,20 +63,51 @@ ensure_grafana_permissions() {
 mkdir -p "$BACKUP_DIR"
 mkdir -p "$BACKUP_FOLDER_PATH"
 
+# Minimum Docker API version required (1.44 = Docker 25.0+)
+MIN_API_VERSION="1.44"
+
+# Check if Docker API version is sufficient
+check_docker_api_version() {
+  local api_version=$(docker version --format '{{.Client.APIVersion}}' 2>/dev/null || echo "0")
+  if [ "$(printf '%s\n' "$MIN_API_VERSION" "$api_version" | sort -V | head -n1)" = "$MIN_API_VERSION" ]; then
+    return 0  # Version is sufficient
+  else
+    return 1  # Version is too old
+  fi
+}
+
+# Install/upgrade standalone docker-compose to latest version
+install_latest_docker_compose() {
+  echo "Docker API version is too old (requires $MIN_API_VERSION+). Installing latest docker-compose standalone..."
+  sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+  sudo chmod +x /usr/local/bin/docker-compose
+  sudo ln -sf /usr/local/bin/docker-compose /usr/bin/docker-compose
+  echo "docker-compose standalone installed."
+}
+
 # Detect docker compose command (modern plugin vs legacy standalone)
 # Modern: docker compose (plugin, API 1.44+)
-# Legacy: docker-compose (standalone binary, older API)
+# Legacy: docker-compose (standalone binary)
 detect_docker_compose() {
-  # First check if docker compose plugin is available and works
-  if docker compose version >/dev/null 2>&1; then
+  # First check if docker compose plugin is available AND API version is sufficient
+  if docker compose version >/dev/null 2>&1 && check_docker_api_version; then
     echo "docker compose"
     return 0
   fi
-  # Fall back to legacy docker-compose if available
+
+  # Check if standalone docker-compose exists and works
+  if command -v docker-compose >/dev/null 2>&1 && docker-compose version >/dev/null 2>&1; then
+    echo "docker-compose"
+    return 0
+  fi
+
+  # API too old or no compose available - install latest standalone
+  install_latest_docker_compose
   if command -v docker-compose >/dev/null 2>&1; then
     echo "docker-compose"
     return 0
   fi
+
   # Neither available
   echo ""
   return 1

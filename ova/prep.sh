@@ -34,19 +34,48 @@ fi
 
 sudo chown -R calltelemetry /home/calltelemetry
 
+# Minimum Docker API version required (1.44 = Docker 25.0+)
+MIN_API_VERSION="1.44"
+
+# Check if Docker API version is sufficient
+check_docker_api_version() {
+  local api_version=$(docker version --format '{{.Client.APIVersion}}' 2>/dev/null || echo "0")
+  if [ "$(printf '%s\n' "$MIN_API_VERSION" "$api_version" | sort -V | head -n1)" = "$MIN_API_VERSION" ]; then
+    return 0  # Version is sufficient
+  else
+    return 1  # Version is too old
+  fi
+}
+
+# Install/upgrade standalone docker-compose to latest version
+install_latest_docker_compose() {
+  echo "Installing latest docker-compose standalone..."
+  sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+  sudo chmod +x /usr/local/bin/docker-compose
+  sudo ln -sf /usr/local/bin/docker-compose /usr/bin/docker-compose
+  echo "docker-compose standalone installed."
+}
+
 # Detect docker compose command (prefer modern plugin over standalone)
 detect_docker_compose_cmd() {
-  if docker compose version >/dev/null 2>&1; then
+  # Check if modern docker compose plugin works with current API
+  if docker compose version >/dev/null 2>&1 && check_docker_api_version; then
     echo "/usr/bin/docker compose"
-  elif command -v docker-compose >/dev/null 2>&1; then
-    echo "/usr/bin/docker-compose"
-  else
-    # Fallback: install standalone as backup
-    sudo curl -L "https://github.com/docker/compose/releases/download/$(curl -s https://api.github.com/repos/docker/compose/releases/latest | grep -Po '"tag_name": "\K.*?(?=")')/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-    sudo chmod +x /usr/local/bin/docker-compose
-    sudo ln -sf /usr/local/bin/docker-compose /usr/bin/docker-compose
-    echo "/usr/bin/docker-compose"
+    return 0
   fi
+
+  # Check standalone docker-compose
+  if command -v docker-compose >/dev/null 2>&1; then
+    # Test if it works
+    if docker-compose version >/dev/null 2>&1; then
+      echo "/usr/bin/docker-compose"
+      return 0
+    fi
+  fi
+
+  # Neither works - install latest standalone
+  install_latest_docker_compose
+  echo "/usr/bin/docker-compose"
 }
 
 DOCKER_COMPOSE_CMD=$(detect_docker_compose_cmd)
