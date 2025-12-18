@@ -206,6 +206,11 @@ show_help() {
   echo "  docker network      Show detailed network configuration"
   echo "  docker prune        Remove unused Docker resources"
   echo
+  echo "Offline/Air-Gap Commands:"
+  echo "  offline download [version]  Download images & configs for air-gapped install"
+  echo "  offline apply <bundle.tar>  Apply an offline bundle to this system"
+  echo "  offline list                List images in current docker-compose.yml"
+  echo
   echo "Diagnostic Commands:"
   echo "  diag tesla <ipv4|ipv6> <url>    Test TCP + HTTP connectivity"
   echo "  diag raw_tcp <ipv4|ipv6> <url>  Test raw TCP socket only"
@@ -2725,6 +2730,270 @@ case "$1" in
     echo "To apply changes, restart the service with:"
     echo "  sudo systemctl restart docker-compose-app.service"
     ;;
+
+  # Offline/Air-Gap commands for environments without internet access
+  offline)
+    offline_download() {
+      local version="${1:-latest}"
+      local bundle_dir="offline-bundle-$(date +%Y%m%d-%H%M%S)"
+      local bundle_name="calltelemetry-offline-${version}-$(date +%Y%m%d).tar.gz"
+      local OFFLINE_BASE_URL="https://raw.githubusercontent.com/calltelemetry/calltelemetry/master"
+      local start_dir="$(pwd)"
+
+      # Use curl if wget not available
+      download_file() {
+        local url="$1"
+        local output="$2"
+        if command -v wget >/dev/null 2>&1; then
+          wget -q "$url" -O "$output"
+        elif command -v curl >/dev/null 2>&1; then
+          curl -sfL "$url" -o "$output"
+        else
+          echo "Error: Neither wget nor curl is available"
+          return 1
+        fi
+      }
+
+      echo "=== Creating Offline Bundle ==="
+      echo "Version: $version"
+      echo "Output: $bundle_name"
+      echo ""
+
+      # Create temp directory
+      mkdir -p "$bundle_dir"
+      cd "$bundle_dir" || return 1
+
+      # Download config files
+      echo "Downloading configuration files..."
+      if [ "$version" = "latest" ]; then
+        download_file "$OFFLINE_BASE_URL/docker-compose.yml" "docker-compose.yml" || { echo "Failed to download docker-compose.yml"; cd "$start_dir"; rm -rf "$bundle_dir"; return 1; }
+      else
+        # Try versioned file first (e.g., ova/versions/0.8.4-rc181.yaml), then fall back to latest
+        if ! download_file "$OFFLINE_BASE_URL/ova/versions/${version}.yaml" "docker-compose.yml" 2>/dev/null; then
+          echo "Version-specific file not found, downloading latest and updating tags..."
+          download_file "$OFFLINE_BASE_URL/docker-compose.yml" "docker-compose.yml" || { echo "Failed to download docker-compose.yml"; cd "$start_dir"; rm -rf "$bundle_dir"; return 1; }
+          # Update calltelemetry image tags to specified version
+          echo "Updating image tags to version: $version"
+          sed -i.bak -E "s|(calltelemetry/web:)[^\"'[:space:]]+|\1$version|g" docker-compose.yml
+          sed -i.bak -E "s|(calltelemetry/vue:)[^\"'[:space:]]+|\1$version|g" docker-compose.yml
+          rm -f docker-compose.yml.bak
+        fi
+      fi
+
+      download_file "$OFFLINE_BASE_URL/ova/Caddyfile" "Caddyfile" || echo "Warning: Could not download Caddyfile"
+      download_file "$OFFLINE_BASE_URL/ova/cli.sh" "cli.sh" || echo "Warning: Could not download cli.sh"
+      download_file "$OFFLINE_BASE_URL/ova/nats.conf" "nats.conf" 2>/dev/null || echo "Note: nats.conf not found (optional)"
+
+      # Download prometheus config
+      mkdir -p prometheus
+      download_file "$OFFLINE_BASE_URL/ova/versions/prometheus/prometheus.yml" "prometheus/prometheus.yml" 2>/dev/null || echo "Note: prometheus.yml not found"
+
+      # Download grafana configs
+      mkdir -p grafana/provisioning/datasources grafana/provisioning/dashboards grafana/dashboards
+      download_file "$OFFLINE_BASE_URL/ova/versions/grafana/provisioning/datasources/calltelemetry.yml" "grafana/provisioning/datasources/calltelemetry.yml" 2>/dev/null || true
+      download_file "$OFFLINE_BASE_URL/ova/versions/grafana/provisioning/dashboards/calltelemetry.yaml" "grafana/provisioning/dashboards/calltelemetry.yaml" 2>/dev/null || true
+      download_file "$OFFLINE_BASE_URL/ova/versions/grafana/dashboards/calltelemetry-overview.json" "grafana/dashboards/calltelemetry-overview.json" 2>/dev/null || true
+
+      chmod +x cli.sh 2>/dev/null || true
+
+      echo "Configuration files downloaded."
+      echo ""
+
+      # Extract and pull images
+      echo "Extracting image list from docker-compose.yml..."
+      local images=$(grep -E '^\s*image:' docker-compose.yml | sed 's/.*image:[[:space:]]*["'\'']*\([^"'\'']*\)["'\'']*[[:space:]]*$/\1/' | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
+
+      echo "Images to download:"
+      echo "$images" | while read img; do [ -n "$img" ] && echo "  - $img"; done
+      echo ""
+
+      echo "Pulling Docker images (this may take a while)..."
+      local pull_failed=false
+      for img in $images; do
+        [ -z "$img" ] && continue
+        echo "Pulling: $img"
+        if ! docker pull "$img"; then
+          echo "Warning: Failed to pull $img"
+          pull_failed=true
+        fi
+      done
+
+      if [ "$pull_failed" = true ]; then
+        echo ""
+        echo "Warning: Some images failed to pull. Bundle may be incomplete."
+      fi
+
+      echo ""
+      echo "Saving Docker images to tar file..."
+      # shellcheck disable=SC2086
+      docker save $images -o images.tar
+      echo "Images saved to images.tar ($(du -h images.tar | cut -f1))"
+
+      echo ""
+      echo "Creating bundle archive..."
+      cd "$start_dir"
+      tar -czf "$bundle_name" "$bundle_dir"
+      rm -rf "$bundle_dir"
+
+      echo ""
+      echo "=== Bundle Created Successfully ==="
+      echo "File: $bundle_name"
+      echo "Size: $(du -h "$bundle_name" | cut -f1)"
+      echo ""
+      echo "Transfer this file to your air-gapped system and run:"
+      echo "  ./cli.sh offline apply $bundle_name"
+    }
+
+    offline_apply() {
+      local bundle_file="$1"
+
+      if [ -z "$bundle_file" ]; then
+        echo "Usage: cli.sh offline apply <bundle.tar.gz>"
+        echo ""
+        echo "Apply an offline bundle to this system."
+        return 1
+      fi
+
+      if [ ! -f "$bundle_file" ]; then
+        echo "Error: Bundle file not found: $bundle_file"
+        return 1
+      fi
+
+      echo "=== Applying Offline Bundle ==="
+      echo "Bundle: $bundle_file"
+      echo ""
+
+      # Create temp extraction directory
+      local extract_dir="offline-extract-$$"
+      mkdir -p "$extract_dir"
+
+      echo "Extracting bundle..."
+      tar -xzf "$bundle_file" -C "$extract_dir"
+
+      # Find the inner directory (bundle creates a subdirectory)
+      local inner_dir=$(find "$extract_dir" -maxdepth 1 -type d -name "offline-bundle-*" | head -1)
+      if [ -z "$inner_dir" ]; then
+        inner_dir="$extract_dir"
+      fi
+
+      echo "Loading Docker images (this may take a while)..."
+      if [ -f "$inner_dir/images.tar" ]; then
+        docker load -i "$inner_dir/images.tar"
+        echo "Docker images loaded."
+      else
+        echo "Warning: images.tar not found in bundle"
+      fi
+
+      echo ""
+      echo "Backing up current configuration..."
+      local timestamp=$(date +%Y%m%d-%H%M%S)
+      [ -f docker-compose.yml ] && cp docker-compose.yml "$BACKUP_DIR/docker-compose-$timestamp.yml"
+      [ -f Caddyfile ] && cp Caddyfile "$BACKUP_DIR/Caddyfile-$timestamp"
+
+      echo "Installing configuration files..."
+      [ -f "$inner_dir/docker-compose.yml" ] && cp "$inner_dir/docker-compose.yml" ./docker-compose.yml && echo "  - docker-compose.yml"
+      [ -f "$inner_dir/Caddyfile" ] && cp "$inner_dir/Caddyfile" ./Caddyfile && echo "  - Caddyfile"
+      [ -f "$inner_dir/cli.sh" ] && cp "$inner_dir/cli.sh" ./cli.sh && chmod +x ./cli.sh && echo "  - cli.sh"
+      [ -f "$inner_dir/nats.conf" ] && cp "$inner_dir/nats.conf" ./nats.conf && echo "  - nats.conf"
+
+      # Install prometheus config if present
+      if [ -f "$inner_dir/prometheus/prometheus.yml" ]; then
+        mkdir -p prometheus
+        cp "$inner_dir/prometheus/prometheus.yml" ./prometheus/prometheus.yml
+        echo "  - prometheus/prometheus.yml"
+      fi
+
+      # Install grafana configs if present
+      if [ -d "$inner_dir/grafana" ]; then
+        mkdir -p grafana/provisioning/datasources grafana/provisioning/dashboards grafana/dashboards
+        [ -f "$inner_dir/grafana/provisioning/datasources/calltelemetry.yml" ] && cp "$inner_dir/grafana/provisioning/datasources/calltelemetry.yml" ./grafana/provisioning/datasources/
+        [ -f "$inner_dir/grafana/provisioning/dashboards/calltelemetry.yaml" ] && cp "$inner_dir/grafana/provisioning/dashboards/calltelemetry.yaml" ./grafana/provisioning/dashboards/
+        [ -f "$inner_dir/grafana/dashboards/calltelemetry-overview.json" ] && cp "$inner_dir/grafana/dashboards/calltelemetry-overview.json" ./grafana/dashboards/
+        echo "  - grafana configs"
+      fi
+
+      # Cleanup extraction directory
+      rm -rf "$extract_dir"
+
+      echo ""
+      echo "Restarting services..."
+      fix_systemd_service_if_needed
+      systemctl restart docker-compose-app.service
+
+      echo ""
+      echo "=== Offline Bundle Applied ==="
+      echo "Verifying containers..."
+      sleep 5
+      $DOCKER_COMPOSE_CMD ps
+
+      echo ""
+      echo "Check status with: ./cli.sh status"
+    }
+
+    offline_list() {
+      echo "=== Images in docker-compose.yml ==="
+      if [ ! -f docker-compose.yml ]; then
+        echo "Error: docker-compose.yml not found in current directory"
+        return 1
+      fi
+
+      local images=$(grep -E '^\s*image:' docker-compose.yml | sed 's/.*image:[[:space:]]*["'\'']*\([^"'\'']*\)["'\'']*[[:space:]]*$/\1/' | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
+      echo ""
+      for img in $images; do
+        [ -z "$img" ] && continue
+        # Check if image exists locally
+        if docker image inspect "$img" >/dev/null 2>&1; then
+          local size=$(docker image inspect "$img" --format '{{.Size}}' | awk '{printf "%.1f MB", $1/1024/1024}')
+          echo "  ✓ $img ($size)"
+        else
+          echo "  ✗ $img (not downloaded)"
+        fi
+      done
+      echo ""
+      echo "Total images: $(echo "$images" | grep -c .)"
+    }
+
+    case "$2" in
+      download)
+        offline_download "$3"
+        ;;
+      apply)
+        offline_apply "$3"
+        ;;
+      list)
+        offline_list
+        ;;
+      ""|help)
+        echo "Usage: cli.sh offline <command>"
+        echo ""
+        echo "Air-gapped/offline installation commands:"
+        echo ""
+        echo "  download [version]     Download all images and configs for offline install"
+        echo "                         Creates a .tar.gz bundle with everything needed"
+        echo "                         Default version: latest"
+        echo ""
+        echo "  apply <bundle.tar.gz>  Apply an offline bundle to this system"
+        echo "                         Loads images and installs config files"
+        echo ""
+        echo "  list                   List images in current docker-compose.yml"
+        echo "                         Shows which are downloaded locally"
+        echo ""
+        echo "Workflow:"
+        echo "  1. On internet-connected machine:"
+        echo "     ./cli.sh offline download"
+        echo ""
+        echo "  2. Transfer bundle to air-gapped system via USB/SFTP"
+        echo ""
+        echo "  3. On air-gapped system:"
+        echo "     ./cli.sh offline apply calltelemetry-offline-*.tar.gz"
+        ;;
+      *)
+        echo "Unknown offline command: $2"
+        echo "Run 'cli.sh offline' for available commands."
+        ;;
+    esac
+    ;;
+
   docker)
     case "$2" in
       prune)
