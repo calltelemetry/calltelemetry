@@ -740,10 +740,11 @@ db_upgrade() {
   echo "=== PostgreSQL Database Upgrade ==="
   echo ""
   echo "This will upgrade your PostgreSQL database from version $current_version to $target_version."
-  echo "The upgrade uses pg_upgrade with --link for an efficient in-place upgrade."
+  echo "The upgrade uses pg_upgrade with --link for speed."
   echo ""
-  echo "Note: pg_upgrade uses hard links, so your original data files remain intact"
-  echo "until the upgrade is verified. This is your safety net for recovery."
+  echo "⚠️  WARNING: pg_upgrade modifies your data in place."
+  echo "   If the upgrade fails, your database may be left in an unusable state."
+  echo "   It is STRONGLY recommended to use --backup to create a SQL dump first."
   echo ""
 
   # Validate target version
@@ -780,12 +781,13 @@ db_upgrade() {
 
   # Step 1: Optional backup
   if [ "$create_backup" = "true" ]; then
-    echo "Step 1: Creating database backup (--backup flag specified)..."
+    echo "Step 1: Creating database backup..."
     backup
     echo ""
   else
-    echo "Step 1: Skipping SQL backup (use --backup flag if you want one)"
-    echo "  Note: Your original data directory will be preserved as a backup."
+    echo "Step 1: Skipping SQL backup"
+    echo "  WARNING: No backup will be created. If upgrade fails, data may be unrecoverable."
+    echo "  Consider running with --backup flag for production systems."
     echo ""
   fi
 
@@ -959,11 +961,10 @@ UPGRADE_SCRIPT
           --old-bindir=/usr/lib/postgresql/${current_version}/bin \\
           --new-bindir=/usr/lib/postgresql/${target_version}/bin \\
           --username=calltelemetry \\
-          --link \\
-          --verbose\"
+          --link\"
 
         echo ''
-        echo '=== pg_upgrade completed successfully! ==='
+        echo '=== pg_upgrade completed ==='
       " 2>&1 | tee "$upgrade_log"
 
     upgrade_result=${PIPESTATUS[0]}
@@ -982,17 +983,16 @@ UPGRADE_SCRIPT
     tail -30 "$upgrade_log"
     echo "--- End of log excerpt ---"
     echo ""
-    echo "YOUR DATA IS SAFE:"
-    echo "  Original data directory is intact: $data_dir"
-    echo "  Full log available at: $upgrade_log"
+    echo "⚠️  WARNING: Your database may be in an inconsistent state."
+    echo "   pg_upgrade with --link modifies data in place."
     echo ""
-    echo "ALTERNATIVE - Dump/Restore Method:"
-    echo "  You can try the dump/restore method instead:"
+    echo "RECOVERY OPTIONS:"
+    echo "  1. If you used --backup, restore from the SQL dump:"
+    echo "     cli.sh db restore <backup-file>"
     echo ""
-    echo "    cli.sh db upgrade ${target_version} --method=dump-restore"
+    echo "  2. If you have an external backup, restore from that."
     echo ""
-    echo "  This creates a SQL dump of your database and restores it"
-    echo "  into a fresh PostgreSQL ${target_version} instance."
+    echo "  3. Check the full log for details: $upgrade_log"
     echo "============================================================"
 
     echo "STATUS=failed" >> "$PG_UPGRADE_STATE_DIR/upgrade.state"
