@@ -892,41 +892,66 @@ UPGRADE_SCRIPT
   local abs_new_data_parent=$(mkdir -p "$new_data_parent" && cd "$new_data_parent" && pwd)
   local abs_upgrade_state=$(cd "$PG_UPGRADE_STATE_DIR" && pwd)
 
+  # Log file for capturing upgrade output
+  local upgrade_log="$PG_UPGRADE_STATE_DIR/upgrade-$(date +%Y%m%d-%H%M%S).log"
+
   # Run the upgrade container with both PostgreSQL versions
   # Using tianon/docker-pg-upgrade which has multiple PG versions
   echo "Pulling pg_upgrade container image..."
-  docker pull tianon/postgres-upgrade:${current_version}-to-${target_version} 2>/dev/null || {
-    echo "Official upgrade image not found. Using manual upgrade approach..."
+  echo ""
 
-    # Alternative: Use official postgres image and install old version
-    docker pull postgres:${target_version}
+  local upgrade_result=0
 
-    # Run upgrade using the postgres container
+  # Try the dedicated upgrade image first
+  if docker pull tianon/postgres-upgrade:${current_version}-to-${target_version} 2>/dev/null; then
+    echo "Using tianon/postgres-upgrade:${current_version}-to-${target_version}"
+    echo ""
+    echo "Running pg_upgrade (output logged to $upgrade_log)..."
+    echo ""
+
     docker run --rm \
       -v "${abs_old_data}:/var/lib/postgresql/${current_version}/data:rw" \
       -v "${abs_new_data_parent}:/var/lib/postgresql/${target_version}:rw" \
-      -v "${abs_upgrade_state}:/upgrade:ro" \
+      -e POSTGRES_USER=calltelemetry \
+      -e POSTGRES_PASSWORD=postgres \
+      -e PGUSER=calltelemetry \
+      tianon/postgres-upgrade:${current_version}-to-${target_version} 2>&1 | tee "$upgrade_log"
+
+    upgrade_result=${PIPESTATUS[0]}
+  else
+    echo "Dedicated upgrade image not available."
+    echo "Using postgres:${target_version} with pg_upgrade..."
+    echo ""
+
+    docker pull postgres:${target_version}
+
+    # Run upgrade using the official postgres container
+    docker run --rm \
+      -v "${abs_old_data}:/var/lib/postgresql/${current_version}/data:rw" \
+      -v "${abs_new_data_parent}:/var/lib/postgresql/${target_version}:rw" \
+      -v "${abs_upgrade_state}:/upgrade:rw" \
       -e POSTGRES_USER=calltelemetry \
       -e POSTGRES_PASSWORD=postgres \
       -e PGUSER=calltelemetry \
       postgres:${target_version} \
       bash -c "
         set -e
-        echo 'Installing PostgreSQL ${current_version} for upgrade...'
-        apt-get update && apt-get install -y postgresql-${current_version} || {
-          echo 'Could not install old PostgreSQL version. Falling back to dump/restore.'
-          exit 100
-        }
+
+        echo '=== Installing PostgreSQL ${current_version} binaries ==='
+        apt-get update
+        apt-get install -y postgresql-${current_version}
 
         NEW_DATADIR=/var/lib/postgresql/${target_version}/data
 
-        echo 'Initializing new data directory...'
+        echo ''
+        echo '=== Initializing new data directory ==='
         mkdir -p \$NEW_DATADIR
         chown postgres:postgres \$NEW_DATADIR
         chmod 700 \$NEW_DATADIR
         su postgres -c \"/usr/lib/postgresql/${target_version}/bin/initdb -D \$NEW_DATADIR -U calltelemetry --encoding=UTF8\"
 
-        echo 'Running pg_upgrade...'
+        echo ''
+        echo '=== Running pg_upgrade ==='
         cd /tmp
         su postgres -c \"/usr/lib/postgresql/${target_version}/bin/pg_upgrade \\
           --old-datadir=/var/lib/postgresql/${current_version}/data \\
@@ -934,94 +959,46 @@ UPGRADE_SCRIPT
           --old-bindir=/usr/lib/postgresql/${current_version}/bin \\
           --new-bindir=/usr/lib/postgresql/${target_version}/bin \\
           --username=calltelemetry \\
-          --link\"
+          --link \\
+          --verbose\"
 
-        echo 'pg_upgrade completed!'
-      "
-  } || {
-    # Use the official upgrade image if available
-    docker run --rm \
-      -v "${abs_old_data}:/var/lib/postgresql/${current_version}/data:rw" \
-      -v "${abs_new_data_parent}:/var/lib/postgresql/${target_version}:rw" \
-      -e POSTGRES_USER=calltelemetry \
-      -e POSTGRES_PASSWORD=postgres \
-      -e PGUSER=calltelemetry \
-      tianon/postgres-upgrade:${current_version}-to-${target_version}
-  }
+        echo ''
+        echo '=== pg_upgrade completed successfully! ==='
+      " 2>&1 | tee "$upgrade_log"
 
-  local upgrade_result=$?
+    upgrade_result=${PIPESTATUS[0]}
+  fi
 
-  if [ $upgrade_result -eq 100 ]; then
+  # Check result and show appropriate message
+  if [ $upgrade_result -ne 0 ]; then
     echo ""
     echo "============================================================"
-    echo "✗ pg_upgrade FAILED: Could not install PostgreSQL ${current_version}"
+    echo "✗ pg_upgrade FAILED (exit code: $upgrade_result)"
     echo "============================================================"
     echo ""
-    echo "The pg_upgrade method requires both the old and new PostgreSQL"
-    echo "versions to be available. The old version (${current_version}) could not"
-    echo "be installed in the upgrade container."
+    echo "Full log saved to: $upgrade_log"
     echo ""
-    echo "WHY THIS HAPPENED:"
-    echo "  PostgreSQL ${current_version} packages may not be available in the"
-    echo "  official Debian/Ubuntu repositories used by the postgres:${target_version} image."
-    echo ""
-    echo "RECOMMENDED SOLUTION - Dump/Restore Method:"
-    echo "  This method exports your data as SQL and imports it into a fresh"
-    echo "  PostgreSQL ${target_version} database. It's slower but more reliable."
-    echo ""
-    echo "  To use dump/restore, run:"
-    echo "    cli.sh db upgrade ${target_version} --method=dump-restore"
-    echo ""
-    echo "  This will:"
-    echo "    1. Create a full SQL dump of your database"
-    echo "    2. Stop the old PostgreSQL ${current_version} container"
-    echo "    3. Start a new PostgreSQL ${target_version} container"
-    echo "    4. Restore the SQL dump into the new database"
-    echo ""
-    echo "  Space required: Approximately equal to your database size for the dump file"
-    echo ""
-    echo "Your original data is untouched and safe."
-    echo "============================================================"
-
-    echo "STATUS=failed" >> "$PG_UPGRADE_STATE_DIR/upgrade.state"
-    echo "ERROR=pg_version_unavailable" >> "$PG_UPGRADE_STATE_DIR/upgrade.state"
-    echo "SUGGESTION=use --method=dump-restore" >> "$PG_UPGRADE_STATE_DIR/upgrade.state"
-
-    # Restart services since we stopped them
-    echo ""
-    echo "Restarting services with original database..."
-    $DOCKER_COMPOSE_CMD up -d
-    return 1
-
-  elif [ $upgrade_result -ne 0 ]; then
-    echo ""
-    echo "============================================================"
-    echo "✗ pg_upgrade FAILED with exit code $upgrade_result"
-    echo "============================================================"
-    echo ""
-    echo "The pg_upgrade process encountered an error."
-    echo ""
-    echo "WHAT TO CHECK:"
-    echo "  1. Review the upgrade logs above for specific error messages"
-    echo "  2. Common issues:"
-    echo "     - Incompatible extensions or data types"
-    echo "     - Corrupted data files"
-    echo "     - Insufficient permissions"
+    echo "--- Last 30 lines of output ---"
+    tail -30 "$upgrade_log"
+    echo "--- End of log excerpt ---"
     echo ""
     echo "YOUR DATA IS SAFE:"
-    echo "  Your original data directory is still intact at: $data_dir"
-    echo "  Upgrade state saved to: $PG_UPGRADE_STATE_DIR"
+    echo "  Original data directory is intact: $data_dir"
+    echo "  Full log available at: $upgrade_log"
     echo ""
     echo "ALTERNATIVE - Dump/Restore Method:"
-    echo "  If pg_upgrade continues to fail, you can try the dump/restore method:"
+    echo "  You can try the dump/restore method instead:"
+    echo ""
     echo "    cli.sh db upgrade ${target_version} --method=dump-restore"
     echo ""
-    echo "  This method is slower but handles more edge cases."
+    echo "  This creates a SQL dump of your database and restores it"
+    echo "  into a fresh PostgreSQL ${target_version} instance."
     echo "============================================================"
 
     echo "STATUS=failed" >> "$PG_UPGRADE_STATE_DIR/upgrade.state"
     echo "ERROR=pg_upgrade_failed" >> "$PG_UPGRADE_STATE_DIR/upgrade.state"
     echo "EXIT_CODE=$upgrade_result" >> "$PG_UPGRADE_STATE_DIR/upgrade.state"
+    echo "LOG_FILE=$upgrade_log" >> "$PG_UPGRADE_STATE_DIR/upgrade.state"
 
     # Restart services since we stopped them
     echo ""
