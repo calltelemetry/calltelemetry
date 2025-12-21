@@ -189,7 +189,7 @@ show_help() {
   echo
   echo "Database Upgrade Commands:"
   echo "  db upgrade [ver]    Upgrade PostgreSQL to version (default: 17)"
-  echo "                      Options: --force, --method=dump-restore"
+  echo "                      Options: --force, --backup, --method=dump-restore"
   echo "  db upgrade-check    Run pre-flight checks before upgrading"
   echo "  db upgrade-status   Show upgrade status and history"
   echo
@@ -654,8 +654,11 @@ pg_upgrade_precheck() {
     echo "✓ OK"
   fi
 
-  # Check 4: Disk space (need roughly 2x database size for pg_upgrade)
-  echo -n "Checking disk space requirements... "
+  # Check 4: Disk space
+  # pg_upgrade with --link uses hard links (minimal extra space needed)
+  # We need space for: WAL files, temp files, and some catalog data (~500MB-1GB typically)
+  # Plus space if user wants a SQL backup before upgrade
+  echo -n "Checking disk space... "
   local db_size_bytes=$($DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -t -c \
     "SELECT pg_database_size('calltelemetry_prod');" 2>/dev/null | tr -d '[:space:]')
 
@@ -663,19 +666,23 @@ pg_upgrade_precheck() {
     db_size_bytes=0
   fi
 
-  local required_bytes=$((db_size_bytes * 2))
-  local required_gb=$(echo "scale=2; $required_bytes / 1024 / 1024 / 1024" | bc 2>/dev/null || echo "0")
+  local db_size_gb=$(echo "scale=2; $db_size_bytes / 1024 / 1024 / 1024" | bc 2>/dev/null || echo "0")
+  # pg_upgrade with --link needs minimal space (just catalogs/WAL), estimate 1GB + 10% of DB
+  local required_bytes=$((1073741824 + db_size_bytes / 10))
+  local required_gb=$(echo "scale=2; $required_bytes / 1024 / 1024 / 1024" | bc 2>/dev/null || echo "1")
   local available_bytes=$(df --block-size=1 . 2>/dev/null | awk 'NR==2 {print $4}')
   local available_gb=$(echo "scale=2; $available_bytes / 1024 / 1024 / 1024" | bc 2>/dev/null || echo "0")
 
   if [ -z "$available_bytes" ] || [ "$available_bytes" -lt "$required_bytes" ] 2>/dev/null; then
     echo "✗ FAILED"
-    echo "  Required: ~${required_gb}GB (2x database size)"
+    echo "  Required: ~${required_gb}GB (for pg_upgrade catalogs and WAL)"
     echo "  Available: ${available_gb}GB"
-    echo "  pg_upgrade needs extra space for the new data directory."
     errors=$((errors + 1))
   else
-    echo "✓ OK (${available_gb}GB available, ~${required_gb}GB needed)"
+    echo "✓ OK (${available_gb}GB available)"
+    echo "  Database size: ${db_size_gb}GB"
+    echo "  Note: pg_upgrade uses hard links, so minimal extra space needed."
+    echo "  Optional backup (--backup flag) would need additional ${db_size_gb}GB."
   fi
 
   # Check 5: Data directory integrity
@@ -727,12 +734,16 @@ pg_upgrade_precheck() {
 db_upgrade() {
   local target_version="${1:-17}"
   local force_upgrade="${2:-false}"
+  local create_backup="${3:-false}"
   local current_version=$(get_postgres_version)
 
   echo "=== PostgreSQL Database Upgrade ==="
   echo ""
   echo "This will upgrade your PostgreSQL database from version $current_version to $target_version."
-  echo "The upgrade uses pg_upgrade for an efficient in-place upgrade."
+  echo "The upgrade uses pg_upgrade with --link for an efficient in-place upgrade."
+  echo ""
+  echo "Note: pg_upgrade uses hard links, so your original data files remain intact"
+  echo "until the upgrade is verified. This is your safety net for recovery."
   echo ""
 
   # Validate target version
@@ -767,10 +778,16 @@ db_upgrade() {
   echo "=== Starting PostgreSQL Upgrade ==="
   echo ""
 
-  # Step 1: Create a backup first
-  echo "Step 1: Creating database backup..."
-  backup
-  echo ""
+  # Step 1: Optional backup
+  if [ "$create_backup" = "true" ]; then
+    echo "Step 1: Creating database backup (--backup flag specified)..."
+    backup
+    echo ""
+  else
+    echo "Step 1: Skipping SQL backup (use --backup flag if you want one)"
+    echo "  Note: Your original data directory will be preserved as a backup."
+    echo ""
+  fi
 
   # Step 2: Record upgrade state
   echo "Step 2: Recording upgrade state..."
@@ -936,23 +953,80 @@ UPGRADE_SCRIPT
 
   if [ $upgrade_result -eq 100 ]; then
     echo ""
-    echo "pg_upgrade method unavailable. Falling back to dump/restore method..."
+    echo "============================================================"
+    echo "✗ pg_upgrade FAILED: Could not install PostgreSQL ${current_version}"
+    echo "============================================================"
     echo ""
-    db_upgrade_dump_restore "$target_version"
-    return $?
+    echo "The pg_upgrade method requires both the old and new PostgreSQL"
+    echo "versions to be available. The old version (${current_version}) could not"
+    echo "be installed in the upgrade container."
+    echo ""
+    echo "WHY THIS HAPPENED:"
+    echo "  PostgreSQL ${current_version} packages may not be available in the"
+    echo "  official Debian/Ubuntu repositories used by the postgres:${target_version} image."
+    echo ""
+    echo "RECOMMENDED SOLUTION - Dump/Restore Method:"
+    echo "  This method exports your data as SQL and imports it into a fresh"
+    echo "  PostgreSQL ${target_version} database. It's slower but more reliable."
+    echo ""
+    echo "  To use dump/restore, run:"
+    echo "    cli.sh db upgrade ${target_version} --method=dump-restore"
+    echo ""
+    echo "  This will:"
+    echo "    1. Create a full SQL dump of your database"
+    echo "    2. Stop the old PostgreSQL ${current_version} container"
+    echo "    3. Start a new PostgreSQL ${target_version} container"
+    echo "    4. Restore the SQL dump into the new database"
+    echo ""
+    echo "  Space required: Approximately equal to your database size for the dump file"
+    echo ""
+    echo "Your original data is untouched and safe."
+    echo "============================================================"
+
+    echo "STATUS=failed" >> "$PG_UPGRADE_STATE_DIR/upgrade.state"
+    echo "ERROR=pg_version_unavailable" >> "$PG_UPGRADE_STATE_DIR/upgrade.state"
+    echo "SUGGESTION=use --method=dump-restore" >> "$PG_UPGRADE_STATE_DIR/upgrade.state"
+
+    # Restart services since we stopped them
+    echo ""
+    echo "Restarting services with original database..."
+    $DOCKER_COMPOSE_CMD up -d
+    return 1
+
   elif [ $upgrade_result -ne 0 ]; then
     echo ""
-    echo "✗ pg_upgrade failed with exit code $upgrade_result"
+    echo "============================================================"
+    echo "✗ pg_upgrade FAILED with exit code $upgrade_result"
+    echo "============================================================"
     echo ""
-    echo "Upgrade state preserved in $PG_UPGRADE_STATE_DIR"
-    echo "Your original data is still intact in $data_dir"
+    echo "The pg_upgrade process encountered an error."
     echo ""
-    echo "You can try the dump/restore method instead:"
-    echo "  cli.sh db upgrade $target_version --method=dump-restore"
+    echo "WHAT TO CHECK:"
+    echo "  1. Review the upgrade logs above for specific error messages"
+    echo "  2. Common issues:"
+    echo "     - Incompatible extensions or data types"
+    echo "     - Corrupted data files"
+    echo "     - Insufficient permissions"
+    echo ""
+    echo "YOUR DATA IS SAFE:"
+    echo "  Your original data directory is still intact at: $data_dir"
+    echo "  Upgrade state saved to: $PG_UPGRADE_STATE_DIR"
+    echo ""
+    echo "ALTERNATIVE - Dump/Restore Method:"
+    echo "  If pg_upgrade continues to fail, you can try the dump/restore method:"
+    echo "    cli.sh db upgrade ${target_version} --method=dump-restore"
+    echo ""
+    echo "  This method is slower but handles more edge cases."
+    echo "============================================================"
 
     echo "STATUS=failed" >> "$PG_UPGRADE_STATE_DIR/upgrade.state"
     echo "ERROR=pg_upgrade_failed" >> "$PG_UPGRADE_STATE_DIR/upgrade.state"
     echo "EXIT_CODE=$upgrade_result" >> "$PG_UPGRADE_STATE_DIR/upgrade.state"
+
+    # Restart services since we stopped them
+    echo ""
+    echo "Restarting services with original database..."
+    $DOCKER_COMPOSE_CMD up -d
     return 1
   fi
 
@@ -2095,12 +2169,17 @@ db_cmd() {
       # Parse upgrade arguments
       local target_version=""
       local force_flag="false"
+      local backup_flag="false"
       local method=""
 
       while [ $# -gt 0 ]; do
         case "$1" in
           --force)
             force_flag="true"
+            shift
+            ;;
+          --backup)
+            backup_flag="true"
             shift
             ;;
           --method=*)
@@ -2123,7 +2202,7 @@ db_cmd() {
       if [ "$method" = "dump-restore" ]; then
         db_upgrade_dump_restore "$target_version"
       else
-        db_upgrade "$target_version" "$force_flag"
+        db_upgrade "$target_version" "$force_flag" "$backup_flag"
       fi
       ;;
     upgrade-check)
@@ -2187,9 +2266,14 @@ db_cmd() {
       echo ""
       echo "Upgrade Commands:"
       echo "  upgrade [version]   Upgrade PostgreSQL to specified version (default: 17)"
-      echo "                      Options: --force, --method=dump-restore"
+      echo "                      Options: --force, --backup, --method=dump-restore"
       echo "  upgrade-check [v]   Run pre-flight checks without upgrading"
       echo "  upgrade-status      Show upgrade status and history"
+      echo ""
+      echo "Upgrade Notes:"
+      echo "  pg_upgrade uses hard links, so minimal extra disk space is needed."
+      echo "  Your original data directory is preserved as a backup automatically."
+      echo "  Use --backup to also create a SQL dump before upgrading."
       return 1
       ;;
   esac
