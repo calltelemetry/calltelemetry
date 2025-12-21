@@ -185,6 +185,13 @@ show_help() {
   echo "  db tables [name]    Show table sizes"
   echo "  db purge <tbl> <d>  Purge records older than <d> days from table"
   echo "  db size             Show database size"
+  echo "  db version          Show PostgreSQL version"
+  echo
+  echo "Database Upgrade Commands:"
+  echo "  db upgrade [ver]    Upgrade PostgreSQL to version (default: 17)"
+  echo "                      Options: --force, --method=dump-restore"
+  echo "  db upgrade-check    Run pre-flight checks before upgrading"
+  echo "  db upgrade-status   Show upgrade status and history"
   echo
   echo "Migration Commands:"
   echo "  migrate             Show migration status (default)"
@@ -470,6 +477,769 @@ get_current_version() {
   fi
 }
 
+# =============================================================================
+# PostgreSQL Version Management & Upgrade Functions
+# =============================================================================
+
+# Metadata: Application version -> Required PostgreSQL version
+# Format: "app_version:pg_version" (pg_version 0 means any version is acceptable)
+POSTGRES_VERSION_REQUIREMENTS=(
+  "0.8.6:17"   # Version 0.8.6+ requires PostgreSQL 17
+  "0.9.0:17"   # Future versions will also require 17+
+)
+
+# Directory for storing PostgreSQL upgrade state
+PG_UPGRADE_STATE_DIR="/home/calltelemetry/.pg_upgrade"
+
+# Get the current PostgreSQL major version from the running database container
+get_postgres_version() {
+  local version=""
+
+  # Try to get version from running database
+  version=$($DOCKER_COMPOSE_CMD exec -T db psql -U calltelemetry -d calltelemetry_prod -t -c "SHOW server_version;" 2>/dev/null | tr -d '[:space:]' | cut -d'.' -f1)
+
+  if [ -n "$version" ] && [ "$version" -gt 0 ] 2>/dev/null; then
+    echo "$version"
+    return 0
+  fi
+
+  # Fallback: try to get from docker image tag
+  if [ -f "$ORIGINAL_FILE" ]; then
+    local image_tag=$(grep -E "postgresql:" "$ORIGINAL_FILE" | head -1 | sed 's/.*postgresql://' | sed 's/".*//' | cut -d'-' -f1)
+    if [ -n "$image_tag" ] && [ "$image_tag" -gt 0 ] 2>/dev/null; then
+      echo "$image_tag"
+      return 0
+    fi
+  fi
+
+  # Fallback: check PG_VERSION file in data directory
+  if [ -f "./postgres-data/data/PG_VERSION" ]; then
+    cat "./postgres-data/data/PG_VERSION" 2>/dev/null
+    return 0
+  fi
+
+  # For bitnami layout
+  if [ -f "./postgres-data/postgresql/data/PG_VERSION" ]; then
+    cat "./postgres-data/postgresql/data/PG_VERSION" 2>/dev/null
+    return 0
+  fi
+
+  echo "unknown"
+  return 1
+}
+
+# Get the PostgreSQL data directory version (from PG_VERSION file)
+get_postgres_data_version() {
+  local version=""
+
+  # Check standard location
+  if [ -f "./postgres-data/data/PG_VERSION" ]; then
+    version=$(cat "./postgres-data/data/PG_VERSION" 2>/dev/null)
+  # Check bitnami layout
+  elif [ -f "./postgres-data/postgresql/data/PG_VERSION" ]; then
+    version=$(cat "./postgres-data/postgresql/data/PG_VERSION" 2>/dev/null)
+  fi
+
+  if [ -n "$version" ]; then
+    echo "$version"
+    return 0
+  fi
+
+  echo "unknown"
+  return 1
+}
+
+# Get required PostgreSQL version for a given application version
+get_required_postgres_version() {
+  local app_version="$1"
+
+  # Handle "latest" as requiring the newest PostgreSQL
+  if [ "$app_version" = "latest" ]; then
+    echo "17"
+    return 0
+  fi
+
+  # Extract major.minor.patch from version string
+  if [[ "$app_version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
+    local major="${BASH_REMATCH[1]}"
+    local minor="${BASH_REMATCH[2]}"
+    local patch="${BASH_REMATCH[3]}"
+
+    # Check version requirements (from highest to lowest)
+    # 0.9.0+ requires PG 17
+    if [ "$major" -gt 0 ] || ([ "$major" -eq 0 ] && [ "$minor" -ge 9 ]); then
+      echo "17"
+      return 0
+    fi
+
+    # 0.8.6+ requires PG 17
+    if [ "$major" -eq 0 ] && [ "$minor" -eq 8 ] && [ "$patch" -ge 6 ]; then
+      echo "17"
+      return 0
+    fi
+  fi
+
+  # Older versions work with PG 14
+  echo "14"
+  return 0
+}
+
+# Check if PostgreSQL upgrade is needed for a target application version
+check_postgres_upgrade_needed() {
+  local target_app_version="$1"
+  local current_pg_version=$(get_postgres_version)
+  local required_pg_version=$(get_required_postgres_version "$target_app_version")
+
+  if [ "$current_pg_version" = "unknown" ]; then
+    echo "unknown"
+    return 2
+  fi
+
+  if [ "$current_pg_version" -lt "$required_pg_version" ] 2>/dev/null; then
+    echo "required"
+    return 0
+  fi
+
+  echo "not_required"
+  return 1
+}
+
+# Pre-flight checks for PostgreSQL upgrade
+pg_upgrade_precheck() {
+  local target_pg_version="$1"
+  local current_pg_version=$(get_postgres_version)
+  local errors=0
+
+  echo "=== PostgreSQL Upgrade Pre-flight Checks ==="
+  echo ""
+  echo "Current PostgreSQL Version: $current_pg_version"
+  echo "Target PostgreSQL Version:  $target_pg_version"
+  echo ""
+
+  # Check 1: Current version is valid
+  echo -n "Checking current PostgreSQL version... "
+  if [ "$current_pg_version" = "unknown" ]; then
+    echo "✗ FAILED"
+    echo "  Unable to detect current PostgreSQL version."
+    echo "  Ensure the database container is running."
+    errors=$((errors + 1))
+  elif [ "$current_pg_version" -ge "$target_pg_version" ] 2>/dev/null; then
+    echo "✗ NOT NEEDED"
+    echo "  Current version ($current_pg_version) >= target version ($target_pg_version)"
+    echo "  No upgrade required."
+    return 2
+  else
+    echo "✓ OK (version $current_pg_version -> $target_pg_version)"
+  fi
+
+  # Check 2: Database is accessible and healthy
+  echo -n "Checking database connectivity... "
+  if $DOCKER_COMPOSE_CMD exec -T db pg_isready -U calltelemetry -d calltelemetry_prod >/dev/null 2>&1; then
+    echo "✓ OK"
+  else
+    echo "✗ FAILED"
+    echo "  Database is not accepting connections."
+    errors=$((errors + 1))
+  fi
+
+  # Check 3: Check for active connections (warn only)
+  echo -n "Checking active connections... "
+  local conn_count=$($DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -t -c \
+    "SELECT count(*) FROM pg_stat_activity WHERE datname = 'calltelemetry_prod' AND state != 'idle';" 2>/dev/null | tr -d '[:space:]')
+  if [ -n "$conn_count" ] && [ "$conn_count" -gt 1 ]; then
+    echo "⚠ WARNING"
+    echo "  $conn_count active connections detected."
+    echo "  Consider stopping the application before upgrading."
+  else
+    echo "✓ OK"
+  fi
+
+  # Check 4: Disk space (need roughly 2x database size for pg_upgrade)
+  echo -n "Checking disk space requirements... "
+  local db_size_bytes=$($DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -t -c \
+    "SELECT pg_database_size('calltelemetry_prod');" 2>/dev/null | tr -d '[:space:]')
+
+  if [ -z "$db_size_bytes" ] || [ "$db_size_bytes" = "" ]; then
+    db_size_bytes=0
+  fi
+
+  local required_bytes=$((db_size_bytes * 2))
+  local required_gb=$(echo "scale=2; $required_bytes / 1024 / 1024 / 1024" | bc 2>/dev/null || echo "0")
+  local available_bytes=$(df --block-size=1 . 2>/dev/null | awk 'NR==2 {print $4}')
+  local available_gb=$(echo "scale=2; $available_bytes / 1024 / 1024 / 1024" | bc 2>/dev/null || echo "0")
+
+  if [ -z "$available_bytes" ] || [ "$available_bytes" -lt "$required_bytes" ] 2>/dev/null; then
+    echo "✗ FAILED"
+    echo "  Required: ~${required_gb}GB (2x database size)"
+    echo "  Available: ${available_gb}GB"
+    echo "  pg_upgrade needs extra space for the new data directory."
+    errors=$((errors + 1))
+  else
+    echo "✓ OK (${available_gb}GB available, ~${required_gb}GB needed)"
+  fi
+
+  # Check 5: Data directory integrity
+  echo -n "Checking data directory... "
+  local data_version=$(get_postgres_data_version)
+  if [ "$data_version" = "unknown" ]; then
+    echo "✗ FAILED"
+    echo "  Cannot find PostgreSQL data directory or PG_VERSION file."
+    errors=$((errors + 1))
+  elif [ "$data_version" != "$current_pg_version" ]; then
+    echo "✗ FAILED"
+    echo "  Data directory version ($data_version) doesn't match running version ($current_pg_version)"
+    errors=$((errors + 1))
+  else
+    echo "✓ OK (version $data_version)"
+  fi
+
+  # Check 6: Check for unsupported extensions or features
+  echo -n "Checking for upgrade blockers... "
+  local blockers=$($DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -t -c \
+    "SELECT count(*) FROM pg_extension WHERE extname IN ('pglogical', 'postgis');" 2>/dev/null | tr -d '[:space:]')
+  if [ -n "$blockers" ] && [ "$blockers" -gt 0 ]; then
+    echo "⚠ WARNING"
+    echo "  Some extensions may require special handling during upgrade."
+  else
+    echo "✓ OK"
+  fi
+
+  # Check 7: Ensure pg_upgrade state directory exists
+  echo -n "Checking upgrade state directory... "
+  if mkdir -p "$PG_UPGRADE_STATE_DIR" 2>/dev/null; then
+    echo "✓ OK"
+  else
+    echo "⚠ WARNING (could not create $PG_UPGRADE_STATE_DIR)"
+  fi
+
+  echo ""
+  echo "=== Pre-flight Check Summary ==="
+  if [ $errors -eq 0 ]; then
+    echo "✓ All checks passed. Ready to upgrade."
+    return 0
+  else
+    echo "✗ $errors check(s) failed. Please resolve issues before upgrading."
+    return 1
+  fi
+}
+
+# Main PostgreSQL upgrade function using pg_upgrade
+db_upgrade() {
+  local target_version="${1:-17}"
+  local force_upgrade="${2:-false}"
+  local current_version=$(get_postgres_version)
+
+  echo "=== PostgreSQL Database Upgrade ==="
+  echo ""
+  echo "This will upgrade your PostgreSQL database from version $current_version to $target_version."
+  echo "The upgrade uses pg_upgrade for an efficient in-place upgrade."
+  echo ""
+
+  # Validate target version
+  if ! [[ "$target_version" =~ ^[0-9]+$ ]]; then
+    echo "Error: Invalid target version. Please specify a major version number (e.g., 17)"
+    return 1
+  fi
+
+  if [ "$target_version" -lt 14 ] || [ "$target_version" -gt 18 ]; then
+    echo "Error: Target version must be between 14 and 18"
+    return 1
+  fi
+
+  # Run pre-flight checks
+  if ! pg_upgrade_precheck "$target_version"; then
+    local precheck_result=$?
+    if [ $precheck_result -eq 2 ]; then
+      echo ""
+      echo "No upgrade needed. Database is already at version $current_version."
+      return 0
+    fi
+    if [ "$force_upgrade" != "true" ]; then
+      echo ""
+      echo "Pre-flight checks failed. Use 'db upgrade $target_version --force' to proceed anyway."
+      return 1
+    fi
+    echo ""
+    echo "⚠️  Proceeding despite failed pre-flight checks (--force specified)"
+  fi
+
+  echo ""
+  echo "=== Starting PostgreSQL Upgrade ==="
+  echo ""
+
+  # Step 1: Create a backup first
+  echo "Step 1: Creating database backup..."
+  backup
+  echo ""
+
+  # Step 2: Record upgrade state
+  echo "Step 2: Recording upgrade state..."
+  mkdir -p "$PG_UPGRADE_STATE_DIR"
+  cat > "$PG_UPGRADE_STATE_DIR/upgrade.state" << EOF
+UPGRADE_STARTED=$(date -Iseconds)
+SOURCE_VERSION=$current_version
+TARGET_VERSION=$target_version
+STATUS=in_progress
+EOF
+  echo "Upgrade state saved to $PG_UPGRADE_STATE_DIR/upgrade.state"
+  echo ""
+
+  # Step 3: Stop the application services (keep only db for now)
+  echo "Step 3: Stopping application services..."
+  $DOCKER_COMPOSE_CMD stop web vue-web traceroute nats caddy 2>/dev/null || true
+  echo "Application services stopped."
+  echo ""
+
+  # Step 4: Stop the database
+  echo "Step 4: Stopping database container..."
+  $DOCKER_COMPOSE_CMD stop db
+  echo "Database stopped."
+  echo ""
+
+  # Step 5: Determine data directory layout
+  echo "Step 5: Analyzing data directory structure..."
+  local data_dir=""
+  local bitnami_layout=false
+
+  if [ -f "./postgres-data/postgresql/data/PG_VERSION" ]; then
+    data_dir="./postgres-data/postgresql/data"
+    bitnami_layout=true
+    echo "Detected Bitnami PostgreSQL layout"
+  elif [ -f "./postgres-data/data/PG_VERSION" ]; then
+    data_dir="./postgres-data/data"
+    echo "Detected standard PostgreSQL layout"
+  elif [ -f "./postgres-data/PG_VERSION" ]; then
+    data_dir="./postgres-data"
+    echo "Detected simple PostgreSQL layout"
+  else
+    echo "Error: Could not find PostgreSQL data directory"
+    # Restore upgrade state
+    echo "STATUS=failed" >> "$PG_UPGRADE_STATE_DIR/upgrade.state"
+    echo "ERROR=data_directory_not_found" >> "$PG_UPGRADE_STATE_DIR/upgrade.state"
+    return 1
+  fi
+  echo "Data directory: $data_dir"
+  echo ""
+
+  # Step 6: Create new data directory for target version
+  echo "Step 6: Preparing new data directory..."
+  local new_data_parent="./postgres-data-pg${target_version}"
+  local new_data_dir=""
+
+  if [ "$bitnami_layout" = true ]; then
+    new_data_dir="${new_data_parent}/postgresql/data"
+  else
+    new_data_dir="${new_data_parent}/data"
+  fi
+
+  mkdir -p "$(dirname "$new_data_dir")"
+  echo "New data directory will be: $new_data_dir"
+  echo ""
+
+  # Step 7: Run pg_upgrade in a container
+  echo "Step 7: Running pg_upgrade..."
+  echo "This may take several minutes depending on database size."
+  echo ""
+
+  # Create pg_upgrade script
+  local upgrade_script="$PG_UPGRADE_STATE_DIR/run_upgrade.sh"
+  cat > "$upgrade_script" << 'UPGRADE_SCRIPT'
+#!/bin/bash
+set -e
+
+OLD_VERSION=$1
+NEW_VERSION=$2
+OLD_DATADIR=$3
+NEW_DATADIR=$4
+
+echo "Initializing new data directory..."
+/usr/lib/postgresql/${NEW_VERSION}/bin/initdb -D ${NEW_DATADIR} -U calltelemetry --encoding=UTF8 --locale=C
+
+echo "Running pg_upgrade..."
+cd /tmp
+/usr/lib/postgresql/${NEW_VERSION}/bin/pg_upgrade \
+  --old-datadir=${OLD_DATADIR} \
+  --new-datadir=${NEW_DATADIR} \
+  --old-bindir=/usr/lib/postgresql/${OLD_VERSION}/bin \
+  --new-bindir=/usr/lib/postgresql/${NEW_VERSION}/bin \
+  --username=calltelemetry \
+  --jobs=$(nproc) \
+  --link
+
+echo "pg_upgrade completed successfully!"
+UPGRADE_SCRIPT
+  chmod +x "$upgrade_script"
+
+  # Determine the absolute paths for mounting
+  local abs_old_data=$(cd "$(dirname "$data_dir")" && pwd)/$(basename "$data_dir")
+  local abs_new_data_parent=$(mkdir -p "$new_data_parent" && cd "$new_data_parent" && pwd)
+  local abs_upgrade_state=$(cd "$PG_UPGRADE_STATE_DIR" && pwd)
+
+  # Run the upgrade container with both PostgreSQL versions
+  # Using tianon/docker-pg-upgrade which has multiple PG versions
+  echo "Pulling pg_upgrade container image..."
+  docker pull tianon/postgres-upgrade:${current_version}-to-${target_version} 2>/dev/null || {
+    echo "Official upgrade image not found. Using manual upgrade approach..."
+
+    # Alternative: Use official postgres image and install old version
+    docker pull postgres:${target_version}
+
+    # Run upgrade using the postgres container
+    docker run --rm \
+      -v "${abs_old_data}:/var/lib/postgresql/${current_version}/data:rw" \
+      -v "${abs_new_data_parent}:/var/lib/postgresql/${target_version}:rw" \
+      -v "${abs_upgrade_state}:/upgrade:ro" \
+      -e POSTGRES_USER=calltelemetry \
+      -e POSTGRES_PASSWORD=postgres \
+      -e PGUSER=calltelemetry \
+      postgres:${target_version} \
+      bash -c "
+        set -e
+        echo 'Installing PostgreSQL ${current_version} for upgrade...'
+        apt-get update && apt-get install -y postgresql-${current_version} || {
+          echo 'Could not install old PostgreSQL version. Falling back to dump/restore.'
+          exit 100
+        }
+
+        NEW_DATADIR=/var/lib/postgresql/${target_version}/data
+
+        echo 'Initializing new data directory...'
+        mkdir -p \$NEW_DATADIR
+        chown postgres:postgres \$NEW_DATADIR
+        chmod 700 \$NEW_DATADIR
+        su postgres -c \"/usr/lib/postgresql/${target_version}/bin/initdb -D \$NEW_DATADIR -U calltelemetry --encoding=UTF8\"
+
+        echo 'Running pg_upgrade...'
+        cd /tmp
+        su postgres -c \"/usr/lib/postgresql/${target_version}/bin/pg_upgrade \\
+          --old-datadir=/var/lib/postgresql/${current_version}/data \\
+          --new-datadir=\$NEW_DATADIR \\
+          --old-bindir=/usr/lib/postgresql/${current_version}/bin \\
+          --new-bindir=/usr/lib/postgresql/${target_version}/bin \\
+          --username=calltelemetry \\
+          --link\"
+
+        echo 'pg_upgrade completed!'
+      "
+  } || {
+    # Use the official upgrade image if available
+    docker run --rm \
+      -v "${abs_old_data}:/var/lib/postgresql/${current_version}/data:rw" \
+      -v "${abs_new_data_parent}:/var/lib/postgresql/${target_version}:rw" \
+      -e POSTGRES_USER=calltelemetry \
+      -e POSTGRES_PASSWORD=postgres \
+      -e PGUSER=calltelemetry \
+      tianon/postgres-upgrade:${current_version}-to-${target_version}
+  }
+
+  local upgrade_result=$?
+
+  if [ $upgrade_result -eq 100 ]; then
+    echo ""
+    echo "pg_upgrade method unavailable. Falling back to dump/restore method..."
+    echo ""
+    db_upgrade_dump_restore "$target_version"
+    return $?
+  elif [ $upgrade_result -ne 0 ]; then
+    echo ""
+    echo "✗ pg_upgrade failed with exit code $upgrade_result"
+    echo ""
+    echo "Upgrade state preserved in $PG_UPGRADE_STATE_DIR"
+    echo "Your original data is still intact in $data_dir"
+    echo ""
+    echo "You can try the dump/restore method instead:"
+    echo "  cli.sh db upgrade $target_version --method=dump-restore"
+
+    echo "STATUS=failed" >> "$PG_UPGRADE_STATE_DIR/upgrade.state"
+    echo "ERROR=pg_upgrade_failed" >> "$PG_UPGRADE_STATE_DIR/upgrade.state"
+    echo "EXIT_CODE=$upgrade_result" >> "$PG_UPGRADE_STATE_DIR/upgrade.state"
+    return 1
+  fi
+
+  echo ""
+  echo "✓ pg_upgrade completed successfully!"
+  echo ""
+
+  # Step 8: Update docker-compose.yml to use new PostgreSQL version
+  echo "Step 8: Updating docker-compose.yml..."
+
+  # Backup current compose file
+  cp "$ORIGINAL_FILE" "$BACKUP_DIR/docker-compose-pre-pg-upgrade-$(date +%Y%m%d-%H%M%S).yml"
+
+  # Update the PostgreSQL image
+  sed -i "s|bitnamilegacy/postgresql:${current_version}|postgres:${target_version}|g" "$ORIGINAL_FILE"
+  sed -i "s|postgres:${current_version}|postgres:${target_version}|g" "$ORIGINAL_FILE"
+
+  # Update volume mount for official postgres (different layout than bitnami)
+  if [ "$bitnami_layout" = true ]; then
+    # Change from bitnami layout to official postgres layout
+    sed -i 's|./postgres-data:/bitnami/postgresql|./postgres-data:/var/lib/postgresql/data|g' "$ORIGINAL_FILE"
+  fi
+
+  echo "docker-compose.yml updated to use postgres:${target_version}"
+  echo ""
+
+  # Step 9: Swap data directories
+  echo "Step 9: Swapping data directories..."
+  local old_data_backup="./postgres-data-pg${current_version}-backup-$(date +%Y%m%d-%H%M%S)"
+
+  # For bitnami layout, we need to restructure
+  if [ "$bitnami_layout" = true ]; then
+    # Move old data to backup
+    mv "./postgres-data" "$old_data_backup"
+
+    # Create new structure for official postgres
+    mkdir -p "./postgres-data"
+    mv "${abs_new_data_parent}/data" "./postgres-data/" 2>/dev/null || \
+    mv "${abs_new_data_parent}/postgresql/data" "./postgres-data/data" 2>/dev/null || \
+    mv "${abs_new_data_parent}" "./postgres-data/data"
+
+    # Ensure proper permissions
+    sudo chown -R 999:999 "./postgres-data" 2>/dev/null || true
+  else
+    mv "./postgres-data" "$old_data_backup"
+    mv "$new_data_parent" "./postgres-data"
+    sudo chown -R 999:999 "./postgres-data" 2>/dev/null || true
+  fi
+
+  echo "Data directories swapped."
+  echo "Old data backed up to: $old_data_backup"
+  echo ""
+
+  # Step 10: Start the new database
+  echo "Step 10: Starting upgraded database..."
+  $DOCKER_COMPOSE_CMD up -d db
+
+  # Wait for database to be ready
+  echo "Waiting for database to start..."
+  local max_wait=60
+  local waited=0
+  while [ $waited -lt $max_wait ]; do
+    if $DOCKER_COMPOSE_CMD exec -T db pg_isready -U calltelemetry -d calltelemetry_prod >/dev/null 2>&1; then
+      echo "✓ Database is ready!"
+      break
+    fi
+    sleep 2
+    waited=$((waited + 2))
+    echo "  Waiting... ($waited/$max_wait seconds)"
+  done
+
+  if [ $waited -ge $max_wait ]; then
+    echo "⚠ Database did not start within $max_wait seconds."
+    echo "  Check logs with: $DOCKER_COMPOSE_CMD logs db"
+    return 1
+  fi
+
+  # Verify the new version
+  local new_version=$(get_postgres_version)
+  echo ""
+  echo "Verifying upgrade..."
+  echo "  Running PostgreSQL version: $new_version"
+
+  if [ "$new_version" != "$target_version" ]; then
+    echo "⚠ Warning: Expected version $target_version but got $new_version"
+  fi
+  echo ""
+
+  # Step 11: Run post-upgrade tasks
+  echo "Step 11: Running post-upgrade optimization..."
+  $DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -c "ANALYZE;" 2>/dev/null || true
+  echo "Database statistics updated."
+  echo ""
+
+  # Step 12: Start remaining services
+  echo "Step 12: Starting application services..."
+  $DOCKER_COMPOSE_CMD up -d
+  echo ""
+
+  # Update upgrade state
+  cat >> "$PG_UPGRADE_STATE_DIR/upgrade.state" << EOF
+UPGRADE_COMPLETED=$(date -Iseconds)
+STATUS=completed
+NEW_VERSION=$new_version
+OLD_DATA_BACKUP=$old_data_backup
+EOF
+
+  echo "=== PostgreSQL Upgrade Complete ==="
+  echo ""
+  echo "Summary:"
+  echo "  Previous version: $current_version"
+  echo "  Current version:  $new_version"
+  echo "  Old data backup:  $old_data_backup"
+  echo "  Upgrade log:      $PG_UPGRADE_STATE_DIR/upgrade.state"
+  echo ""
+  echo "The upgrade was successful! Your application should now be running."
+  echo ""
+  echo "If you encounter any issues:"
+  echo "  1. Check logs: $DOCKER_COMPOSE_CMD logs"
+  echo "  2. Restore from backup: cli.sh db restore <backup-file>"
+  echo "  3. Rollback: cli.sh rollback"
+
+  return 0
+}
+
+# Fallback upgrade method using dump/restore
+db_upgrade_dump_restore() {
+  local target_version="${1:-17}"
+  local current_version=$(get_postgres_version)
+
+  echo "=== PostgreSQL Upgrade via Dump/Restore ==="
+  echo ""
+  echo "This method creates a full SQL dump and restores it to a new PostgreSQL version."
+  echo "It's slower but more reliable than pg_upgrade."
+  echo ""
+
+  # Step 1: Create a fresh backup
+  echo "Step 1: Creating database dump..."
+  local dump_file="$BACKUP_FOLDER_PATH/pg-upgrade-dump-$(date +%Y%m%d-%H%M%S).sql"
+
+  $DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db pg_dumpall -U calltelemetry > "$dump_file"
+
+  if [ ! -s "$dump_file" ]; then
+    echo "Error: Database dump failed or is empty"
+    return 1
+  fi
+
+  echo "Dump created: $dump_file ($(du -h "$dump_file" | cut -f1))"
+  echo ""
+
+  # Step 2: Stop all services
+  echo "Step 2: Stopping all services..."
+  $DOCKER_COMPOSE_CMD down
+  echo ""
+
+  # Step 3: Move old data directory
+  echo "Step 3: Backing up old data directory..."
+  local old_data_backup="./postgres-data-pg${current_version}-backup-$(date +%Y%m%d-%H%M%S)"
+  mv "./postgres-data" "$old_data_backup"
+  mkdir -p "./postgres-data"
+  echo "Old data moved to: $old_data_backup"
+  echo ""
+
+  # Step 4: Update docker-compose.yml
+  echo "Step 4: Updating docker-compose.yml..."
+  cp "$ORIGINAL_FILE" "$BACKUP_DIR/docker-compose-pre-pg-upgrade-$(date +%Y%m%d-%H%M%S).yml"
+
+  # Update PostgreSQL image to official postgres
+  sed -i "s|bitnamilegacy/postgresql:${current_version}|postgres:${target_version}|g" "$ORIGINAL_FILE"
+  sed -i "s|postgres:${current_version}|postgres:${target_version}|g" "$ORIGINAL_FILE"
+
+  # Update volume mount for official postgres
+  sed -i 's|./postgres-data:/bitnami/postgresql|./postgres-data:/var/lib/postgresql/data|g' "$ORIGINAL_FILE"
+
+  # Update environment variables for official postgres
+  sed -i 's/POSTGRESQL_MAX_CONNECTIONS/POSTGRES_MAX_CONNECTIONS/g' "$ORIGINAL_FILE"
+
+  echo "docker-compose.yml updated."
+  echo ""
+
+  # Step 5: Start new database
+  echo "Step 5: Starting new PostgreSQL ${target_version} database..."
+  $DOCKER_COMPOSE_CMD up -d db
+
+  # Wait for database initialization
+  echo "Waiting for database to initialize..."
+  sleep 10
+
+  local max_wait=60
+  local waited=0
+  while [ $waited -lt $max_wait ]; do
+    if $DOCKER_COMPOSE_CMD exec -T db pg_isready -U calltelemetry -d postgres >/dev/null 2>&1; then
+      echo "✓ Database is ready!"
+      break
+    fi
+    sleep 2
+    waited=$((waited + 2))
+    echo "  Waiting... ($waited/$max_wait seconds)"
+  done
+  echo ""
+
+  # Step 6: Restore the dump
+  echo "Step 6: Restoring database from dump..."
+  echo "This may take a while for large databases..."
+
+  # Create the database if it doesn't exist
+  $DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d postgres -c \
+    "CREATE DATABASE calltelemetry_prod WITH OWNER calltelemetry;" 2>/dev/null || true
+
+  # Restore the dump
+  cat "$dump_file" | $DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d postgres
+
+  echo "Database restored."
+  echo ""
+
+  # Step 7: Verify and start services
+  echo "Step 7: Verifying and starting application..."
+  local new_version=$(get_postgres_version)
+  echo "Running PostgreSQL version: $new_version"
+
+  $DOCKER_COMPOSE_CMD up -d
+  echo ""
+
+  # Update upgrade state
+  cat >> "$PG_UPGRADE_STATE_DIR/upgrade.state" << EOF
+UPGRADE_METHOD=dump_restore
+UPGRADE_COMPLETED=$(date -Iseconds)
+STATUS=completed
+NEW_VERSION=$new_version
+DUMP_FILE=$dump_file
+OLD_DATA_BACKUP=$old_data_backup
+EOF
+
+  echo "=== PostgreSQL Upgrade Complete ==="
+  echo ""
+  echo "Summary:"
+  echo "  Previous version: $current_version"
+  echo "  Current version:  $new_version"
+  echo "  Dump file:        $dump_file"
+  echo "  Old data backup:  $old_data_backup"
+  echo ""
+
+  return 0
+}
+
+# Display PostgreSQL upgrade status and history
+pg_upgrade_status() {
+  echo "=== PostgreSQL Upgrade Status ==="
+  echo ""
+
+  local current_version=$(get_postgres_version)
+  local data_version=$(get_postgres_data_version)
+
+  echo "Current PostgreSQL Version: $current_version"
+  echo "Data Directory Version:     $data_version"
+  echo ""
+
+  # Show docker-compose PostgreSQL configuration
+  if [ -f "$ORIGINAL_FILE" ]; then
+    echo "Docker Compose Configuration:"
+    grep -E "postgresql:|postgres:" "$ORIGINAL_FILE" | head -1 | sed 's/^/  /'
+  fi
+  echo ""
+
+  # Show upgrade state if exists
+  if [ -f "$PG_UPGRADE_STATE_DIR/upgrade.state" ]; then
+    echo "Last Upgrade State:"
+    cat "$PG_UPGRADE_STATE_DIR/upgrade.state" | sed 's/^/  /'
+  else
+    echo "No previous upgrade state found."
+  fi
+  echo ""
+
+  # Show what version would be required for latest app
+  echo "Version Requirements:"
+  echo "  Current app version: $(get_current_version)"
+  echo "  For 'latest' app:    PostgreSQL $(get_required_postgres_version "latest") required"
+
+  # Check if upgrade is needed
+  local upgrade_check=$(check_postgres_upgrade_needed "latest")
+  if [ "$upgrade_check" = "required" ]; then
+    echo ""
+    echo "⚠️  PostgreSQL upgrade will be required to update to latest version."
+    echo "   Run 'cli.sh db upgrade' to upgrade PostgreSQL first."
+  fi
+}
+
 # Function to configure IPv6 settings in docker-compose.yml
 configure_ipv6() {
   local compose_file="$1"
@@ -697,6 +1467,51 @@ update() {
       sleep 5
     fi
   fi
+
+  # Check PostgreSQL version requirements for target application version
+  echo "Checking PostgreSQL requirements..."
+  local current_pg_version=$(get_postgres_version)
+  local required_pg_version=$(get_required_postgres_version "$version")
+  local pg_upgrade_needed=$(check_postgres_upgrade_needed "$version")
+
+  if [ "$current_pg_version" != "unknown" ]; then
+    echo "  Current PostgreSQL: $current_pg_version"
+    echo "  Required for $version: PostgreSQL $required_pg_version"
+
+    if [ "$pg_upgrade_needed" = "required" ]; then
+      echo ""
+      echo "❌ ERROR: PostgreSQL upgrade required before updating to $version"
+      echo ""
+      echo "   Your database is running PostgreSQL $current_pg_version, but version $version"
+      echo "   requires PostgreSQL $required_pg_version or higher."
+      echo ""
+      echo "   Please upgrade PostgreSQL first using:"
+      echo "     cli.sh db upgrade $required_pg_version"
+      echo ""
+      echo "   To check upgrade requirements:"
+      echo "     cli.sh db upgrade-check $required_pg_version"
+      echo ""
+      if [ "$force_upgrade" = false ]; then
+        echo "   To proceed anyway (NOT RECOMMENDED), use:"
+        echo "     $0 update $version --force-upgrade"
+        echo ""
+        echo "   WARNING: Proceeding without upgrading PostgreSQL will likely cause"
+        echo "   the application to fail to start due to database incompatibility."
+        return 1
+      else
+        echo "⚠️  WARNING: Proceeding with PostgreSQL version mismatch (--force-upgrade specified)"
+        echo "   This may cause the application to fail!"
+        echo ""
+        sleep 3
+      fi
+    else
+      echo "✅ PostgreSQL version is compatible"
+    fi
+  else
+    echo "⚠️  Could not detect PostgreSQL version (database may not be running)"
+    echo "   Will continue with update, but PostgreSQL compatibility should be verified."
+  fi
+  echo ""
 
   # Check Docker version and update if needed
   echo "Checking Docker version..."
@@ -1276,6 +2091,56 @@ db_cmd() {
       $DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -c \
         "SELECT pg_size_pretty(pg_database_size('calltelemetry_prod')) AS database_size;"
       ;;
+    upgrade)
+      # Parse upgrade arguments
+      local target_version=""
+      local force_flag="false"
+      local method=""
+
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --force)
+            force_flag="true"
+            shift
+            ;;
+          --method=*)
+            method="${1#--method=}"
+            shift
+            ;;
+          [0-9]*)
+            target_version="$1"
+            shift
+            ;;
+          *)
+            shift
+            ;;
+        esac
+      done
+
+      # Default to PostgreSQL 17 if no version specified
+      target_version="${target_version:-17}"
+
+      if [ "$method" = "dump-restore" ]; then
+        db_upgrade_dump_restore "$target_version"
+      else
+        db_upgrade "$target_version" "$force_flag"
+      fi
+      ;;
+    upgrade-check)
+      local target_version="${1:-17}"
+      echo "Running pre-flight checks for PostgreSQL $target_version upgrade..."
+      echo ""
+      pg_upgrade_precheck "$target_version"
+      ;;
+    upgrade-status)
+      pg_upgrade_status
+      ;;
+    version)
+      local pg_version=$(get_postgres_version)
+      local data_version=$(get_postgres_data_version)
+      echo "PostgreSQL Version: $pg_version"
+      echo "Data Directory Version: $data_version"
+      ;;
     ""|status)
       echo "=== Database Status ==="
       if $DOCKER_COMPOSE_CMD exec -T db pg_isready -U calltelemetry -d calltelemetry_prod >/dev/null 2>&1; then
@@ -1285,13 +2150,24 @@ db_cmd() {
         return 1
       fi
       echo ""
+      # Show PostgreSQL version
+      local pg_version=$(get_postgres_version)
+      echo "PostgreSQL Version: $pg_version"
+      echo ""
       echo "=== Database Size ==="
       $DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -c \
         "SELECT pg_size_pretty(pg_database_size('calltelemetry_prod')) AS database_size;"
       echo ""
       list_backups
       echo ""
-      echo "Commands: cli.sh db <backup|restore|list|compact|tables|purge|size>"
+      # Check if upgrade is recommended
+      local upgrade_check=$(check_postgres_upgrade_needed "latest")
+      if [ "$upgrade_check" = "required" ]; then
+        echo "⚠️  PostgreSQL upgrade recommended for latest app version."
+        echo "   Run 'cli.sh db upgrade-check' for details."
+        echo ""
+      fi
+      echo "Commands: cli.sh db <backup|restore|list|compact|tables|purge|size|upgrade|version>"
       ;;
     *)
       echo "Unknown db command: $action"
@@ -1299,14 +2175,21 @@ db_cmd() {
       echo "Usage: cli.sh db <command>"
       echo ""
       echo "Commands:"
-      echo "  status          Show database status (default)"
-      echo "  backup          Create a database backup"
-      echo "  restore <file>  Restore from a backup file"
-      echo "  list            List available backups"
-      echo "  compact         Vacuum and compact the database"
-      echo "  tables [name]   Show table sizes (optionally filter by name)"
-      echo "  purge <t> <d>   Purge records older than <d> days from table <t>"
-      echo "  size            Show database size"
+      echo "  status              Show database status (default)"
+      echo "  backup              Create a database backup"
+      echo "  restore <file>      Restore from a backup file"
+      echo "  list                List available backups"
+      echo "  compact             Vacuum and compact the database"
+      echo "  tables [name]       Show table sizes (optionally filter by name)"
+      echo "  purge <t> <d>       Purge records older than <d> days from table <t>"
+      echo "  size                Show database size"
+      echo "  version             Show PostgreSQL version"
+      echo ""
+      echo "Upgrade Commands:"
+      echo "  upgrade [version]   Upgrade PostgreSQL to specified version (default: 17)"
+      echo "                      Options: --force, --method=dump-restore"
+      echo "  upgrade-check [v]   Run pre-flight checks without upgrading"
+      echo "  upgrade-status      Show upgrade status and history"
       return 1
       ;;
   esac
