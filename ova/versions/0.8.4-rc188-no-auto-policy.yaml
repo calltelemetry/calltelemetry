@@ -43,7 +43,7 @@ services:
       - ct
 
   web:
-    image: "calltelemetry/web:0.8.4-rc188-no-auto-policy"
+    image: "calltelemetry/web:0.8.4-rc188"
     restart: "always"
     user: root
     expose:
