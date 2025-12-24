@@ -12,7 +12,7 @@ services:
       - ct
 
   vue-web:
-    image: "calltelemetry/vue:0.8.4-rc188-no-auto-policy2"
+    image: "calltelemetry/vue:0.8.4-rc188-no-auto-policy3"
     restart: "always"
     expose:
       - "80"
