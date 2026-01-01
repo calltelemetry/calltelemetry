@@ -1,6 +1,18 @@
 #!/bin/sh -eux
 sudo hostname ct-appliance
 
+# Detect installation user and directory
+if [ -n "${SUDO_USER:-}" ]; then
+  INSTALL_USER="$SUDO_USER"
+  INSTALL_DIR=$(eval echo "~$SUDO_USER")
+else
+  INSTALL_USER=$(whoami)
+  INSTALL_DIR="$HOME"
+fi
+
+echo "Installation user: $INSTALL_USER"
+echo "Installation directory: $INSTALL_DIR"
+
 # Install wget and basic net tools if not already installed.
 sudo dnf install wget net-tools -y
 
@@ -21,18 +33,9 @@ sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin 
 # Enable and Start Docker
 sudo systemctl enable --now docker
 
-# Add calltelemetry user
-if id "calltelemetry" >/dev/null 2>&1; then
-  echo "User calltelemetry exists."
-else
-  echo "User calltelemetry does not exist."
-  sudo useradd -m calltelemetry
-  echo "calltelemetry" | passwd calltelemetry --stdin
-  sudo usermod -aG docker calltelemetry
-  sudo usermod -aG wheel calltelemetry
-fi
-
-sudo chown -R calltelemetry /home/calltelemetry
+# Ensure install user has docker access
+sudo usermod -aG docker "$INSTALL_USER"
+sudo chown -R "$INSTALL_USER" "$INSTALL_DIR"
 
 # Minimum Docker API version required (1.44 = Docker 25.0+)
 MIN_API_VERSION="1.44"
@@ -82,12 +85,12 @@ DOCKER_COMPOSE_CMD=$(detect_docker_compose_cmd)
 echo "Using docker compose command: $DOCKER_COMPOSE_CMD"
 
 # Setup Call Telemetry Home
-cd /home/calltelemetry/
-chown -R calltelemetry /home/calltelemetry
+cd "$INSTALL_DIR"
+chown -R "$INSTALL_USER" "$INSTALL_DIR"
 
 # Prep SFTP root
-mkdir /home/calltelemetry/sftp -p
-chown calltelemetry /home/calltelemetry/sftp
+mkdir "$INSTALL_DIR/sftp" -p
+chown "$INSTALL_USER" "$INSTALL_DIR/sftp"
 
 # Install the setup-network-environment binary
 # This helps discover the host IP address and other network settings
@@ -122,7 +125,7 @@ After=docker.service
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-WorkingDirectory=/home/calltelemetry
+WorkingDirectory=${INSTALL_DIR}
 EnvironmentFile=/etc/network-environment
 ExecStart=${DOCKER_COMPOSE_CMD} up -d --remove-orphans
 ExecStop=${DOCKER_COMPOSE_CMD} down
@@ -149,22 +152,20 @@ sudo systemctl enable docker.service --now
 sudo systemctl enable docker-compose-app
 
 # Setup a Backup Job
-sudo tee -a /etc/crontab > /dev/null <<'EOF'
-0 0 * * * calltelemetry /home/calltelemetry/backup.sh
-EOF
+echo "0 0 * * * $INSTALL_USER $INSTALL_DIR/backup.sh" | sudo tee -a /etc/crontab > /dev/null
 
 # Downloads a utility reset script
 wget https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/ova/reset.sh -O reset.sh
-sudo chmod +x /home/calltelemetry/reset.sh
+sudo chmod +x "$INSTALL_DIR/reset.sh"
 
 # Prep Backup Directory and Script
-sudo mkdir /home/calltelemetry/backups -p
-sudo chown -R calltelemetry /home/calltelemetry/backups
-wget https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/ova/backup.sh -O /home/calltelemetry/backup.sh
-sudo chmod +x /home/calltelemetry/backup.sh
-sudo chown calltelemetry /home/calltelemetry/backup.sh
+sudo mkdir "$INSTALL_DIR/backups" -p
+sudo chown -R "$INSTALL_USER" "$INSTALL_DIR/backups"
+wget https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/ova/backup.sh -O "$INSTALL_DIR/backup.sh"
+sudo chmod +x "$INSTALL_DIR/backup.sh"
+sudo chown "$INSTALL_USER" "$INSTALL_DIR/backup.sh"
 
-sudo usermod -aG docker calltelemetry
+sudo usermod -aG docker "$INSTALL_USER"
 sudo systemctl restart docker
 
 sudo tee /etc/issue > /dev/null <<'EOF'
