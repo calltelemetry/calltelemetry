@@ -40,6 +40,65 @@ GRAFANA_ASSET_PATHS=(
   "grafana/dashboards/caddy-overview.json"
 )
 
+# PostgreSQL version configuration
+POSTGRES_OVERRIDE_FILE="docker-compose.override.yml"
+POSTGRES_DEFAULT_VERSION="17"
+POSTGRES_SUPPORTED_VERSIONS="14 15 16 17 18"
+POSTGRES_OVERRIDE_URL="https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/ova"
+
+# Get current PostgreSQL version from override file, or default
+get_postgres_version() {
+  if [ -f "$POSTGRES_OVERRIDE_FILE" ]; then
+    # Extract version from calltelemetry/postgres:XX image line
+    local version=$(grep -o 'calltelemetry/postgres:[0-9]\+' "$POSTGRES_OVERRIDE_FILE" | grep -o '[0-9]\+$')
+    if [ -n "$version" ]; then
+      echo "$version"
+      return
+    fi
+  fi
+  echo "$POSTGRES_DEFAULT_VERSION"
+}
+
+# Set PostgreSQL version by downloading override file
+set_postgres_version() {
+  local version="$1"
+  if ! echo "$POSTGRES_SUPPORTED_VERSIONS" | grep -qw "$version"; then
+    echo "Invalid PostgreSQL version: $version"
+    echo "Supported versions: $POSTGRES_SUPPORTED_VERSIONS"
+    return 1
+  fi
+
+  local override_url="${POSTGRES_OVERRIDE_URL}/postgres-${version}.yaml"
+
+  echo "Downloading PostgreSQL $version override..."
+  if wget -q "$override_url" -O "$POSTGRES_OVERRIDE_FILE"; then
+    echo "PostgreSQL version set to $version"
+    echo "Override file: $POSTGRES_OVERRIDE_FILE"
+    return 0
+  else
+    echo "Failed to download override file from: $override_url"
+    return 1
+  fi
+}
+
+# Get current PostgreSQL image (checks override first, then main compose)
+get_current_postgres_image() {
+  # Check override file first
+  if [ -f "$POSTGRES_OVERRIDE_FILE" ]; then
+    local override_image=$(grep -o 'image: *"[^"]*"' "$POSTGRES_OVERRIDE_FILE" | head -1 | sed 's/image: *"\([^"]*\)"/\1/')
+    if [ -n "$override_image" ]; then
+      echo "$override_image"
+      return
+    fi
+  fi
+  # Fall back to main compose file
+  if [ -f "$ORIGINAL_FILE" ]; then
+    grep -A1 "^  db:" "$ORIGINAL_FILE" | grep "image:" | sed 's/.*image: *"\?\([^"]*\)"\?.*/\1/' | head -1
+  else
+    echo "unknown"
+  fi
+}
+
 ensure_grafana_permissions() {
   local dirs=("$@")
 
@@ -196,6 +255,9 @@ show_help() {
   echo "Configuration Commands:"
   echo "  logging [level]     Show or set logging level (debug/info/warning/error)"
   echo "  ipv6 [enable|disable] Show or toggle IPv6 support"
+  echo "  postgres            Show current PostgreSQL version"
+  echo "  postgres set <ver>  Set PostgreSQL version (14, 15, 16, 17, 18)"
+  echo "  postgres upgrade <ver> Upgrade PostgreSQL to new major version (backup required)"
   echo "  certs               Show certificate status and expiry"
   echo "  certs reset         Delete and regenerate self-signed certificates"
   echo
@@ -2692,6 +2754,141 @@ case "$1" in
     ;;
   certs)
     certs_cmd "$2"
+    ;;
+  postgres)
+    case "$2" in
+      ""|status)
+        echo "PostgreSQL Configuration"
+        echo "========================"
+        echo "Configured version: $(get_postgres_version)"
+        echo "Current image:      $(get_current_postgres_image)"
+        echo "Supported versions: $POSTGRES_SUPPORTED_VERSIONS"
+        echo ""
+        echo "Usage:"
+        echo "  cli.sh postgres set <version>     Set version for next update"
+        echo "  cli.sh postgres upgrade <version> Upgrade to new major version"
+        ;;
+      set)
+        if [ -z "$3" ]; then
+          echo "Usage: cli.sh postgres set <version>"
+          echo "Supported versions: $POSTGRES_SUPPORTED_VERSIONS"
+          exit 1
+        fi
+        set_postgres_version "$3"
+        echo ""
+        echo "Note: Run 'cli.sh update' to apply the new PostgreSQL version."
+        ;;
+      upgrade)
+        if [ -z "$3" ]; then
+          echo "Usage: cli.sh postgres upgrade <version>"
+          echo "Supported versions: $POSTGRES_SUPPORTED_VERSIONS"
+          exit 1
+        fi
+        target_version="$3"
+        current_image=$(get_current_postgres_image)
+
+        echo "PostgreSQL Major Version Upgrade"
+        echo "================================="
+        echo "Current image: $current_image"
+        echo "Target version: $target_version"
+        echo ""
+        echo "WARNING: Major version upgrades require a full database dump and restore."
+        echo "The data directory format changes between major versions."
+        echo ""
+        echo "This process will:"
+        echo "  1. Set PostgreSQL $target_version override"
+        echo "  2. Create a database backup (pg_dump)"
+        echo "  3. Stop all services"
+        echo "  4. Remove the old postgres-data directory"
+        echo "  5. Start PostgreSQL $target_version (fresh initialization)"
+        echo "  6. Restore the database from backup"
+        echo "  7. Restart all services"
+        echo ""
+
+        # Check if running in interactive mode
+        if [[ -t 0 ]]; then
+          read -p "Do you want to proceed? (yes/no): " confirm
+          if [ "$confirm" != "yes" ]; then
+            echo "Upgrade cancelled."
+            exit 0
+          fi
+        else
+          echo "Running in non-interactive mode - proceeding automatically in 10 seconds..."
+          echo "Press Ctrl+C to cancel."
+          sleep 10
+        fi
+
+        # Set the new version (Step 1)
+        echo ""
+        echo "Step 1: Setting PostgreSQL $target_version override..."
+        if ! set_postgres_version "$target_version"; then
+          exit 1
+        fi
+
+        # Create backup
+        echo ""
+        echo "Step 2: Creating database backup..."
+        backup_file="postgres-upgrade-$(date +%Y%m%d-%H%M%S).sql"
+        if ! $DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db pg_dump -U calltelemetry -d calltelemetry_prod > "$backup_file"; then
+          echo "ERROR: Failed to create database backup"
+          exit 1
+        fi
+        echo "Backup created: $backup_file"
+
+        # Stop services
+        echo ""
+        echo "Step 3: Stopping all services..."
+        $DOCKER_COMPOSE_CMD down
+
+        # Remove old data directory
+        echo ""
+        echo "Step 4: Removing old postgres-data directory..."
+        sudo rm -rf "$POSTGRES_DATA_DIR"
+
+        # Start just the database (override file already set in Step 1)
+        echo ""
+        echo "Step 5: Starting PostgreSQL $target_version..."
+        $DOCKER_COMPOSE_CMD up -d db
+
+        echo "Waiting for PostgreSQL to initialize..."
+        sleep 10
+
+        # Wait for database to be ready
+        for i in {1..30}; do
+          if $DOCKER_COMPOSE_CMD exec -T db pg_isready -U calltelemetry -d calltelemetry_prod >/dev/null 2>&1; then
+            echo "PostgreSQL is ready."
+            break
+          fi
+          echo "Waiting for PostgreSQL... ($i/30)"
+          sleep 2
+        done
+
+        # Restore the database
+        echo ""
+        echo "Step 6: Restoring database from backup..."
+        if ! $DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod < "$backup_file"; then
+          echo "ERROR: Failed to restore database"
+          echo "Backup file preserved at: $backup_file"
+          exit 1
+        fi
+        echo "Database restored successfully."
+
+        # Start all services
+        echo ""
+        echo "Step 7: Starting all services..."
+        $DOCKER_COMPOSE_CMD up -d
+
+        echo ""
+        echo "PostgreSQL upgrade complete!"
+        echo "New image: calltelemetry/postgres:$target_version"
+        echo "Backup preserved at: $backup_file"
+        ;;
+      *)
+        echo "Unknown postgres command: $2"
+        echo "Usage: cli.sh postgres [status|set <version>|upgrade <version>]"
+        exit 1
+        ;;
+    esac
     ;;
 
   # Maintenance commands
