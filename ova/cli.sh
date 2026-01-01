@@ -304,6 +304,7 @@ show_help() {
   echo "  offline list                List images in current docker-compose.yml"
   echo
   echo "Diagnostic Commands:"
+  echo "  diag network                Run comprehensive network diagnostics"
   echo "  diag tesla <ipv4|ipv6> <url>    Test TCP + HTTP connectivity"
   echo "  diag raw_tcp <ipv4|ipv6> <url>  Test raw TCP socket only"
   echo "  diag capture <secs> [filter] [file]  Capture packets with tcpdump"
@@ -3624,16 +3625,181 @@ end
 
         echo "=== Database Diagnostics Complete ==="
         ;;
+      network)
+        echo "=== Network Diagnostics ==="
+        echo ""
+
+        # Get primary interface (the one with default route)
+        PRIMARY_IF=$(ip route | grep default | head -1 | awk '{print $5}')
+        echo "--- Primary Interface: $PRIMARY_IF ---"
+
+        # IP Address and Subnet
+        echo ""
+        echo "--- IP Address & Subnet ---"
+        ip -4 addr show "$PRIMARY_IF" 2>/dev/null | grep inet | awk '{print "  IPv4: " $2}'
+        ip -6 addr show "$PRIMARY_IF" 2>/dev/null | grep inet6 | grep -v fe80 | awk '{print "  IPv6: " $2}'
+
+        # Default Gateway
+        echo ""
+        echo "--- Default Gateway ---"
+        DEFAULT_GW=$(ip route | grep default | head -1 | awk '{print $3}')
+        echo "  Gateway: $DEFAULT_GW"
+
+        # DNS Servers
+        echo ""
+        echo "--- DNS Servers ---"
+        if [ -f /etc/resolv.conf ]; then
+          DNS_SERVERS=$(grep "^nameserver" /etc/resolv.conf | awk '{print $2}')
+          PRIMARY_DNS=$(echo "$DNS_SERVERS" | head -1)
+          SECONDARY_DNS=$(echo "$DNS_SERVERS" | sed -n '2p')
+          echo "$DNS_SERVERS" | while read dns; do echo "  $dns"; done
+        else
+          echo "  Unable to read /etc/resolv.conf"
+        fi
+
+        # Ping Gateway
+        echo ""
+        echo "--- Ping Gateway ($DEFAULT_GW) ---"
+        if ping -c 3 -W 2 "$DEFAULT_GW" >/dev/null 2>&1; then
+          echo "  Result: SUCCESS"
+          ping -c 3 -W 2 "$DEFAULT_GW" 2>&1 | tail -1
+        else
+          echo "  Result: FAILED"
+        fi
+
+        # Ping DNS Servers
+        echo ""
+        echo "--- Ping DNS Servers ---"
+        if [ -n "$PRIMARY_DNS" ]; then
+          echo "  Primary DNS ($PRIMARY_DNS):"
+          if ping -c 2 -W 2 "$PRIMARY_DNS" >/dev/null 2>&1; then
+            echo "    Result: SUCCESS"
+          else
+            echo "    Result: FAILED"
+          fi
+        fi
+        if [ -n "$SECONDARY_DNS" ]; then
+          echo "  Secondary DNS ($SECONDARY_DNS):"
+          if ping -c 2 -W 2 "$SECONDARY_DNS" >/dev/null 2>&1; then
+            echo "    Result: SUCCESS"
+          else
+            echo "    Result: FAILED"
+          fi
+        fi
+
+        # DNS Resolution Tests
+        echo ""
+        echo "--- DNS Resolution (www.google.com) ---"
+        if [ -n "$PRIMARY_DNS" ]; then
+          echo "  Query Primary DNS ($PRIMARY_DNS):"
+          if command -v nslookup >/dev/null 2>&1; then
+            nslookup www.google.com "$PRIMARY_DNS" 2>&1 | grep -A1 "Name:" | head -2 | sed 's/^/    /'
+          elif command -v dig >/dev/null 2>&1; then
+            dig +short www.google.com @"$PRIMARY_DNS" 2>&1 | head -2 | sed 's/^/    /'
+          elif command -v host >/dev/null 2>&1; then
+            host www.google.com "$PRIMARY_DNS" 2>&1 | head -2 | sed 's/^/    /'
+          else
+            echo "    No DNS tools available (nslookup/dig/host)"
+          fi
+        fi
+        if [ -n "$SECONDARY_DNS" ]; then
+          echo "  Query Secondary DNS ($SECONDARY_DNS):"
+          if command -v nslookup >/dev/null 2>&1; then
+            nslookup www.google.com "$SECONDARY_DNS" 2>&1 | grep -A1 "Name:" | head -2 | sed 's/^/    /'
+          elif command -v dig >/dev/null 2>&1; then
+            dig +short www.google.com @"$SECONDARY_DNS" 2>&1 | head -2 | sed 's/^/    /'
+          elif command -v host >/dev/null 2>&1; then
+            host www.google.com "$SECONDARY_DNS" 2>&1 | head -2 | sed 's/^/    /'
+          else
+            echo "    No DNS tools available (nslookup/dig/host)"
+          fi
+        fi
+
+        # Ping www.google.com
+        echo ""
+        echo "--- Ping www.google.com ---"
+        if ping -c 3 -W 2 www.google.com >/dev/null 2>&1; then
+          echo "  Result: SUCCESS"
+          ping -c 3 -W 2 www.google.com 2>&1 | tail -1
+        else
+          echo "  Result: FAILED"
+        fi
+
+        # Traceroute to 8.8.8.8
+        echo ""
+        echo "--- Traceroute to 8.8.8.8 ---"
+        if command -v traceroute >/dev/null 2>&1; then
+          traceroute -m 15 -w 2 8.8.8.8 2>&1
+        elif command -v tracepath >/dev/null 2>&1; then
+          tracepath -m 15 8.8.8.8 2>&1
+        else
+          echo "  No traceroute tool available (traceroute/tracepath)"
+          echo "  Install with: sudo dnf install traceroute"
+        fi
+
+        # HTTPS connectivity test
+        echo ""
+        echo "--- HTTPS Connectivity Test (GitHub) ---"
+        TEST_URL="https://raw.githubusercontent.com/calltelemetry/calltelemetry/refs/heads/master/docker-compose.yml"
+        echo "  URL: $TEST_URL"
+        echo ""
+        if command -v wget >/dev/null 2>&1; then
+          WGET_OUTPUT=$(wget --timeout=10 --tries=1 -O /dev/null "$TEST_URL" 2>&1)
+          WGET_EXIT=$?
+          if [ $WGET_EXIT -eq 0 ]; then
+            echo "  Result: SUCCESS"
+            echo "$WGET_OUTPUT" | grep -E "(Length|saved|response)" | sed 's/^/  /'
+          else
+            echo "  Result: FAILED (exit code: $WGET_EXIT)"
+            echo ""
+            echo "  Error details:"
+            echo "$WGET_OUTPUT" | sed 's/^/    /'
+            echo ""
+            echo "  Common causes:"
+            case $WGET_EXIT in
+              1) echo "    - Generic error (check output above)" ;;
+              2) echo "    - Command line parse error" ;;
+              3) echo "    - File I/O error" ;;
+              4) echo "    - Network failure (DNS, connection refused, timeout)" ;;
+              5) echo "    - SSL/TLS verification failure" ;;
+              6) echo "    - Authentication required" ;;
+              7) echo "    - Protocol error" ;;
+              8) echo "    - Server error response" ;;
+            esac
+          fi
+        elif command -v curl >/dev/null 2>&1; then
+          CURL_OUTPUT=$(curl -sS --connect-timeout 10 -o /dev/null -w "%{http_code}" "$TEST_URL" 2>&1)
+          CURL_EXIT=$?
+          if [ $CURL_EXIT -eq 0 ] && [ "$CURL_OUTPUT" = "200" ]; then
+            echo "  Result: SUCCESS (HTTP $CURL_OUTPUT)"
+          else
+            echo "  Result: FAILED"
+            echo "  HTTP Code: $CURL_OUTPUT"
+            echo "  Exit Code: $CURL_EXIT"
+            # Get verbose output for debugging
+            echo ""
+            echo "  Error details:"
+            curl -v --connect-timeout 10 "$TEST_URL" -o /dev/null 2>&1 | grep -E "(Could not|Failed|error|SSL|connect)" | sed 's/^/    /'
+          fi
+        else
+          echo "  No HTTP client available (wget/curl)"
+        fi
+
+        echo ""
+        echo "=== Network Diagnostics Complete ==="
+        ;;
       ""|help)
         echo "Usage: cli.sh diag <command>"
         echo ""
         echo "Diagnostic commands:"
+        echo "  network                    Run comprehensive network diagnostics"
         echo "  tesla <ipv4|ipv6> <url>    Test TCP + HTTP connectivity"
         echo "  raw_tcp <ipv4|ipv6> <url>  Test raw TCP socket only"
         echo "  capture <secs> [filter] [file]  Capture packets with tcpdump"
         echo "  database                   Run comprehensive database diagnostics"
         echo ""
         echo "Examples:"
+        echo "  cli.sh diag network"
         echo "  cli.sh diag tesla ipv6 http://[dead:beef:cafe:1::11]:8090"
         echo "  cli.sh diag tesla ipv4 http://192.168.1.100:8090"
         echo "  cli.sh diag raw_tcp ipv6 http://[dead:beef:cafe:1::11]:8090"
