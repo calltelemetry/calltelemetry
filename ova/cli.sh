@@ -13,16 +13,27 @@ cat << "EOF"
 https://calltelemetry.com
 EOF
 
+# Detect installation user and directory
+if [ -n "${SUDO_USER:-}" ]; then
+  INSTALL_USER="$SUDO_USER"
+  INSTALL_DIR=$(eval echo "~$SUDO_USER")
+else
+  INSTALL_USER=$(whoami)
+  INSTALL_DIR="$HOME"
+fi
+
+cd "$INSTALL_DIR" 2>/dev/null || true
+
 # Directory for storing backups and other directories to be cleared
-BACKUP_DIR="/home/calltelemetry/backups"
-BACKUP_FOLDER_PATH="/home/calltelemetry/db_dumps"
+BACKUP_DIR="${INSTALL_DIR}/backups"
+BACKUP_FOLDER_PATH="${INSTALL_DIR}/db_dumps"
 SFTP_DIR="sftp/*"
 POSTGRES_DATA_DIR="postgres-data"
 # Original and backup docker-compose files
 ORIGINAL_FILE="docker-compose.yml"
 TEMP_FILE="temp-docker-compose.yml"
 SCRIPT_URL="https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/ova/cli.sh"
-CLI_INSTALL_PATH="/home/calltelemetry/cli.sh"
+CLI_INSTALL_PATH="${INSTALL_DIR}/cli.sh"
 # Detect if running from a pipe (curl ... | sh) vs local file
 if [ -f "$0" ] && [ "$0" != "sh" ] && [ "$0" != "bash" ] && [ "$0" != "-bash" ]; then
   CURRENT_SCRIPT_PATH="$0"
@@ -181,24 +192,37 @@ if [ -z "$DOCKER_COMPOSE_CMD" ]; then
   exit 1
 fi
 
-# Auto-fix systemd service file to match detected docker compose command
-# This ensures the service uses the same command syntax as the CLI
+# Auto-fix systemd service file to match detected docker compose command and working directory
+# This ensures the service uses the same command syntax as the CLI and correct install path
 fix_systemd_service_if_needed() {
   local SERVICE_FILE="/etc/systemd/system/docker-compose-app.service"
 
   [ -f "$SERVICE_FILE" ] || return 0
 
-  local needs_update=false
+  local needs_reload=false
   local current_cmd=""
   local target_cmd=""
 
-  # Detect what the service file currently uses
+  # Check and fix WorkingDirectory if it doesn't match INSTALL_DIR
+  local current_workdir=$(grep "^WorkingDirectory=" "$SERVICE_FILE" 2>/dev/null | cut -d= -f2)
+  if [ -n "$current_workdir" ] && [ "$current_workdir" != "$INSTALL_DIR" ]; then
+    echo "Updating systemd service WorkingDirectory from $current_workdir to $INSTALL_DIR..."
+    sudo cp "$SERVICE_FILE" "${SERVICE_FILE}.backup" 2>/dev/null
+    sudo sed -i "s|^WorkingDirectory=.*|WorkingDirectory=$INSTALL_DIR|g" "$SERVICE_FILE"
+    needs_reload=true
+  fi
+
+  # Detect what the service file currently uses for docker compose command
   if grep -q "/usr/bin/docker-compose" "$SERVICE_FILE"; then
     current_cmd="docker-compose"
   elif grep -q "/usr/bin/docker compose" "$SERVICE_FILE"; then
     current_cmd="docker compose"
   else
-    return 0  # Unknown format, don't touch
+    if [ "$needs_reload" = true ]; then
+      sudo systemctl daemon-reload
+      echo "Systemd service WorkingDirectory updated."
+    fi
+    return 0  # Unknown format, don't touch command
   fi
 
   # Determine what it should use based on what's available
@@ -211,7 +235,9 @@ fix_systemd_service_if_needed() {
   # Update if mismatch
   if [ "$current_cmd" != "$target_cmd" ]; then
     echo "Updating systemd service to use '$target_cmd'..."
-    sudo cp "$SERVICE_FILE" "${SERVICE_FILE}.backup" 2>/dev/null
+    if [ "$needs_reload" != true ]; then
+      sudo cp "$SERVICE_FILE" "${SERVICE_FILE}.backup" 2>/dev/null
+    fi
 
     if [ "$target_cmd" = "docker compose" ]; then
       sudo sed -i 's|/usr/bin/docker-compose|/usr/bin/docker compose|g' "$SERVICE_FILE"
@@ -219,8 +245,12 @@ fix_systemd_service_if_needed() {
       sudo sed -i 's|/usr/bin/docker compose|/usr/bin/docker-compose|g' "$SERVICE_FILE"
     fi
 
-    sudo systemctl daemon-reload
+    needs_reload=true
     echo "Systemd service updated to use '$target_cmd'."
+  fi
+
+  if [ "$needs_reload" = true ]; then
+    sudo systemctl daemon-reload
   fi
 }
 
@@ -949,7 +979,7 @@ update() {
   fi
 
   rm -f "$caddyfile_tmp"
-  rm -f /home/calltelemetry/.ssh/authorized_keys
+  rm -f "${INSTALL_DIR}/.ssh/authorized_keys"
 }
 
 # Function to perform rollback to the old configuration
@@ -3179,10 +3209,10 @@ case "$1" in
         echo "  1. On internet-connected machine:"
         echo "     ./cli.sh offline download 0.8.4-rc181"
         echo ""
-        echo "  2. Transfer bundle to air-gapped system via USB/SFTP to /home/calltelemetry/"
+        echo "  2. Transfer bundle to air-gapped system via USB/SFTP to your home directory"
         echo ""
         echo "  3. On air-gapped system (first time - extract cli.sh first):"
-        echo "     cd /home/calltelemetry"
+        echo "     cd ~"
         echo "     tar -xzf calltelemetry-offline-*.tar.gz"
         echo "     cp offline-bundle-*/cli.sh ./cli.sh && chmod +x ./cli.sh"
         echo "     ./cli.sh offline apply calltelemetry-offline-*.tar.gz"
