@@ -9,6 +9,11 @@ on:
         description: 'Version tag to package (e.g., 0.8.4-rc191)'
         required: true
         type: string
+      stable:
+        description: 'Mark as stable release (updates latest-stable.txt)'
+        required: false
+        type: boolean
+        default: false
 
 env:
   GCS_BUCKET: ${{ secrets.GCS_BUCKET }}
@@ -44,63 +49,123 @@ jobs:
           mkdir -p "$BUNDLE_DIR"
           echo "📁 Created bundle directory: $BUNDLE_DIR"
 
-      - name: Copy CLI script
+      - name: Install yq for YAML parsing
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Copy files from manifest
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           BUNDLE_DIR="${BUNDLE_NAME}-${VERSION}"
+          MANIFEST="ova/bundle-manifest.yml"
 
-          cp ova/cli.sh "$BUNDLE_DIR/"
-          chmod +x "$BUNDLE_DIR/cli.sh"
-          echo "✅ Copied cli.sh"
-
-      - name: Get docker-compose for version
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          BUNDLE_DIR="${BUNDLE_NAME}-${VERSION}"
-
-          # Check if version-specific compose file exists
-          if [ -f "ova/versions/${VERSION}.yml" ]; then
-            cp "ova/versions/${VERSION}.yml" "$BUNDLE_DIR/docker-compose.yml"
-            echo "✅ Using version-specific compose: ova/versions/${VERSION}.yml"
-          elif [ -f "ova/versions/${VERSION}.yaml" ]; then
-            cp "ova/versions/${VERSION}.yaml" "$BUNDLE_DIR/docker-compose.yml"
-            echo "✅ Using version-specific compose: ova/versions/${VERSION}.yaml"
-          elif [ -f "docker-compose.yml" ]; then
-            cp docker-compose.yml "$BUNDLE_DIR/"
-            echo "✅ Using root docker-compose.yml"
-          else
-            echo "❌ No docker-compose file found for version $VERSION"
+          if [ ! -f "$MANIFEST" ]; then
+            echo "❌ Manifest not found: $MANIFEST"
             exit 1
           fi
 
-      - name: Copy supporting files
+          echo "📋 Reading manifest: $MANIFEST"
+
+          # Copy scripts
+          echo "--- Scripts ---"
+          for script in $(yq '.scripts[]' "$MANIFEST" 2>/dev/null); do
+            if [ -f "ova/$script" ]; then
+              cp "ova/$script" "$BUNDLE_DIR/"
+              chmod +x "$BUNDLE_DIR/$script"
+              echo "✅ $script"
+            else
+              echo "⚠️  Missing: ova/$script"
+            fi
+          done
+
+          # Copy configs
+          echo "--- Configs ---"
+          for config in $(yq '.configs[]' "$MANIFEST" 2>/dev/null); do
+            if [ -f "ova/$config" ]; then
+              cp "ova/$config" "$BUNDLE_DIR/"
+              echo "✅ $(basename $config)"
+            else
+              echo "⚠️  Missing: ova/$config"
+            fi
+          done
+
+          # Copy prometheus
+          echo "--- Prometheus ---"
+          mkdir -p "$BUNDLE_DIR/prometheus"
+          for file in $(yq '.prometheus[]' "$MANIFEST" 2>/dev/null); do
+            if [ -f "ova/$file" ]; then
+              cp "ova/$file" "$BUNDLE_DIR/prometheus/"
+              echo "✅ $(basename $file)"
+            fi
+          done
+
+          # Copy grafana dashboards
+          echo "--- Grafana Dashboards ---"
+          mkdir -p "$BUNDLE_DIR/grafana/dashboards"
+          for file in $(yq '.grafana.dashboards[]' "$MANIFEST" 2>/dev/null); do
+            if [ -f "ova/$file" ]; then
+              cp "ova/$file" "$BUNDLE_DIR/grafana/dashboards/"
+              echo "✅ $(basename $file)"
+            fi
+          done
+
+          # Copy grafana provisioning
+          echo "--- Grafana Provisioning ---"
+          mkdir -p "$BUNDLE_DIR/grafana/provisioning/datasources"
+          mkdir -p "$BUNDLE_DIR/grafana/provisioning/dashboards"
+          for file in $(yq '.grafana.provisioning[]' "$MANIFEST" 2>/dev/null); do
+            if [ -f "ova/$file" ]; then
+              # Determine subdirectory from path
+              if echo "$file" | grep -q "datasources"; then
+                cp "ova/$file" "$BUNDLE_DIR/grafana/provisioning/datasources/"
+              elif echo "$file" | grep -q "dashboards"; then
+                cp "ova/$file" "$BUNDLE_DIR/grafana/provisioning/dashboards/"
+              fi
+              echo "✅ $(basename $file)"
+            fi
+          done
+
+      - name: Verify version-specific compose exists
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+
+          # REQUIRE version-specific compose file - no fallbacks
+          if [ -f "ova/versions/${VERSION}.yml" ]; then
+            echo "✅ Found: ova/versions/${VERSION}.yml"
+          elif [ -f "ova/versions/${VERSION}.yaml" ]; then
+            echo "✅ Found: ova/versions/${VERSION}.yaml"
+          else
+            echo ""
+            echo "❌ ERROR: No docker-compose file found for version ${VERSION}"
+            echo ""
+            echo "Expected one of:"
+            echo "  - ova/versions/${VERSION}.yml"
+            echo "  - ova/versions/${VERSION}.yaml"
+            echo ""
+            echo "Available versions:"
+            ls -1 ova/versions/*.yml ova/versions/*.yaml 2>/dev/null | grep -v "prometheus" | grep -v "caddy" | head -20 || echo "  (none)"
+            echo ""
+            echo "Create the version file first before running this workflow."
+            exit 1
+          fi
+
+      - name: Copy docker-compose for version
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           BUNDLE_DIR="${BUNDLE_NAME}-${VERSION}"
 
-          # Copy additional OVA files if they exist
-          [ -f "ova/nats.conf" ] && cp ova/nats.conf "$BUNDLE_DIR/" && echo "✅ Copied nats.conf"
-          [ -f "ova/backup.sh" ] && cp ova/backup.sh "$BUNDLE_DIR/" && echo "✅ Copied backup.sh"
-          [ -f "ova/reset.sh" ] && cp ova/reset.sh "$BUNDLE_DIR/" && echo "✅ Copied reset.sh"
-
-          # Copy Caddyfile if exists
-          [ -f "ova/versions/caddy/Caddyfile" ] && cp ova/versions/caddy/Caddyfile "$BUNDLE_DIR/" && echo "✅ Copied Caddyfile"
-
-          # Copy prometheus config
-          if [ -f "ova/versions/prometheus/prometheus.yml" ]; then
-            mkdir -p "$BUNDLE_DIR/prometheus"
-            cp ova/versions/prometheus/prometheus.yml "$BUNDLE_DIR/prometheus/"
-            echo "✅ Copied prometheus config"
+          if [ -f "ova/versions/${VERSION}.yml" ]; then
+            cp "ova/versions/${VERSION}.yml" "$BUNDLE_DIR/docker-compose.yml"
+            echo "✅ Copied: ova/versions/${VERSION}.yml"
+          else
+            cp "ova/versions/${VERSION}.yaml" "$BUNDLE_DIR/docker-compose.yml"
+            echo "✅ Copied: ova/versions/${VERSION}.yaml"
           fi
 
-          # Copy grafana configs
-          if [ -d "ova/versions/grafana" ]; then
-            cp -r ova/versions/grafana "$BUNDLE_DIR/"
-            echo "✅ Copied grafana configs"
-          fi
-
+          echo ""
           echo "📋 Bundle contents:"
-          ls -la "$BUNDLE_DIR/"
+          ls -laR "$BUNDLE_DIR/"
 
       - name: Create README for bundle
         run: |
@@ -161,19 +226,56 @@ jobs:
 
           echo "☁️ Uploading to GCS bucket: $GCS_BUCKET"
 
-          # Upload bundle
+          # Upload bundle to version-specific folder
           gsutil cp "$BUNDLE_FILE" "gs://${GCS_BUCKET}/releases/${VERSION}/"
           gsutil cp "${BUNDLE_FILE}.sha256" "gs://${GCS_BUCKET}/releases/${VERSION}/"
 
-          # Also upload as 'latest' if this is a stable release (no rc/beta/alpha)
-          if [[ ! "$VERSION" =~ (rc|beta|alpha) ]]; then
+          # Upload cli.sh and prep.sh to bucket root (always latest)
+          gsutil cp "ova/cli.sh" "gs://${GCS_BUCKET}/cli.sh"
+          gsutil cp "ova/prep.sh" "gs://${GCS_BUCKET}/prep.sh"
+          echo "✅ Uploaded cli.sh and prep.sh to bucket root"
+
+          # Upload postgres override files
+          for pg_file in ova/postgres-*.yaml; do
+            if [ -f "$pg_file" ]; then
+              gsutil cp "$pg_file" "gs://${GCS_BUCKET}/$(basename $pg_file)"
+              echo "✅ Uploaded $(basename $pg_file)"
+            fi
+          done
+
+          # Determine if this is a stable or pre-release
+          # For release events: check prerelease flag
+          # For workflow_dispatch: check stable input
+          IS_STABLE="false"
+          if [ "${{ github.event_name }}" = "release" ]; then
+            if [ "${{ github.event.release.prerelease }}" != "true" ]; then
+              IS_STABLE="true"
+            fi
+          else
+            # workflow_dispatch - check stable input
+            if [ "${{ inputs.stable }}" = "true" ]; then
+              IS_STABLE="true"
+            fi
+          fi
+
+          # Update only the appropriate version marker (they don't cross-update)
+          if [ "$IS_STABLE" = "true" ]; then
+            echo "$VERSION" > latest-stable.txt
+            gsutil cp latest-stable.txt "gs://${GCS_BUCKET}/latest-stable.txt"
             gsutil cp "$BUNDLE_FILE" "gs://${GCS_BUCKET}/releases/latest/${BUNDLE_NAME}-latest.tar.gz"
             gsutil cp "${BUNDLE_FILE}.sha256" "gs://${GCS_BUCKET}/releases/latest/${BUNDLE_NAME}-latest.tar.gz.sha256"
-            echo "✅ Also uploaded as latest"
+            echo "✅ Updated latest-stable.txt → $VERSION"
+          else
+            echo "$VERSION" > latest.txt
+            gsutil cp latest.txt "gs://${GCS_BUCKET}/latest.txt"
+            echo "✅ Updated latest.txt → $VERSION"
           fi
 
           echo "✅ Uploaded to GCS:"
           echo "   gs://${GCS_BUCKET}/releases/${VERSION}/${BUNDLE_FILE}"
+          echo "   gs://${GCS_BUCKET}/cli.sh"
+          echo "   gs://${GCS_BUCKET}/prep.sh"
+          echo "   gs://${GCS_BUCKET}/latest.txt"
 
       - name: Upload bundle to GitHub Release
         if: github.event_name == 'release'
@@ -225,5 +327,11 @@ jobs:
           if [ -n "$GCS_BUCKET" ]; then
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "### Download URLs" >> $GITHUB_STEP_SUMMARY
-            echo "- GCS: \`gs://${GCS_BUCKET}/releases/${VERSION}/${BUNDLE_FILE}\`" >> $GITHUB_STEP_SUMMARY
+            echo "- Bundle: \`gs://${GCS_BUCKET}/releases/${VERSION}/${BUNDLE_FILE}\`" >> $GITHUB_STEP_SUMMARY
+            echo "- CLI: \`gs://${GCS_BUCKET}/cli.sh\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Public URLs" >> $GITHUB_STEP_SUMMARY
+            echo "- Bundle: https://storage.googleapis.com/${GCS_BUCKET}/releases/${VERSION}/${BUNDLE_FILE}" >> $GITHUB_STEP_SUMMARY
+            echo "- CLI: https://storage.googleapis.com/${GCS_BUCKET}/cli.sh" >> $GITHUB_STEP_SUMMARY
+            echo "- Prep: https://storage.googleapis.com/${GCS_BUCKET}/prep.sh" >> $GITHUB_STEP_SUMMARY
           fi

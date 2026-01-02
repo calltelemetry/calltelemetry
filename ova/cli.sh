@@ -32,7 +32,11 @@ POSTGRES_DATA_DIR="postgres-data"
 # Original and backup docker-compose files
 ORIGINAL_FILE="docker-compose.yml"
 TEMP_FILE="temp-docker-compose.yml"
-SCRIPT_URL="https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/ova/cli.sh"
+# GCS URLs for downloads (no GitHub dependency)
+GCS_BASE_URL="https://storage.googleapis.com/ct_releases"
+SCRIPT_URL="${GCS_BASE_URL}/cli.sh"
+GCS_BUNDLE_BASE_URL="${GCS_BASE_URL}/releases"
+
 CLI_INSTALL_PATH="${INSTALL_DIR}/cli.sh"
 # Detect if running from a pipe (curl ... | sh) vs local file
 if [ -f "$0" ] && [ "$0" != "sh" ] && [ "$0" != "bash" ] && [ "$0" != "-bash" ]; then
@@ -40,22 +44,15 @@ if [ -f "$0" ] && [ "$0" != "sh" ] && [ "$0" != "bash" ] && [ "$0" != "-bash" ];
 else
   CURRENT_SCRIPT_PATH="$CLI_INSTALL_PATH"
 fi
-PREP_SCRIPT_URL="https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/ova/prep.sh"
-PROMETHEUS_CONFIG_URL="https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/ova/versions/prometheus/prometheus.yml"
-GRAFANA_ASSETS_BASE_URL="https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/ova/versions"
-GRAFANA_ASSET_PATHS=(
-  "grafana/provisioning/datasources/calltelemetry.yml"
-  "grafana/provisioning/dashboards/calltelemetry.yaml"
-  "grafana/dashboards/calltelemetry-overview.json"
-  "grafana/dashboards/curri-observability.json"
-  "grafana/dashboards/caddy-overview.json"
-)
+
+# Prep script from GCS
+PREP_SCRIPT_URL="${GCS_BASE_URL}/prep.sh"
 
 # PostgreSQL version configuration
 POSTGRES_OVERRIDE_FILE="docker-compose.override.yml"
 POSTGRES_DEFAULT_VERSION="17"
 POSTGRES_SUPPORTED_VERSIONS="14 15 16 17 18"
-POSTGRES_OVERRIDE_URL="https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/ova"
+POSTGRES_OVERRIDE_URL="${GCS_BASE_URL}"
 
 # Get current PostgreSQL version from override file, or default
 get_postgres_version() {
@@ -260,7 +257,9 @@ show_help() {
   echo
   echo "Application Commands:"
   echo "  status              Show application status and diagnostics"
-  echo "  update [version]    Update to specified version (default: latest)"
+  echo "  update              Update to latest stable release (default)"
+  echo "  update --latest     Update to latest build (including pre-releases)"
+  echo "  update <version>    Update to specific version (e.g., 0.8.4-rc191)"
   echo "                      Options: --force-upgrade, --no-cleanup, --ipv6"
   echo "  rollback            Roll back to previous docker-compose configuration"
   echo "  reset               Stop application, remove data, and restart"
@@ -299,7 +298,8 @@ show_help() {
   echo "  docker prune        Remove unused Docker resources"
   echo
   echo "Offline/Air-Gap Commands:"
-  echo "  offline download [version]  Download images & configs for air-gapped install"
+  echo "  offline fetch <version>     Download pre-built bundle from cloud (fast)"
+  echo "  offline download [version]  Build full bundle with Docker images (slow)"
   echo "  offline apply <bundle.tar>  Apply an offline bundle to this system"
   echo "  offline list                List images in current docker-compose.yml"
   echo
@@ -401,6 +401,130 @@ check_image_availability() {
     echo -e "$unavailable_images"
     return 1
   fi
+}
+
+# Download and extract the pre-built config bundle from GCS
+# This consolidates all config files: docker-compose.yml, prometheus, grafana, cli.sh, etc.
+download_bundle() {
+  local version="$1"
+  local bundle_name="calltelemetry-bundle-${version}.tar.gz"
+  local bundle_url="${GCS_BUNDLE_BASE_URL}/${version}/${bundle_name}"
+  local extract_dir="bundle-extract-$$"
+
+  echo "Downloading config bundle for version $version..."
+
+  # Download bundle
+  if command -v wget >/dev/null 2>&1; then
+    if ! wget -q --show-progress "$bundle_url" -O "$bundle_name" 2>&1; then
+      echo ""
+      echo "❌ Failed to download bundle from GCS"
+      echo "URL: $bundle_url"
+      echo ""
+      echo "Possible causes:"
+      echo "  - Version $version may not exist"
+      echo "  - Network connectivity issue"
+      echo ""
+      echo "Check available releases at:"
+      echo "  https://github.com/calltelemetry/calltelemetry/releases"
+      rm -f "$bundle_name"
+      return 1
+    fi
+  elif command -v curl >/dev/null 2>&1; then
+    if ! curl -fL --progress-bar "$bundle_url" -o "$bundle_name"; then
+      echo "❌ Failed to download bundle from GCS"
+      rm -f "$bundle_name"
+      return 1
+    fi
+  else
+    echo "Error: Neither wget nor curl is available"
+    return 1
+  fi
+
+  echo "✅ Bundle downloaded"
+
+  # Extract bundle
+  echo "Extracting config files..."
+  rm -rf "$extract_dir"
+  mkdir -p "$extract_dir"
+  if ! tar -xzf "$bundle_name" -C "$extract_dir" --strip-components=1; then
+    echo "❌ Failed to extract bundle"
+    rm -f "$bundle_name"
+    rm -rf "$extract_dir"
+    return 1
+  fi
+
+  # Move files to proper locations
+  # docker-compose.yml -> temp file for validation
+  if [ -f "$extract_dir/docker-compose.yml" ]; then
+    mv "$extract_dir/docker-compose.yml" "$TEMP_FILE"
+    echo "  ✅ docker-compose.yml"
+  else
+    echo "❌ Bundle missing docker-compose.yml"
+    rm -f "$bundle_name"
+    rm -rf "$extract_dir"
+    return 1
+  fi
+
+  # cli.sh -> update current script
+  if [ -f "$extract_dir/cli.sh" ]; then
+    if ! diff -q "$extract_dir/cli.sh" "$CURRENT_SCRIPT_PATH" >/dev/null 2>&1; then
+      cp "$extract_dir/cli.sh" "$CURRENT_SCRIPT_PATH"
+      chmod +x "$CURRENT_SCRIPT_PATH"
+      echo "  ✅ cli.sh (updated)"
+    else
+      echo "  ✅ cli.sh (no changes)"
+    fi
+  fi
+
+  # prometheus/prometheus.yml
+  if [ -f "$extract_dir/prometheus/prometheus.yml" ]; then
+    mkdir -p prometheus
+    mv "$extract_dir/prometheus/prometheus.yml" prometheus/
+    echo "  ✅ prometheus/prometheus.yml"
+  fi
+
+  # grafana dashboards and provisioning
+  if [ -d "$extract_dir/grafana" ]; then
+    mkdir -p grafana/dashboards grafana/provisioning/datasources grafana/provisioning/dashboards
+
+    # Copy dashboards
+    if [ -d "$extract_dir/grafana/dashboards" ]; then
+      cp -r "$extract_dir/grafana/dashboards/"* grafana/dashboards/ 2>/dev/null && echo "  ✅ grafana/dashboards"
+    fi
+
+    # Copy provisioning
+    if [ -d "$extract_dir/grafana/provisioning" ]; then
+      cp -r "$extract_dir/grafana/provisioning/"* grafana/provisioning/ 2>/dev/null && echo "  ✅ grafana/provisioning"
+    fi
+  fi
+
+  # nats.conf
+  if [ -f "$extract_dir/nats.conf" ]; then
+    cp "$extract_dir/nats.conf" ./nats.conf
+    echo "  ✅ nats.conf"
+  fi
+
+  # Caddyfile
+  if [ -f "$extract_dir/Caddyfile" ]; then
+    if [ -f "./Caddyfile" ]; then
+      if ! diff -q "$extract_dir/Caddyfile" "./Caddyfile" >/dev/null 2>&1; then
+        cp "$extract_dir/Caddyfile" ./Caddyfile
+        echo "  ✅ Caddyfile (updated)"
+      else
+        echo "  ✅ Caddyfile (no changes)"
+      fi
+    else
+      cp "$extract_dir/Caddyfile" ./Caddyfile
+      echo "  ✅ Caddyfile (installed)"
+    fi
+  fi
+
+  # Cleanup
+  rm -f "$bundle_name"
+  rm -rf "$extract_dir"
+
+  echo "✅ All config files extracted"
+  return 0
 }
 
 # Download Prometheus configuration when the compose file defines the service.
@@ -691,7 +815,7 @@ is_version_084_or_higher() {
 
 # Function to update the docker-compose configuration
 update() {
-  cli_update  # Ensure the CLI script is up-to-date
+  # Note: cli.sh is updated via the config bundle download
 
   version=""
   force_upgrade=false
@@ -713,6 +837,14 @@ update() {
         enable_ipv6=true
         shift
         ;;
+      --stable)
+        version="stable"
+        shift
+        ;;
+      --latest)
+        version="latest"
+        shift
+        ;;
       *)
         if [ -z "$version" ]; then
           version="$1"
@@ -722,13 +854,29 @@ update() {
     esac
   done
 
-  # Set default version if not specified
-  version=${version:-"latest"}
-
-  if [ "$version" == "latest" ]; then
-    url="https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/docker-compose.yml"
-  else
-    url="https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/ova/versions/$version.yaml"
+  # Resolve version from GCS markers if needed
+  # Default (no version) = stable, use --latest for bleeding edge
+  if [ -z "$version" ] || [ "$version" = "stable" ]; then
+    echo "Fetching latest stable version..."
+    version=$(curl -sfL "${GCS_BASE_URL}/latest-stable.txt" 2>/dev/null)
+    if [ -z "$version" ]; then
+      echo "❌ Failed to fetch latest stable version"
+      echo ""
+      echo "No stable release available yet."
+      echo "Use 'cli.sh update --latest' for pre-release, or specify a version manually."
+      return 1
+    fi
+    echo "Latest stable version: $version"
+  elif [ "$version" = "latest" ]; then
+    echo "Fetching latest version (including pre-releases)..."
+    version=$(curl -sfL "${GCS_BASE_URL}/latest.txt" 2>/dev/null)
+    if [ -z "$version" ]; then
+      echo "❌ Failed to fetch latest version"
+      echo ""
+      echo "Specify a version manually: cli.sh update <version>"
+      return 1
+    fi
+    echo "Latest version: $version"
   fi
 
   # Get current version
@@ -839,19 +987,15 @@ update() {
     echo "Existing docker-compose.yml backed up to $timestamped_backup_file"
   fi
 
-  echo "Downloading new configuration..."
-  if ! wget "$url" -O "$TEMP_FILE" 2>/dev/null; then
-    echo "❌ Failed to download configuration file from: $url"
-    echo "Please verify that version $version exists"
-    rm -f "$TEMP_FILE"
+  # Download config bundle from GCS (includes docker-compose, prometheus, grafana, cli.sh)
+  echo ""
+  if ! download_bundle "$version"; then
+    echo "❌ Failed to download config bundle"
+    echo ""
+    echo "Check available versions at: https://github.com/calltelemetry/calltelemetry/releases"
     return 1
   fi
-
-  if ! download_prometheus_config "$TEMP_FILE"; then
-    echo "⚠️  Prometheus configuration download failed; continuing with existing file if present."
-  fi
-
-  download_grafana_assets "$TEMP_FILE"
+  echo ""
 
   # Check image availability before proceeding unless --force-upgrade is specified
   if [ "$force_upgrade" = false ]; then
@@ -919,38 +1063,13 @@ update() {
 
   echo "Proceeding with upgrade..."
 
-  # Download NATS configuration file
-  nats_conf_url="https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/ova/nats.conf"
-  nats_conf_file="nats.conf"
-  wget "$nats_conf_url" -O "$nats_conf_file"
-
-  # Download the Caddyfile
-  CADDYFILE_URL="https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/ova/versions/caddy/Caddyfile"
-  caddyfile_tmp=$(mktemp)
-  wget -q "$CADDYFILE_URL" -O "$caddyfile_tmp"
-
-  if [ -f "$TEMP_FILE" ] && [ -f "$nats_conf_file" ] && [ -f "$caddyfile_tmp" ]; then
+  # Config files (nats.conf, Caddyfile, prometheus, grafana) already extracted by download_bundle()
+  if [ -f "$TEMP_FILE" ]; then
     mv "$TEMP_FILE" "$ORIGINAL_FILE"
     echo "New docker-compose.yml moved to production."
-    echo "NATS configuration file downloaded."
-    echo "Caddyfile downloaded."
 
     # Configure IPv6 settings based on --ipv6 flag
     configure_ipv6 "$ORIGINAL_FILE" "$enable_ipv6"
-
-    if [ -f "./Caddyfile" ]; then
-      if ! diff "$caddyfile_tmp" "./Caddyfile" > /dev/null; then
-        echo "Update available for the Caddyfile. Updating now..."
-        cp "$caddyfile_tmp" "./Caddyfile"
-        echo "Caddyfile updated."
-      else
-        echo "Caddyfile is up-to-date."
-      fi
-    else
-      echo "Caddyfile not found. Installing new Caddyfile..."
-      cp "$caddyfile_tmp" "./Caddyfile"
-      echo "Caddyfile installed."
-    fi
 
     fix_systemd_service_if_needed
     echo "Restarting Docker Compose service..."
@@ -2962,114 +3081,133 @@ case "$1" in
   # Offline/Air-Gap commands for environments without internet access
   offline)
     offline_download() {
-      local version="${1:-latest}"
-      local bundle_dir="offline-bundle-$(date +%Y%m%d-%H%M%S)"
-      local bundle_name="calltelemetry-offline-${version}-$(date +%Y%m%d).tar.gz"
-      local OFFLINE_BASE_URL="https://raw.githubusercontent.com/calltelemetry/calltelemetry/master"
+      local version="$1"
       local start_dir="$(pwd)"
 
-      # Use curl if wget not available
-      download_file() {
-        local url="$1"
-        local output="$2"
-        if command -v wget >/dev/null 2>&1; then
-          wget -q "$url" -O "$output"
-        elif command -v curl >/dev/null 2>&1; then
-          curl -sfL "$url" -o "$output"
-        else
-          echo "Error: Neither wget nor curl is available"
-          return 1
-        fi
-      }
+      if [ -z "$version" ]; then
+        echo "Usage: cli.sh offline download <version>"
+        echo ""
+        echo "Build a complete offline bundle with Docker images."
+        echo "Example: cli.sh offline download 0.8.4-rc191"
+        return 1
+      fi
 
-      echo "=== Creating Offline Bundle ==="
+      local config_bundle="calltelemetry-bundle-${version}.tar.gz"
+      local bundle_dir="calltelemetry-offline-${version}"
+      local bundle_name="calltelemetry-offline-${version}.tar.gz"
+
+      echo "=== Creating Offline Bundle (with Docker Images) ==="
       echo "Version: $version"
       echo "Output: $bundle_name"
       echo ""
 
-      # Create temp directory
-      mkdir -p "$bundle_dir"
-      cd "$bundle_dir" || return 1
+      # Step 1: Download pre-built config bundle from GCS
+      echo "Step 1: Downloading pre-built config bundle..."
+      local bundle_url="${GCS_BUNDLE_BASE_URL}/${version}/${config_bundle}"
 
-      # Download config files
-      echo "Downloading configuration files..."
-      if [ "$version" = "latest" ]; then
-        download_file "$OFFLINE_BASE_URL/docker-compose.yml" "docker-compose.yml" || { echo "Failed to download docker-compose.yml"; cd "$start_dir"; rm -rf "$bundle_dir"; return 1; }
-      else
-        # Try versioned file first (e.g., ova/versions/0.8.4-rc181.yaml), then fall back to latest
-        if ! download_file "$OFFLINE_BASE_URL/ova/versions/${version}.yaml" "docker-compose.yml" 2>/dev/null; then
-          echo "Version-specific file not found, downloading latest and updating tags..."
-          download_file "$OFFLINE_BASE_URL/docker-compose.yml" "docker-compose.yml" || { echo "Failed to download docker-compose.yml"; cd "$start_dir"; rm -rf "$bundle_dir"; return 1; }
-          # Update calltelemetry image tags to specified version
-          echo "Updating image tags to version: $version"
-          sed -i.bak -E "s|(calltelemetry/web:)[^\"'[:space:]]+|\1$version|g" docker-compose.yml
-          sed -i.bak -E "s|(calltelemetry/vue:)[^\"'[:space:]]+|\1$version|g" docker-compose.yml
-          rm -f docker-compose.yml.bak
+      if command -v wget >/dev/null 2>&1; then
+        if ! wget -q --show-progress "$bundle_url" -O "$config_bundle" 2>&1; then
+          echo ""
+          echo "❌ ERROR: Failed to download config bundle for version $version"
+          echo "URL: $bundle_url"
+          echo ""
+          echo "Make sure this version exists. Check:"
+          echo "  https://github.com/calltelemetry/calltelemetry/releases"
+          rm -f "$config_bundle"
+          return 1
         fi
+      elif command -v curl >/dev/null 2>&1; then
+        if ! curl -fL --progress-bar "$bundle_url" -o "$config_bundle"; then
+          echo ""
+          echo "❌ ERROR: Failed to download config bundle for version $version"
+          rm -f "$config_bundle"
+          return 1
+        fi
+      else
+        echo "Error: Neither wget nor curl is available"
+        return 1
       fi
-
-      download_file "$OFFLINE_BASE_URL/ova/Caddyfile" "Caddyfile" || echo "Warning: Could not download Caddyfile"
-      download_file "$OFFLINE_BASE_URL/ova/cli.sh" "cli.sh" || echo "Warning: Could not download cli.sh"
-      download_file "$OFFLINE_BASE_URL/ova/nats.conf" "nats.conf" 2>/dev/null || echo "Note: nats.conf not found (optional)"
-
-      # Download prometheus config
-      mkdir -p prometheus
-      download_file "$OFFLINE_BASE_URL/ova/versions/prometheus/prometheus.yml" "prometheus/prometheus.yml" 2>/dev/null || echo "Note: prometheus.yml not found"
-
-      # Download grafana configs
-      mkdir -p grafana/provisioning/datasources grafana/provisioning/dashboards grafana/dashboards
-      download_file "$OFFLINE_BASE_URL/ova/versions/grafana/provisioning/datasources/calltelemetry.yml" "grafana/provisioning/datasources/calltelemetry.yml" 2>/dev/null || true
-      download_file "$OFFLINE_BASE_URL/ova/versions/grafana/provisioning/dashboards/calltelemetry.yaml" "grafana/provisioning/dashboards/calltelemetry.yaml" 2>/dev/null || true
-      download_file "$OFFLINE_BASE_URL/ova/versions/grafana/dashboards/calltelemetry-overview.json" "grafana/dashboards/calltelemetry-overview.json" 2>/dev/null || true
-
-      chmod +x cli.sh 2>/dev/null || true
-
-      echo "Configuration files downloaded."
+      echo "✅ Config bundle downloaded"
       echo ""
 
-      # Extract and pull images
-      echo "Extracting image list from docker-compose.yml..."
-      local images=$(grep -E '^\s*image:' docker-compose.yml | sed 's/.*image:[[:space:]]*["'\'']*\([^"'\'']*\)["'\'']*[[:space:]]*$/\1/' | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
+      # Step 2: Extract config bundle
+      echo "Step 2: Extracting config bundle..."
+      rm -rf "$bundle_dir"
+      mkdir -p "$bundle_dir"
+      tar -xzf "$config_bundle" -C "$bundle_dir" --strip-components=1
+      rm -f "$config_bundle"
+      echo "✅ Config bundle extracted"
+      echo ""
+
+      # Step 3: Extract image list and pull images
+      echo "Step 3: Pulling Docker images..."
+      cd "$bundle_dir" || return 1
+
+      if [ ! -f "docker-compose.yml" ]; then
+        echo "❌ ERROR: docker-compose.yml not found in bundle"
+        cd "$start_dir"
+        rm -rf "$bundle_dir"
+        return 1
+      fi
+
+      local images=$(grep -E '^\s*image:' docker-compose.yml | sed 's/.*image:[[:space:]]*["'\'']*\([^"'\'']*\)["'\'']*[[:space:]]*$/\1/' | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//' | sort -u)
 
       echo "Images to download:"
       echo "$images" | while read img; do [ -n "$img" ] && echo "  - $img"; done
       echo ""
 
-      echo "Pulling Docker images (this may take a while)..."
       local pull_failed=false
+      local image_count=0
+      local total_images=$(echo "$images" | wc -l | tr -d ' ')
+
       for img in $images; do
         [ -z "$img" ] && continue
-        echo "Pulling: $img"
+        image_count=$((image_count + 1))
+        echo "[$image_count/$total_images] Pulling: $img"
         if ! docker pull "$img"; then
-          echo "Warning: Failed to pull $img"
+          echo "⚠️  Warning: Failed to pull $img"
           pull_failed=true
         fi
       done
 
       if [ "$pull_failed" = true ]; then
         echo ""
-        echo "Warning: Some images failed to pull. Bundle may be incomplete."
+        echo "⚠️  Warning: Some images failed to pull. Bundle may be incomplete."
       fi
 
+      # Step 4: Save Docker images to tar
       echo ""
-      echo "Saving Docker images to tar file..."
+      echo "Step 4: Saving Docker images to images.tar..."
       # shellcheck disable=SC2086
-      docker save $images -o images.tar
-      echo "Images saved to images.tar ($(du -h images.tar | cut -f1))"
+      if docker save $images -o images.tar; then
+        echo "✅ Images saved: $(du -h images.tar | cut -f1)"
+      else
+        echo "❌ ERROR: Failed to save Docker images"
+        cd "$start_dir"
+        rm -rf "$bundle_dir"
+        return 1
+      fi
 
+      # Step 5: Create final bundle
       echo ""
-      echo "Creating bundle archive..."
+      echo "Step 5: Creating final bundle archive..."
       cd "$start_dir"
       tar -czf "$bundle_name" "$bundle_dir"
       rm -rf "$bundle_dir"
 
       echo ""
-      echo "=== Bundle Created Successfully ==="
+      echo "=== Offline Bundle Created Successfully ==="
       echo "File: $bundle_name"
       echo "Size: $(du -h "$bundle_name" | cut -f1)"
       echo ""
+      echo "Contents:"
+      echo "  - Configuration files (cli.sh, docker-compose.yml, etc.)"
+      echo "  - Docker images (images.tar)"
+      echo ""
       echo "Transfer this file to your air-gapped system and run:"
-      echo "  ./cli.sh offline apply $bundle_name"
+      echo "  tar -xzf $bundle_name"
+      echo "  cd $bundle_dir"
+      echo "  ./cli.sh offline apply ../$bundle_name"
     }
 
     offline_apply() {
@@ -3181,9 +3319,96 @@ case "$1" in
       echo "Total images: $(echo "$images" | grep -c .)"
     }
 
+    # Fetch pre-built bundle from GCS (no Docker images, just configs)
+    offline_fetch() {
+      local version="$1"
+
+      if [ -z "$version" ]; then
+        echo "Usage: cli.sh offline fetch <version>"
+        echo ""
+        echo "Download a pre-built config bundle from cloud storage."
+        echo "This bundle contains configs only (no Docker images)."
+        echo ""
+        echo "Example: cli.sh offline fetch 0.8.4-rc191"
+        return 1
+      fi
+
+      local bundle_url="${GCS_BUNDLE_BASE_URL}/${version}/calltelemetry-bundle-${version}.tar.gz"
+      local checksum_url="${GCS_BUNDLE_BASE_URL}/${version}/calltelemetry-bundle-${version}.tar.gz.sha256"
+      local bundle_file="calltelemetry-bundle-${version}.tar.gz"
+
+      echo "=== Fetching Pre-built Bundle ==="
+      echo "Version: $version"
+      echo "URL: $bundle_url"
+      echo ""
+
+      # Download bundle
+      echo "Downloading bundle..."
+      if command -v wget >/dev/null 2>&1; then
+        if ! wget -q --show-progress "$bundle_url" -O "$bundle_file" 2>&1; then
+          echo ""
+          echo "❌ ERROR: Failed to download bundle for version $version"
+          echo ""
+          echo "The version may not exist or network error occurred."
+          echo "Check available versions at: https://github.com/calltelemetry/calltelemetry/releases"
+          rm -f "$bundle_file"
+          return 1
+        fi
+      elif command -v curl >/dev/null 2>&1; then
+        if ! curl -fL --progress-bar "$bundle_url" -o "$bundle_file"; then
+          echo ""
+          echo "❌ ERROR: Failed to download bundle for version $version"
+          echo ""
+          echo "The version may not exist or network error occurred."
+          rm -f "$bundle_file"
+          return 1
+        fi
+      else
+        echo "Error: Neither wget nor curl is available"
+        return 1
+      fi
+
+      # Download and verify checksum
+      echo ""
+      echo "Verifying checksum..."
+      local checksum_file="${bundle_file}.sha256"
+      if command -v wget >/dev/null 2>&1; then
+        wget -q "$checksum_url" -O "$checksum_file" 2>/dev/null
+      else
+        curl -sfL "$checksum_url" -o "$checksum_file" 2>/dev/null
+      fi
+
+      if [ -f "$checksum_file" ]; then
+        if command -v sha256sum >/dev/null 2>&1; then
+          if sha256sum -c "$checksum_file" >/dev/null 2>&1; then
+            echo "✅ Checksum verified"
+          else
+            echo "⚠️  Checksum mismatch - file may be corrupted"
+          fi
+        else
+          echo "ℹ️  sha256sum not available, skipping verification"
+        fi
+        rm -f "$checksum_file"
+      fi
+
+      echo ""
+      echo "=== Bundle Downloaded ==="
+      echo "File: $bundle_file"
+      echo "Size: $(du -h "$bundle_file" | cut -f1)"
+      echo ""
+      echo "To apply this bundle:"
+      echo "  ./cli.sh offline apply $bundle_file"
+      echo ""
+      echo "Note: This bundle contains configs only."
+      echo "Docker images will be pulled when you run 'offline apply'."
+    }
+
     case "$2" in
       download)
         offline_download "$3"
+        ;;
+      fetch)
+        offline_fetch "$3"
         ;;
       apply)
         offline_apply "$3"
@@ -3196,30 +3421,28 @@ case "$1" in
         echo ""
         echo "Air-gapped/offline installation commands:"
         echo ""
-        echo "  download [version]     Download all images and configs for offline install"
-        echo "                         Creates a .tar.gz bundle with everything needed"
+        echo "  fetch <version>        Download pre-built config bundle from cloud"
+        echo "                         Fast - configs only, no Docker images"
+        echo "                         Example: cli.sh offline fetch 0.8.4-rc191"
+        echo ""
+        echo "  download [version]     Build full offline bundle with Docker images"
+        echo "                         Slow - includes all images for air-gapped install"
         echo "                         Default version: latest"
         echo ""
         echo "  apply <bundle.tar.gz>  Apply an offline bundle to this system"
-        echo "                         Loads images and installs config files"
+        echo "                         Loads images (if present) and installs configs"
         echo ""
         echo "  list                   List images in current docker-compose.yml"
         echo "                         Shows which are downloaded locally"
         echo ""
-        echo "Workflow:"
-        echo "  1. On internet-connected machine:"
-        echo "     ./cli.sh offline download 0.8.4-rc181"
+        echo "Workflow (with internet on target):"
+        echo "  1. ./cli.sh offline fetch 0.8.4-rc191"
+        echo "  2. ./cli.sh offline apply calltelemetry-bundle-0.8.4-rc191.tar.gz"
         echo ""
-        echo "  2. Transfer bundle to air-gapped system via USB/SFTP to your home directory"
-        echo ""
-        echo "  3. On air-gapped system (first time - extract cli.sh first):"
-        echo "     cd ~"
-        echo "     tar -xzf calltelemetry-offline-*.tar.gz"
-        echo "     cp offline-bundle-*/cli.sh ./cli.sh && chmod +x ./cli.sh"
-        echo "     ./cli.sh offline apply calltelemetry-offline-*.tar.gz"
-        echo ""
-        echo "  4. Future updates (cli.sh already has offline command):"
-        echo "     ./cli.sh offline apply calltelemetry-offline-*.tar.gz"
+        echo "Workflow (air-gapped target):"
+        echo "  1. On internet machine: ./cli.sh offline download 0.8.4-rc191"
+        echo "  2. Transfer bundle via USB/SFTP"
+        echo "  3. On target: ./cli.sh offline apply calltelemetry-offline-*.tar.gz"
         ;;
       *)
         echo "Unknown offline command: $2"
@@ -3739,8 +3962,8 @@ end
 
         # HTTPS connectivity test
         echo ""
-        echo "--- HTTPS Connectivity Test (GitHub) ---"
-        TEST_URL="https://raw.githubusercontent.com/calltelemetry/calltelemetry/refs/heads/master/docker-compose.yml"
+        echo "--- HTTPS Connectivity Test (GCS) ---"
+        TEST_URL="${GCS_BASE_URL}/cli.sh"
         echo "  URL: $TEST_URL"
         echo ""
         if command -v wget >/dev/null 2>&1; then
@@ -3768,7 +3991,7 @@ end
                 echo "  This often means a corporate proxy/firewall is intercepting HTTPS traffic."
                 echo ""
                 echo "  Checking certificate issuer..."
-                CERT_ISSUER=$(echo | openssl s_client -connect raw.githubusercontent.com:443 2>/dev/null | openssl x509 -noout -issuer 2>/dev/null)
+                CERT_ISSUER=$(echo | openssl s_client -connect storage.googleapis.com:443 2>/dev/null | openssl x509 -noout -issuer 2>/dev/null)
                 if [ -n "$CERT_ISSUER" ]; then
                   echo "    $CERT_ISSUER"
                   if echo "$CERT_ISSUER" | grep -qi "cisco\|umbrella\|zscaler\|palo alto\|fortinet\|fortigate\|bluecoat\|symantec\|mcafee\|websense"; then
@@ -3777,7 +4000,7 @@ end
                     echo "  Solutions:"
                     echo "    1. Add the corporate CA certificate to /etc/pki/ca-trust/source/anchors/"
                     echo "       then run: sudo update-ca-trust"
-                    echo "    2. Ask IT to whitelist raw.githubusercontent.com from SSL inspection"
+                    echo "    2. Ask IT to whitelist storage.googleapis.com from SSL inspection"
                   fi
                 fi
                 ;;
