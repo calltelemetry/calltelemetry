@@ -1,0 +1,34 @@
+# CallTelemetry Bundle Manifest
+# This file defines what gets packaged into release bundles
+# Update this file when adding/removing assets - no code changes needed
+
+version: 1
+
+# Core scripts (always included)
+scripts:
+  - cli.sh
+  - backup.sh
+  - reset.sh
+
+# Configuration files
+configs:
+  - nats.conf
+  - versions/caddy/Caddyfile
+
+# Prometheus configuration
+prometheus:
+  - versions/prometheus/prometheus.yml
+
+# Grafana dashboards and provisioning
+grafana:
+  dashboards:
+    - versions/grafana/dashboards/calltelemetry-overview.json
+    - versions/grafana/dashboards/curri-observability.json
+    - versions/grafana/dashboards/caddy-overview.json
+    - versions/grafana/missed-call-overview.json
+  provisioning:
+    - versions/grafana/provisioning/datasources/calltelemetry.yml
+    - versions/grafana/provisioning/dashboards/calltelemetry.yaml
+
+# Docker compose is handled separately (version-specific)
+# The workflow will use: ova/versions/{version}.yml or root docker-compose.yml
