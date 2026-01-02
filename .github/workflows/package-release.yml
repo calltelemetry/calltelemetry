@@ -1,0 +1,229 @@
+name: Package Release Bundle
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag to package (e.g., 0.8.4-rc191)'
+        required: true
+        type: string
+
+env:
+  GCS_BUCKET: ${{ secrets.GCS_BUCKET }}
+  BUNDLE_NAME: calltelemetry-bundle
+
+jobs:
+  package-and-upload:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            VERSION="${{ github.event.release.tag_name }}"
+          else
+            VERSION="${{ inputs.version }}"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "📦 Packaging version: $VERSION"
+
+      - name: Create bundle directory
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          BUNDLE_DIR="${BUNDLE_NAME}-${VERSION}"
+
+          mkdir -p "$BUNDLE_DIR"
+          echo "📁 Created bundle directory: $BUNDLE_DIR"
+
+      - name: Copy CLI script
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          BUNDLE_DIR="${BUNDLE_NAME}-${VERSION}"
+
+          cp ova/cli.sh "$BUNDLE_DIR/"
+          chmod +x "$BUNDLE_DIR/cli.sh"
+          echo "✅ Copied cli.sh"
+
+      - name: Get docker-compose for version
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          BUNDLE_DIR="${BUNDLE_NAME}-${VERSION}"
+
+          # Check if version-specific compose file exists
+          if [ -f "ova/versions/${VERSION}.yml" ]; then
+            cp "ova/versions/${VERSION}.yml" "$BUNDLE_DIR/docker-compose.yml"
+            echo "✅ Using version-specific compose: ova/versions/${VERSION}.yml"
+          elif [ -f "ova/versions/${VERSION}.yaml" ]; then
+            cp "ova/versions/${VERSION}.yaml" "$BUNDLE_DIR/docker-compose.yml"
+            echo "✅ Using version-specific compose: ova/versions/${VERSION}.yaml"
+          elif [ -f "docker-compose.yml" ]; then
+            cp docker-compose.yml "$BUNDLE_DIR/"
+            echo "✅ Using root docker-compose.yml"
+          else
+            echo "❌ No docker-compose file found for version $VERSION"
+            exit 1
+          fi
+
+      - name: Copy supporting files
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          BUNDLE_DIR="${BUNDLE_NAME}-${VERSION}"
+
+          # Copy additional OVA files if they exist
+          [ -f "ova/nats.conf" ] && cp ova/nats.conf "$BUNDLE_DIR/" && echo "✅ Copied nats.conf"
+          [ -f "ova/backup.sh" ] && cp ova/backup.sh "$BUNDLE_DIR/" && echo "✅ Copied backup.sh"
+          [ -f "ova/reset.sh" ] && cp ova/reset.sh "$BUNDLE_DIR/" && echo "✅ Copied reset.sh"
+
+          # Copy Caddyfile if exists
+          [ -f "ova/versions/caddy/Caddyfile" ] && cp ova/versions/caddy/Caddyfile "$BUNDLE_DIR/" && echo "✅ Copied Caddyfile"
+
+          # Copy prometheus config
+          if [ -f "ova/versions/prometheus/prometheus.yml" ]; then
+            mkdir -p "$BUNDLE_DIR/prometheus"
+            cp ova/versions/prometheus/prometheus.yml "$BUNDLE_DIR/prometheus/"
+            echo "✅ Copied prometheus config"
+          fi
+
+          # Copy grafana configs
+          if [ -d "ova/versions/grafana" ]; then
+            cp -r ova/versions/grafana "$BUNDLE_DIR/"
+            echo "✅ Copied grafana configs"
+          fi
+
+          echo "📋 Bundle contents:"
+          ls -la "$BUNDLE_DIR/"
+
+      - name: Create README for bundle
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          BUNDLE_DIR="${BUNDLE_NAME}-${VERSION}"
+
+          cat > "$BUNDLE_DIR/README.txt" << EOF
+          CallTelemetry Offline Bundle
+          Version: ${VERSION}
+          Created: $(date -u '+%Y-%m-%d %H:%M:%S UTC')
+
+          Installation:
+          1. Extract this bundle to your home directory
+          2. Run: chmod +x cli.sh
+          3. Run: sudo ./cli.sh offline apply
+
+          Or for online installation:
+          1. Run: sudo ./cli.sh update ${VERSION}
+
+          For help: ./cli.sh --help
+
+          https://calltelemetry.com
+          EOF
+          echo "✅ Created README.txt"
+
+      - name: Create tar.gz bundle
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          BUNDLE_DIR="${BUNDLE_NAME}-${VERSION}"
+          BUNDLE_FILE="${BUNDLE_NAME}-${VERSION}.tar.gz"
+
+          tar -czvf "$BUNDLE_FILE" "$BUNDLE_DIR"
+
+          echo "📦 Created bundle: $BUNDLE_FILE"
+          echo "📊 Bundle size: $(du -h $BUNDLE_FILE | cut -f1)"
+
+          # Generate checksum
+          sha256sum "$BUNDLE_FILE" > "${BUNDLE_FILE}.sha256"
+          echo "🔐 SHA256: $(cat ${BUNDLE_FILE}.sha256)"
+
+          echo "bundle_file=$BUNDLE_FILE" >> $GITHUB_ENV
+
+      - name: Authenticate to Google Cloud
+        if: env.GCS_BUCKET != ''
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCS_SERVICE_ACCOUNT_KEY }}
+
+      - name: Set up Cloud SDK
+        if: env.GCS_BUCKET != ''
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Upload to Google Cloud Storage
+        if: env.GCS_BUCKET != ''
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          BUNDLE_FILE="${BUNDLE_NAME}-${VERSION}.tar.gz"
+
+          echo "☁️ Uploading to GCS bucket: $GCS_BUCKET"
+
+          # Upload bundle
+          gsutil cp "$BUNDLE_FILE" "gs://${GCS_BUCKET}/releases/${VERSION}/"
+          gsutil cp "${BUNDLE_FILE}.sha256" "gs://${GCS_BUCKET}/releases/${VERSION}/"
+
+          # Also upload as 'latest' if this is a stable release (no rc/beta/alpha)
+          if [[ ! "$VERSION" =~ (rc|beta|alpha) ]]; then
+            gsutil cp "$BUNDLE_FILE" "gs://${GCS_BUCKET}/releases/latest/${BUNDLE_NAME}-latest.tar.gz"
+            gsutil cp "${BUNDLE_FILE}.sha256" "gs://${GCS_BUCKET}/releases/latest/${BUNDLE_NAME}-latest.tar.gz.sha256"
+            echo "✅ Also uploaded as latest"
+          fi
+
+          echo "✅ Uploaded to GCS:"
+          echo "   gs://${GCS_BUCKET}/releases/${VERSION}/${BUNDLE_FILE}"
+
+      - name: Upload bundle to GitHub Release
+        if: github.event_name == 'release'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          BUNDLE_FILE="${BUNDLE_NAME}-${VERSION}.tar.gz"
+
+          echo "📤 Uploading bundle to GitHub release..."
+
+          gh release upload "$VERSION" \
+            "$BUNDLE_FILE" \
+            "${BUNDLE_FILE}.sha256" \
+            --clobber
+
+          echo "✅ Uploaded to GitHub release: $VERSION"
+
+      - name: Upload bundle as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.BUNDLE_NAME }}-${{ steps.version.outputs.version }}
+          path: |
+            ${{ env.BUNDLE_NAME }}-${{ steps.version.outputs.version }}.tar.gz
+            ${{ env.BUNDLE_NAME }}-${{ steps.version.outputs.version }}.tar.gz.sha256
+          retention-days: 90
+
+      - name: Summary
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          BUNDLE_FILE="${BUNDLE_NAME}-${VERSION}.tar.gz"
+
+          echo "## 📦 Release Bundle Created" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** \`${VERSION}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Bundle:** \`${BUNDLE_FILE}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Size:** $(du -h $BUNDLE_FILE | cut -f1)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Contents" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          tar -tzf "$BUNDLE_FILE" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### SHA256 Checksum" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          cat "${BUNDLE_FILE}.sha256" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+          if [ -n "$GCS_BUCKET" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Download URLs" >> $GITHUB_STEP_SUMMARY
+            echo "- GCS: \`gs://${GCS_BUCKET}/releases/${VERSION}/${BUNDLE_FILE}\`" >> $GITHUB_STEP_SUMMARY
+          fi

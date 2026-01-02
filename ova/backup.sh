@@ -1,5 +1,6 @@
-# Location where you want to keep your db dump
-backup_folder_path=/home/calltelemetry/backups
+# Detect installation directory from script location
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+backup_folder_path="${SCRIPT_DIR}/backups"
 
 
 # File name i.e: dump-2020-06-24.sql
