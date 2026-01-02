@@ -3761,7 +3761,26 @@ end
               2) echo "    - Command line parse error" ;;
               3) echo "    - File I/O error" ;;
               4) echo "    - Network failure (DNS, connection refused, timeout)" ;;
-              5) echo "    - SSL/TLS verification failure" ;;
+              5)
+                echo "    - SSL/TLS verification failure"
+                echo ""
+                echo "  SSL Certificate Issue Detected!"
+                echo "  This often means a corporate proxy/firewall is intercepting HTTPS traffic."
+                echo ""
+                echo "  Checking certificate issuer..."
+                CERT_ISSUER=$(echo | openssl s_client -connect raw.githubusercontent.com:443 2>/dev/null | openssl x509 -noout -issuer 2>/dev/null)
+                if [ -n "$CERT_ISSUER" ]; then
+                  echo "    $CERT_ISSUER"
+                  if echo "$CERT_ISSUER" | grep -qi "cisco\|umbrella\|zscaler\|palo alto\|fortinet\|fortigate\|bluecoat\|symantec\|mcafee\|websense"; then
+                    echo ""
+                    echo "  ⚠️  Corporate proxy detected! The firewall is doing SSL inspection."
+                    echo "  Solutions:"
+                    echo "    1. Add the corporate CA certificate to /etc/pki/ca-trust/source/anchors/"
+                    echo "       then run: sudo update-ca-trust"
+                    echo "    2. Ask IT to whitelist raw.githubusercontent.com from SSL inspection"
+                  fi
+                fi
+                ;;
               6) echo "    - Authentication required" ;;
               7) echo "    - Protocol error" ;;
               8) echo "    - Server error response" ;;
