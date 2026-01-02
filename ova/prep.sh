@@ -154,14 +154,17 @@ sudo systemctl enable docker-compose-app
 # Setup a Backup Job
 echo "0 0 * * * $INSTALL_USER $INSTALL_DIR/backup.sh" | sudo tee -a /etc/crontab > /dev/null
 
+# GCS base URL (no GitHub dependency)
+GCS_BASE_URL="https://storage.googleapis.com/ct_releases"
+
 # Downloads a utility reset script
-wget https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/ova/reset.sh -O reset.sh
+wget "${GCS_BASE_URL}/reset.sh" -O reset.sh
 sudo chmod +x "$INSTALL_DIR/reset.sh"
 
 # Prep Backup Directory and Script
 sudo mkdir "$INSTALL_DIR/backups" -p
 sudo chown -R "$INSTALL_USER" "$INSTALL_DIR/backups"
-wget https://raw.githubusercontent.com/calltelemetry/calltelemetry/master/ova/backup.sh -O "$INSTALL_DIR/backup.sh"
+wget "${GCS_BASE_URL}/backup.sh" -O "$INSTALL_DIR/backup.sh"
 sudo chmod +x "$INSTALL_DIR/backup.sh"
 sudo chown "$INSTALL_USER" "$INSTALL_DIR/backup.sh"
 

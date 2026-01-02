@@ -305,6 +305,7 @@ show_help() {
   echo
   echo "Diagnostic Commands:"
   echo "  diag network                Run comprehensive network diagnostics"
+  echo "  diag service                Display systemd service and container logs"
   echo "  diag tesla <ipv4|ipv6> <url>    Test TCP + HTTP connectivity"
   echo "  diag raw_tcp <ipv4|ipv6> <url>  Test raw TCP socket only"
   echo "  diag capture <secs> [filter] [file]  Capture packets with tcpdump"
@@ -4030,11 +4031,54 @@ end
         echo ""
         echo "=== Network Diagnostics Complete ==="
         ;;
+      service)
+        echo "=== Service Diagnostics ==="
+        echo ""
+
+        local SERVICE_FILE="/etc/systemd/system/docker-compose-app.service"
+
+        # Print systemd service file
+        echo "--- Systemd Service File ($SERVICE_FILE) ---"
+        if [ -f "$SERVICE_FILE" ]; then
+          cat "$SERVICE_FILE"
+        else
+          echo "  Service file not found!"
+        fi
+        echo ""
+
+        # Get systemd service logs
+        echo "--- Systemd Service Logs (Last 50 lines) ---"
+        sudo journalctl -u docker-compose-app.service -n 50 --no-pager
+        echo ""
+
+        # Get Docker Compose logs for specific containers
+        echo "--- Docker Container Logs ---"
+        echo ""
+
+        echo "=== Web Container (Last 50 lines) ==="
+        $DOCKER_COMPOSE_CMD logs --tail=50 web 2>/dev/null || echo "  Web container logs not available"
+        echo ""
+
+        echo "=== Database Container (Last 50 lines) ==="
+        $DOCKER_COMPOSE_CMD logs --tail=50 db 2>/dev/null || echo "  Database container logs not available"
+        echo ""
+
+        echo "=== NATS Container (Last 50 lines) ==="
+        $DOCKER_COMPOSE_CMD logs --tail=50 nats 2>/dev/null || echo "  NATS container logs not available"
+        echo ""
+
+        echo "=== Caddy Container (Last 50 lines) ==="
+        $DOCKER_COMPOSE_CMD logs --tail=50 caddy 2>/dev/null || echo "  Caddy container logs not available"
+        echo ""
+
+        echo "=== Service Diagnostics Complete ==="
+        ;;
       ""|help)
         echo "Usage: cli.sh diag <command>"
         echo ""
         echo "Diagnostic commands:"
         echo "  network                    Run comprehensive network diagnostics"
+        echo "  service                    Display systemd service and container logs"
         echo "  tesla <ipv4|ipv6> <url>    Test TCP + HTTP connectivity"
         echo "  raw_tcp <ipv4|ipv6> <url>  Test raw TCP socket only"
         echo "  capture <secs> [filter] [file]  Capture packets with tcpdump"
@@ -4042,6 +4086,7 @@ end
         echo ""
         echo "Examples:"
         echo "  cli.sh diag network"
+        echo "  cli.sh diag service"
         echo "  cli.sh diag tesla ipv6 http://[dead:beef:cafe:1::11]:8090"
         echo "  cli.sh diag tesla ipv4 http://192.168.1.100:8090"
         echo "  cli.sh diag raw_tcp ipv6 http://[dead:beef:cafe:1::11]:8090"
