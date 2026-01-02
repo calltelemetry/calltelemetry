@@ -2565,8 +2565,8 @@ build_appliance() {
   if [ $? -eq 0 ]; then
     chmod +x /tmp/prep.sh
     /tmp/prep.sh
-    sudo chown -R calltelemetry "$BACKUP_DIR"
-    sudo chown -R calltelemetry "$BACKUP_FOLDER_PATH"
+    sudo chown -R "$INSTALL_USER" "$BACKUP_DIR"
+    sudo chown -R "$INSTALL_USER" "$BACKUP_FOLDER_PATH"
   else
     echo "Failed to download the prep script. Please check your internet connection."
   fi
