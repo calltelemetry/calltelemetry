@@ -68,9 +68,11 @@ detect_docker_compose_cmd() {
   fi
 
   # Check standalone docker-compose
-  if command -v docker-compose >/dev/null 2>&1; then
+  if command -v docker-compose >/dev/null 2>&1;
+ then
     # Test if it works
-    if docker-compose version >/dev/null 2>&1; then
+    if docker-compose version >/dev/null 2>&1;
+ then
       echo "/usr/bin/docker-compose"
       return 0
     fi
@@ -157,16 +159,38 @@ echo "0 0 * * * $INSTALL_USER $INSTALL_DIR/backup.sh" | sudo tee -a /etc/crontab
 # GCS base URL (no GitHub dependency)
 GCS_BASE_URL="https://storage.googleapis.com/ct_releases"
 
-# Downloads a utility reset script
-wget "${GCS_BASE_URL}/reset.sh" -O reset.sh
-sudo chmod +x "$INSTALL_DIR/reset.sh"
+ensure_script() {
+  # Usage: ensure_script <name> <url>
+  local name="$1"
+  local url="$2"
+  local local_path="${INSTALL_DIR}/${name}"
+
+  # If already present (e.g., bundled into an image build), prefer it.
+  if [ -f "${local_path}" ]; then
+    echo "Using bundled ${name} at ${local_path}"
+    sudo chmod +x "${local_path}" || true
+    return 0
+  fi
+
+  # Otherwise attempt download; do not hard-fail image builds if the remote is unavailable.
+  echo "Downloading ${name} from ${url}..."
+  if wget "${url}" -O "${local_path}"; then
+    sudo chmod +x "${local_path}" || true
+    return 0
+  fi
+
+  echo "WARNING: Failed to download ${name} from ${url}. Continuing without it."
+  return 0
+}
+
+# Downloads utility scripts (or uses bundled copies if present)
+ensure_script "reset.sh" "${GCS_BASE_URL}/reset.sh"
 
 # Prep Backup Directory and Script
 sudo mkdir "$INSTALL_DIR/backups" -p
 sudo chown -R "$INSTALL_USER" "$INSTALL_DIR/backups"
-wget "${GCS_BASE_URL}/backup.sh" -O "$INSTALL_DIR/backup.sh"
-sudo chmod +x "$INSTALL_DIR/backup.sh"
-sudo chown "$INSTALL_USER" "$INSTALL_DIR/backup.sh"
+ensure_script "backup.sh" "${GCS_BASE_URL}/backup.sh"
+sudo chown "$INSTALL_USER" "$INSTALL_DIR/backup.sh" 2>/dev/null || true
 
 sudo usermod -aG docker "$INSTALL_USER"
 sudo systemctl restart docker
@@ -191,43 +215,117 @@ EOF
 echo "Appliance prep complete."
 echo "IMPORTANT - After this next step you must access the appliance on port 2222 - NOT PORT 22."
 
-# Prompt the user for confirmation to apply the SSH port change
-read -p "The SSH management port must changed to 2222. Applying this change will disconnect your SSH session. Do you want to apply this change and restart the SSH service? (yes/no): " response < /dev/tty
+# SSH port change controls (defaults preserve interactive behavior).
+# - CT_NONINTERACTIVE=1 skips the /dev/tty prompt.
+# - CT_SSH_PORT sets the desired SSH port (default: 2222).
+# - CT_APPLY_SSH_PORT_CHANGE=1 applies the config change (default: prompt-driven).
+# - CT_RESTART_SSHD=1 restarts sshd to apply immediately (default: 1 for interactive flow).
+CT_SSH_PORT="${CT_SSH_PORT:-2222}"
+CT_RESTART_SSHD="${CT_RESTART_SSHD:-1}"
 
+apply_ssh_port_change=""
+if [ -n "${CT_APPLY_SSH_PORT_CHANGE:-}" ]; then
+  apply_ssh_port_change="$CT_APPLY_SSH_PORT_CHANGE"
+elif [ -n "${CT_NONINTERACTIVE:-}" ]; then
+  apply_ssh_port_change="1"
+else
+  # Prompt the user for confirmation to apply the SSH port change
+  read -p "The SSH management port must be changed to ${CT_SSH_PORT}. Applying this change may disconnect your SSH session. Apply now? (yes/no): " response < /dev/tty
+  if [ "$response" = "yes" ]; then
+    apply_ssh_port_change="1"
+  else
+    apply_ssh_port_change="0"
+  fi
+fi
 
-if [ "$response" = "yes" ]; then
-  # Change SSH port to 2222
-  sudo sed -i "s/#Port 22/Port 2222/" /etc/ssh/sshd_config
-  echo "Configuring firewall for port 2222"
+if [ "$apply_ssh_port_change" = "1" ]; then
+  # Ensure sshd_config contains ONLY the desired Port line.
+  # Multiple Port lines cause sshd to listen on multiple ports, which can keep 22 occupied.
+  sudo sed -i -E '/^[[:space:]]*#?Port[[:space:]]+[0-9]+/d' /etc/ssh/sshd_config
+  echo "Port ${CT_SSH_PORT}" | sudo tee -a /etc/ssh/sshd_config > /dev/null
+
+  echo "Configuring firewall for port ${CT_SSH_PORT}"
+
+  # Ensure firewalld is available/running before attempting firewall-cmd.
+  if ! command -v firewall-cmd >/dev/null 2>&1;
+ then
+    sudo dnf install -y firewalld || sudo yum install -y firewalld || true
+  fi
+  if command -v firewall-cmd >/dev/null 2>&1;
+ then
+    sudo systemctl enable --now firewalld 2>/dev/null || true
+  fi
 
   # Detect AlmaLinux, CentOS, or RHEL and handle accordingly
-  if grep -q "AlmaLinux" /etc/os-release; then
+  if grep -q "AlmaLinux" /etc/os-release;
+ then
     echo "Detected Alma Linux. Installing semanage tools and configuring firewall..."
     sudo yum install policycoreutils-python-utils -y
-    sudo semanage port -a -t ssh_port_t -p tcp 2222
-    sudo firewall-cmd --zone=public --add-port=2222/tcp --permanent
+    sudo semanage port -a -t ssh_port_t -p tcp "${CT_SSH_PORT}" 2>/dev/null || sudo semanage port -m -t ssh_port_t -p tcp "${CT_SSH_PORT}"
+    sudo firewall-cmd --zone=public --add-port="${CT_SSH_PORT}/tcp" --permanent
+    # Keep port 22 open for the appliance to bind (SFTP, etc.) while moving OS sshd off 22.
+    sudo firewall-cmd --zone=public --add-port="22/tcp" --permanent 2>/dev/null || true
     sudo firewall-cmd --reload
 
-  elif grep -q "CentOS" /etc/os-release; then
+  elif grep -q "CentOS" /etc/os-release;
+ then
     echo "Detected CentOS Linux. Installing semanage tools and configuring firewall..."
     sudo yum install policycoreutils-python-utils -y
-    sudo semanage port -a -t ssh_port_t -p tcp 2222
-    sudo firewall-cmd --zone=public --add-port=2222/tcp --permanent
+    sudo semanage port -a -t ssh_port_t -p tcp "${CT_SSH_PORT}" 2>/dev/null || sudo semanage port -m -t ssh_port_t -p tcp "${CT_SSH_PORT}"
+    sudo firewall-cmd --zone=public --add-port="${CT_SSH_PORT}/tcp" --permanent
+    sudo firewall-cmd --zone=public --add-port="22/tcp" --permanent 2>/dev/null || true
     sudo firewall-cmd --reload
 
-  elif grep -q "Red Hat Enterprise Linux" /etc/os-release; then
+  elif grep -q "Red Hat Enterprise Linux" /etc/os-release;
+ then
     echo "Detected Red Hat Enterprise Linux. Installing semanage tools and configuring firewall..."
     sudo yum install policycoreutils-python-utils -y
-    sudo semanage port -a -t ssh_port_t -p tcp 2222
-    sudo firewall-cmd --zone=public --add-port=2222/tcp --permanent
+    sudo semanage port -a -t ssh_port_t -p tcp "${CT_SSH_PORT}" 2>/dev/null || sudo semanage port -m -t ssh_port_t -p tcp "${CT_SSH_PORT}"
+    sudo firewall-cmd --zone=public --add-port="${CT_SSH_PORT}/tcp" --permanent
+    sudo firewall-cmd --zone=public --add-port="22/tcp" --permanent 2>/dev/null || true
     sudo firewall-cmd --reload
 
   else
-      echo "Unsupported OS. Please make sure your firewall allows access to port 2222 "
+      echo "Unsupported OS. Please make sure your firewall allows access to port ${CT_SSH_PORT}"
   fi
 
-  # Restart SSH service
-  sudo systemctl restart sshd
+  # Restart SSH service (optional).
+  # For image-building workflows (e.g., Packer), you can set CT_RESTART_SSHD=0 to avoid disconnecting.
+  if [ "$CT_RESTART_SSHD" = "1" ]; then
+    # Validate config before applying.
+    if ! sudo sshd -t 2>/dev/null;
+ then
+      echo "ERROR: sshd_config validation failed; refusing to reload/restart sshd."
+      exit 1
+    fi
+
+    # Prefer reload to avoid dropping existing SSH sessions (restart may kill the current connection).
+    if sudo systemctl reload sshd 2>/dev/null;
+ then
+      echo "sshd reloaded."
+    else
+      sudo systemctl restart sshd
+      echo "sshd restarted."
+    fi
+
+    # Verify the listener moved and port 22 is freed.
+    if command -v ss >/dev/null 2>&1;
+ then
+      sudo ss -ltnp 2>/dev/null | grep -E ':(22|'"${CT_SSH_PORT}"'[[:space:]]' || true
+      if sudo ss -ltnp 2>/dev/null | grep -E ':22\b' | grep -q sshd;
+ then
+        echo "ERROR: sshd is still listening on port 22 (expected to be freed)."
+        exit 1
+      fi
+      if ! sudo ss -ltnp 2>/dev/null | grep -E ":${CT_SSH_PORT}\b" | grep -q sshd;
+ then
+        echo "ERROR: sshd is not listening on port ${CT_SSH_PORT}."
+        exit 1
+      fi
+    fi
+  else
+    echo "Skipping sshd restart (CT_RESTART_SSHD=0). SSH port change will apply on next boot/restart."
+  fi
 else
   echo "The SSH port change was not applied. Please rerun the script and choose 'yes' to complete the setup."
 fi
