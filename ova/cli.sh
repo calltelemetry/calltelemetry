@@ -2679,18 +2679,35 @@ logging_toggle() {
 
 # Function to build the appliance by fetching and executing the prep script
 build_appliance() {
-  echo "Downloading and executing the prep script to build the appliance..."
-  wget -q "$PREP_SCRIPT_URL" -O /tmp/prep.sh
-  echo "Script downloaded. Executing the script..."
-  if [ $? -eq 0 ]; then
-    chmod +x /tmp/prep.sh
-    /tmp/prep.sh
+  # Allow image builders (e.g., Packer) to provide a bundled prep script path and avoid network fetches.
+  local prep_path="${CT_PREP_SCRIPT_PATH:-}"
+  local prep_url="${CT_PREP_SCRIPT_URL:-$PREP_SCRIPT_URL}"
+  local prep_to_run=""
+  local downloaded="0"
+
+  if [ -n "$prep_path" ] && [ -f "$prep_path" ]; then
+    echo "Using bundled prep script: $prep_path"
+    prep_to_run="$prep_path"
+  else
+    echo "Downloading and executing the prep script to build the appliance..."
+    prep_to_run="/tmp/prep.sh"
+    downloaded="1"
+    wget -q "$prep_url" -O "$prep_to_run"
+  fi
+
+  echo "Prep script ready. Executing..."
+  if [ -f "$prep_to_run" ]; then
+    chmod +x "$prep_to_run" 2>/dev/null || true
+    "$prep_to_run"
     sudo chown -R "$INSTALL_USER" "$BACKUP_DIR"
     sudo chown -R "$INSTALL_USER" "$BACKUP_FOLDER_PATH"
   else
-    echo "Failed to download the prep script. Please check your internet connection."
+    echo "Failed to obtain the prep script."
   fi
-  rm -f /tmp/prep.sh
+
+  if [ "$downloaded" = "1" ]; then
+    rm -f /tmp/prep.sh 2>/dev/null || true
+  fi
 }
 
 # Function to prepare the cluster node with necessary tools
