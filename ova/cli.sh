@@ -2678,19 +2678,43 @@ logging_toggle() {
 }
 
 # Function to build the appliance by fetching and executing the prep script
+# Supports CT_PREP_SCRIPT_PATH environment variable to use a local script instead of downloading
 build_appliance() {
-  echo "Downloading and executing the prep script to build the appliance..."
-  wget -q "$PREP_SCRIPT_URL" -O /tmp/prep.sh
-  echo "Script downloaded. Executing the script..."
-  if [ $? -eq 0 ]; then
+  local prep_script="/tmp/prep.sh"
+  local cleanup_script=true
+
+  # Check if a local prep script path was provided
+  if [ -n "${CT_PREP_SCRIPT_PATH:-}" ] && [ -f "${CT_PREP_SCRIPT_PATH}" ]; then
+    echo "Using local prep script: ${CT_PREP_SCRIPT_PATH}"
+    prep_script="${CT_PREP_SCRIPT_PATH}"
+    cleanup_script=false
+  else
+    echo "Downloading and executing the prep script to build the appliance..."
+    wget -q "$PREP_SCRIPT_URL" -O /tmp/prep.sh
+    if [ $? -ne 0 ]; then
+      echo "Failed to download the prep script. Please check your internet connection."
+      return 1
+    fi
+    echo "Script downloaded."
     chmod +x /tmp/prep.sh
-    /tmp/prep.sh
+  fi
+
+  echo "Executing the prep script..."
+  # Run the script - it will pick up CT_NONINTERACTIVE from the environment
+  "$prep_script"
+  local result=$?
+
+  if [ $result -eq 0 ]; then
     sudo chown -R "$INSTALL_USER" "$BACKUP_DIR"
     sudo chown -R "$INSTALL_USER" "$BACKUP_FOLDER_PATH"
-  else
-    echo "Failed to download the prep script. Please check your internet connection."
   fi
-  rm -f /tmp/prep.sh
+
+  # Cleanup only if we downloaded the script
+  if [ "$cleanup_script" = true ] && [ -f /tmp/prep.sh ]; then
+    rm -f /tmp/prep.sh
+  fi
+
+  return $result
 }
 
 # Function to prepare the cluster node with necessary tools
