@@ -1,0 +1,17 @@
+name: Notify OVA Build
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  trigger-ova-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger OVA build in ai-workspace
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.CT_WORKSPACE_DISPATCH_TOKEN }}
+          repository: calltelemetry/ai-workspace
+          event-type: build-ova
+          client-payload: '{"version": "${{ github.event.release.tag_name }}"}'
