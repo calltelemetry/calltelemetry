@@ -191,9 +191,15 @@ EOF
 echo "Appliance prep complete."
 echo "IMPORTANT - After this next step you must access the appliance on port 2222 - NOT PORT 22."
 
-# Prompt the user for confirmation to apply the SSH port change
-read -p "The SSH management port must changed to 2222. Applying this change will disconnect your SSH session. Do you want to apply this change and restart the SSH service? (yes/no): " response < /dev/tty
-
+# Support non-interactive mode for automated builds (Packer, CI, etc.)
+# Set CT_NONINTERACTIVE=1 to skip the interactive prompt and apply SSH port change automatically
+if [ "${CT_NONINTERACTIVE:-0}" = "1" ]; then
+  echo "Non-interactive mode detected. Applying SSH port change automatically..."
+  response="yes"
+else
+  # Prompt the user for confirmation to apply the SSH port change
+  read -p "The SSH management port must changed to 2222. Applying this change will disconnect your SSH session. Do you want to apply this change and restart the SSH service? (yes/no): " response < /dev/tty
+fi
 
 if [ "$response" = "yes" ]; then
   # Change SSH port to 2222
