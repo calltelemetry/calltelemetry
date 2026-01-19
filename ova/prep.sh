@@ -182,8 +182,8 @@ sudo chown "$INSTALL_USER" "$INSTALL_DIR/backup.sh"
 sudo usermod -aG docker "$INSTALL_USER"
 sudo systemctl restart docker
 
-sudo tee /etc/issue > /dev/null <<'EOF'
-Call Telemetry Appliance
+# Set login banners (issue for local console, issue.net for SSH, motd for post-login)
+BANNER_CONTENT='Call Telemetry Appliance
 
    ______      ____   ______     __                    __
   / ____/___ _/ / /  /_  __/__  / /__  ____ ___  ___  / /________  __
@@ -193,11 +193,37 @@ Call Telemetry Appliance
                                                             /____/
 
 https://calltelemetry.com
+'
 
+# Console login banner with dynamic info
+sudo tee /etc/issue > /dev/null <<EOF
+${BANNER_CONTENT}
 Hostname: \n
 System IP Address: \4
 Mgmt: https://\4
 EOF
+
+# SSH banner (no escape sequences)
+sudo tee /etc/issue.net > /dev/null <<EOF
+${BANNER_CONTENT}
+EOF
+
+# Post-login MOTD
+sudo tee /etc/motd > /dev/null <<EOF
+${BANNER_CONTENT}
+Run 'cli.sh' for appliance management.
+EOF
+
+# Suppress kernel bridge/STP "entering blocking state" messages on console
+# These flood the console when Docker creates bridge networks
+sudo tee /etc/sysctl.d/99-quiet-console.conf > /dev/null <<EOF
+# Suppress noisy kernel messages on console (bridge STP, etc.)
+kernel.printk = 3 4 1 3
+EOF
+sudo sysctl -p /etc/sysctl.d/99-quiet-console.conf 2>/dev/null || true
+
+# Disable kernel bridge module logging to console
+echo "options bridge bridge_nf_call_iptables=0" | sudo tee /etc/modprobe.d/bridge.conf > /dev/null 2>/dev/null || true
 
 echo "Appliance prep complete."
 echo "IMPORTANT - After this next step you must access the appliance on port 2222 - NOT PORT 22."
