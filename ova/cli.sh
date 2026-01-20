@@ -1312,7 +1312,7 @@ wait_for_services() {
   # Check web endpoint
   local web_healthy=false
   for i in {1..10}; do
-    if $DOCKER_COMPOSE_CMD exec -T web wget -q --spider http://127.0.0.1:4080/healthz 2>/dev/null; then
+    if $DOCKER_COMPOSE_CMD exec -T web curl -sf http://127.0.0.1:4080/healthz >/dev/null 2>&1; then
       web_healthy=true
       break
     fi
