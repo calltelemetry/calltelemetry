@@ -102,6 +102,8 @@ services:
     volumes:
       - ./certs:/home/app/cert:rw
       - ./crash-dumps:/tmp/crash-dumps:rw
+      # Persistent org-scoped media storage (JTAPI audio, recordings, etc)
+      - ./org-data:/data:rw
     logging:
       driver: "json-file"
       options:
