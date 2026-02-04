@@ -95,6 +95,9 @@ services:
       - PROM_EX_UPLOAD_DASHBOARDS=${PROM_EX_UPLOAD_DASHBOARDS:-false}
       - GRAFANA_HOST=${GRAFANA_HOST_INTERNAL:-http://grafana:3000/grafana}
       - GRAFANA_TOKEN=${GRAFANA_TOKEN:-secret-token}
+      # JTAPI direct mode — API talks to sidecar gRPC without K8s operator
+      - JTAPI_MODE=direct
+      - JTAPI_SIDECAR_ENDPOINT=jtapi-sidecar:50051
     tmpfs:
       - /var/log:rw,mode=0555,size=5000m
     networks:
@@ -126,6 +129,36 @@ services:
       - "4222"
     networks:
       - ct
+
+  jtapi-sidecar:
+    image: "calltelemetry/jtapi-sidecar:${JTAPI_VERSION:-latest}"
+    restart: unless-stopped
+    expose:
+      - "50051"
+      - "8080"
+    volumes:
+      - jtapi-jars:/app/jars
+    environment:
+      - NATS_URL=nats://nats:4222
+      - POD_NAME=jtapi-sidecar-1
+      - SPRING_PROFILES_ACTIVE=standalone
+      - GRPC_PORT=50051
+      - JTAPI_PORT=8080
+      - CUCM_HOST=${CUCM_HOST:-}
+      - CUCM_CTI_PORT=${CUCM_CTI_PORT:-2748}
+      - CUCM_JTAPI_USER=${CUCM_JTAPI_USER:-}
+      - CUCM_JTAPI_PASSWORD=${CUCM_JTAPI_PASSWORD:-}
+    depends_on:
+      nats:
+        condition: service_started
+    networks:
+      - ct
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8080/actuator/health || curl -sf http://127.0.0.1:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
   prometheus:
     image: prom/prometheus:v2.52.0
@@ -184,4 +217,6 @@ volumes:
   prometheus-data:
     driver: local
   grafana-data:
+    driver: local
+  jtapi-jars:
     driver: local
