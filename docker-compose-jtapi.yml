@@ -1,0 +1,58 @@
+# JTAPI Sidecar overlay for Docker Compose appliance deployments.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose-jtapi.yml up -d
+#
+# Prerequisites:
+#   Set CUCM credentials in .env or shell environment:
+#     CUCM_HOST=10.0.0.1
+#     CUCM_JTAPI_USER=jtapi-app-user
+#     CUCM_JTAPI_PASSWORD=secret
+#
+# This overlay:
+#   1. Adds JTAPI_MODE=direct to the web service so the API talks
+#      directly to the sidecar's gRPC endpoint (no K8s operator).
+#   2. Adds the jtapi-sidecar service (Java/Spring, standalone profile).
+
+version: "3.8"
+
+services:
+  web:
+    environment:
+      # JTAPI direct mode — API talks to sidecar gRPC without K8s operator
+      - JTAPI_MODE=direct
+      - JTAPI_SIDECAR_ENDPOINT=jtapi-sidecar:50051
+
+  jtapi-sidecar:
+    image: "calltelemetry/jtapi-sidecar:${JTAPI_VERSION:-latest}"
+    restart: unless-stopped
+    expose:
+      - "50051"
+      - "8080"
+    volumes:
+      - jtapi-jars:/app/jars
+    environment:
+      - NATS_URL=nats://nats:4222
+      - POD_NAME=jtapi-sidecar-1
+      - SPRING_PROFILES_ACTIVE=standalone
+      - GRPC_PORT=50051
+      - JTAPI_PORT=8080
+      - CUCM_HOST=${CUCM_HOST:-}
+      - CUCM_CTI_PORT=${CUCM_CTI_PORT:-2748}
+      - CUCM_JTAPI_USER=${CUCM_JTAPI_USER:-}
+      - CUCM_JTAPI_PASSWORD=${CUCM_JTAPI_PASSWORD:-}
+    depends_on:
+      nats:
+        condition: service_started
+    networks:
+      - ct
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8080/actuator/health || curl -sf http://127.0.0.1:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  jtapi-jars:
+    driver: local
