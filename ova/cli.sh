@@ -22,6 +22,27 @@ else
   INSTALL_DIR="$HOME"
 fi
 
+# --- Existing installation detection ---
+# Prevent accidentally creating a second instance when running as root
+# or from the wrong directory. Check well-known install paths for an
+# existing docker-compose.yml with CallTelemetry services.
+KNOWN_INSTALL_PATHS="/home/calltelemetry /opt/calltelemetry"
+
+for check_path in $KNOWN_INSTALL_PATHS; do
+  if [ "$check_path" != "$INSTALL_DIR" ] && [ -f "$check_path/docker-compose.yml" ]; then
+    # Verify it's actually a CallTelemetry compose file (not some unrelated project)
+    if grep -q "calltelemetry" "$check_path/docker-compose.yml" 2>/dev/null; then
+      echo ""
+      echo "  Note: Existing installation detected at $check_path"
+      echo "  Using $check_path instead of $INSTALL_DIR"
+      echo ""
+      INSTALL_DIR="$check_path"
+      INSTALL_USER=$(stat -c '%U' "$check_path" 2>/dev/null || ls -ld "$check_path" | awk '{print $3}')
+      break
+    fi
+  fi
+done
+
 cd "$INSTALL_DIR" 2>/dev/null || true
 
 # Directory for storing backups and other directories to be cleared
