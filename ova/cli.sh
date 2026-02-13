@@ -3113,7 +3113,7 @@ case "$1" in
         echo "Step 6: Restoring database from compressed backup..."
         if ! gunzip -c "$backup_file" | \
           $DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db \
-          psql -U calltelemetry -d calltelemetry_prod; then
+          psql -q -U calltelemetry -d calltelemetry_prod; then
           echo "ERROR: Failed to restore database"
           echo "Backup file preserved at: $backup_file"
           exit 1
