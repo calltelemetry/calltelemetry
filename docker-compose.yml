@@ -50,17 +50,14 @@ services:
       start_period: 30s
 
   db:
-    image: "calltelemetry/postgres:17"
+    image: "bitnamilegacy/postgresql:14"
     user: root
     restart: "always"
-    shm_size: "256mb"
     environment:
       - POSTGRES_USER=calltelemetry
       - POSTGRES_PASSWORD=postgres
       - POSTGRES_DB=calltelemetry_prod
-    command: >
-      postgres
-      -c max_connections=300
+      - POSTGRESQL_MAX_CONNECTIONS=300
     expose:
       - "5432"
     volumes:
