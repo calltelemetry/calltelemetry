@@ -1135,39 +1135,6 @@ update() {
       echo "Check CPU usage with: top (high postgresql CPU is normal during index rebuilds)"
     fi
 
-    # Post-upgrade verification and backup cleanup
-    if [[ -t 0 ]]; then
-      echo ""
-      echo "─────────────────────────────────────────────"
-      echo "  Post-Upgrade Verification"
-      echo "─────────────────────────────────────────────"
-      echo ""
-      echo "Please verify the upgrade was successful:"
-      echo "  - Log in to the web UI"
-      echo "  - Check that dashboards load correctly"
-      echo "  - Verify call data is flowing"
-      echo ""
-      read -p "Was the upgrade successful? (yes/no): " upgrade_ok
-      if [[ "$upgrade_ok" =~ ^[Yy] ]]; then
-        echo ""
-        echo "The previous docker-compose.yml backup is at:"
-        echo "  $timestamped_backup_file"
-        read -p "Would you like to delete the backup file? (yes/no): " delete_backup
-        if [[ "$delete_backup" =~ ^[Yy] ]]; then
-          rm -f "$timestamped_backup_file"
-          echo "✅ Backup file deleted."
-        else
-          echo "Backup preserved at: $timestamped_backup_file"
-          echo "To rollback later: cli.sh rollback"
-        fi
-      else
-        echo ""
-        echo "To rollback to the previous version:"
-        echo "  cli.sh rollback"
-        echo ""
-        echo "Backup preserved at: $timestamped_backup_file"
-      fi
-    fi
   else
     echo "Failed to download new docker-compose.yml or other required files. No changes made."
   fi
