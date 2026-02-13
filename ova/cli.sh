@@ -1134,6 +1134,40 @@ update() {
       echo "Monitor progress with: $DOCKER_COMPOSE_CMD logs -f"
       echo "Check CPU usage with: top (high postgresql CPU is normal during index rebuilds)"
     fi
+
+    # Post-upgrade verification and backup cleanup
+    if [[ -t 0 ]]; then
+      echo ""
+      echo "─────────────────────────────────────────────"
+      echo "  Post-Upgrade Verification"
+      echo "─────────────────────────────────────────────"
+      echo ""
+      echo "Please verify the upgrade was successful:"
+      echo "  - Log in to the web UI"
+      echo "  - Check that dashboards load correctly"
+      echo "  - Verify call data is flowing"
+      echo ""
+      read -p "Was the upgrade successful? (yes/no): " upgrade_ok
+      if [[ "$upgrade_ok" =~ ^[Yy] ]]; then
+        echo ""
+        echo "The previous docker-compose.yml backup is at:"
+        echo "  $timestamped_backup_file"
+        read -p "Would you like to delete the backup file? (yes/no): " delete_backup
+        if [[ "$delete_backup" =~ ^[Yy] ]]; then
+          rm -f "$timestamped_backup_file"
+          echo "✅ Backup file deleted."
+        else
+          echo "Backup preserved at: $timestamped_backup_file"
+          echo "To rollback later: cli.sh rollback"
+        fi
+      else
+        echo ""
+        echo "To rollback to the previous version:"
+        echo "  cli.sh rollback"
+        echo ""
+        echo "Backup preserved at: $timestamped_backup_file"
+      fi
+    fi
   else
     echo "Failed to download new docker-compose.yml or other required files. No changes made."
   fi
@@ -3134,7 +3168,40 @@ case "$1" in
         echo ""
         echo "PostgreSQL upgrade complete!"
         echo "New image: calltelemetry/postgres:$target_version"
-        echo "Backup preserved at: $backup_file"
+        echo ""
+
+        # Post-upgrade verification and backup cleanup
+        if [[ -t 0 ]]; then
+          echo "─────────────────────────────────────────────"
+          echo "  Post-Upgrade Verification"
+          echo "─────────────────────────────────────────────"
+          echo ""
+          echo "Please verify the database upgrade was successful:"
+          echo "  - Log in to the web UI"
+          echo "  - Check that dashboards and reports load correctly"
+          echo "  - Verify historical data is intact"
+          echo ""
+          read -p "Was the upgrade successful? (yes/no): " upgrade_ok
+          if [[ "$upgrade_ok" =~ ^[Yy] ]]; then
+            echo ""
+            echo "The database backup is at:"
+            echo "  $backup_file ($backup_size compressed)"
+            read -p "Would you like to delete the backup file? (yes/no): " delete_backup
+            if [[ "$delete_backup" =~ ^[Yy] ]]; then
+              rm -f "$backup_file"
+              echo "✅ Backup file deleted."
+            else
+              echo "Backup preserved at: $backup_file"
+            fi
+          else
+            echo ""
+            echo "The database backup is preserved at: $backup_file"
+            echo "To restore manually:"
+            echo "  gunzip -c $backup_file | docker exec -i <db-container> psql -U calltelemetry -d calltelemetry_prod"
+          fi
+        else
+          echo "Backup preserved at: $backup_file"
+        fi
         ;;
       *)
         echo "Unknown postgres command: $2"
