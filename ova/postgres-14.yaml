@@ -2,4 +2,6 @@ version: "3.8"
 
 services:
   db:
-    image: "calltelemetry/postgres:14"
+    image: "bitnamilegacy/postgresql:14"
+    environment:
+      - POSTGRESQL_MAX_CONNECTIONS=300
