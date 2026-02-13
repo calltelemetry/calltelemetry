@@ -1087,6 +1087,24 @@ update() {
 
   # Config files (nats.conf, Caddyfile, prometheus, grafana) already extracted by download_bundle()
   if [ -f "$TEMP_FILE" ]; then
+    # --- PostgreSQL version guard ---
+    # Detect current PG image from the EXISTING docker-compose.yml before replacing it.
+    # If customer is on PG < 17 and has no override, auto-pin their version
+    # to prevent PG 17 from trying to read PG 14 data format.
+    if [ -f "$ORIGINAL_FILE" ]; then
+      current_pg_image=$(grep -A1 "^  db:" "$ORIGINAL_FILE" | grep "image:" | sed 's/.*image: *"\?\([^"]*\)"\?.*/\1/' | head -1)
+      current_pg_ver=$(echo "$current_pg_image" | grep -o '[0-9]\+$')
+
+      if [ -n "$current_pg_ver" ] && [ "$current_pg_ver" != "17" ] && [ ! -f "$POSTGRES_OVERRIDE_FILE" ]; then
+        echo ""
+        echo "PostgreSQL version guard: Your database is on PostgreSQL $current_pg_ver"
+        echo "  New default is PostgreSQL 17. Auto-pinning to PostgreSQL $current_pg_ver for safety."
+        echo "  To upgrade later: cli.sh postgres upgrade 17"
+        echo ""
+        set_postgres_version "$current_pg_ver"
+      fi
+    fi
+
     mv "$TEMP_FILE" "$ORIGINAL_FILE"
     echo "New docker-compose.yml moved to production."
 
@@ -3014,6 +3032,35 @@ case "$1" in
           sleep 10
         fi
 
+        # Pre-flight: disk space check
+        echo "Checking disk space..."
+        db_size_kb=$($DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db \
+          psql -U calltelemetry -d calltelemetry_prod -t -c \
+          "SELECT pg_database_size('calltelemetry_prod') / 1024" 2>/dev/null | tr -d ' ')
+        free_kb=$(df -k "$INSTALL_DIR" | tail -1 | awk '{print $4}')
+
+        if [ -n "$db_size_kb" ] && [ -n "$free_kb" ]; then
+          # Compressed dump needs ~20% of DB size (conservative estimate)
+          required_kb=$((db_size_kb / 5))
+          db_size_mb=$((db_size_kb / 1024))
+          free_mb=$((free_kb / 1024))
+          required_mb=$((required_kb / 1024))
+
+          echo "  Database size:  ${db_size_mb} MB"
+          echo "  Free space:     ${free_mb} MB"
+          echo "  Required:       ~${required_mb} MB (compressed backup)"
+
+          if [ "$free_kb" -lt "$required_kb" ]; then
+            echo ""
+            echo "ERROR: Insufficient disk space for PostgreSQL upgrade"
+            echo "  Free up at least ${required_mb} MB before proceeding."
+            exit 1
+          fi
+          echo "  Sufficient disk space"
+        else
+          echo "  Could not determine database size - proceeding anyway"
+        fi
+
         # Set the new version (Step 1)
         echo ""
         echo "Step 1: Setting PostgreSQL $target_version override..."
@@ -3021,15 +3068,17 @@ case "$1" in
           exit 1
         fi
 
-        # Create backup
+        # Create compressed backup
         echo ""
-        echo "Step 2: Creating database backup..."
-        backup_file="postgres-upgrade-$(date +%Y%m%d-%H%M%S).sql"
-        if ! $DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db pg_dump -U calltelemetry -d calltelemetry_prod > "$backup_file"; then
+        echo "Step 2: Creating compressed database backup..."
+        backup_file="postgres-upgrade-$(date +%Y%m%d-%H%M%S).sql.gz"
+        if ! $DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db \
+          pg_dump -U calltelemetry -d calltelemetry_prod | gzip > "$backup_file"; then
           echo "ERROR: Failed to create database backup"
           exit 1
         fi
-        echo "Backup created: $backup_file"
+        backup_size=$(du -h "$backup_file" | cut -f1)
+        echo "Backup created: $backup_file ($backup_size compressed)"
 
         # Stop services
         echo ""
@@ -3059,10 +3108,12 @@ case "$1" in
           sleep 2
         done
 
-        # Restore the database
+        # Restore the database from compressed backup
         echo ""
-        echo "Step 6: Restoring database from backup..."
-        if ! $DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod < "$backup_file"; then
+        echo "Step 6: Restoring database from compressed backup..."
+        if ! gunzip -c "$backup_file" | \
+          $DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db \
+          psql -U calltelemetry -d calltelemetry_prod; then
           echo "ERROR: Failed to restore database"
           echo "Backup file preserved at: $backup_file"
           exit 1
@@ -3073,6 +3124,12 @@ case "$1" in
         echo ""
         echo "Step 7: Starting all services..."
         $DOCKER_COMPOSE_CMD up -d
+
+        # If upgraded to the base default (17), the override is no longer needed
+        if [ "$target_version" = "17" ] && [ -f "$POSTGRES_OVERRIDE_FILE" ]; then
+          echo "Removing PostgreSQL override (now matches base default)."
+          rm -f "$POSTGRES_OVERRIDE_FILE"
+        fi
 
         echo ""
         echo "PostgreSQL upgrade complete!"
