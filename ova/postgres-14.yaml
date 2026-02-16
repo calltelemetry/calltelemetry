@@ -2,6 +2,9 @@ version: "3.8"
 
 services:
   db:
-    image: "bitnamilegacy/postgresql:14"
+    image: "calltelemetry/postgres:14"
+    user: root
     environment:
       - POSTGRESQL_MAX_CONNECTIONS=300
+    volumes:
+      - ./postgres-data:/var/lib/postgresql
