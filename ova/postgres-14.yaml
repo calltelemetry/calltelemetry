@@ -6,5 +6,6 @@ services:
     user: root
     environment:
       - POSTGRESQL_MAX_CONNECTIONS=300
+      - PGDATA=/bitnami/postgresql/data
     volumes:
-      - ./postgres-data:/var/lib/postgresql
+      - ./postgres-data:/bitnami/postgresql
