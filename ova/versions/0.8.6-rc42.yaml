@@ -35,10 +35,11 @@ services:
       - POSTGRES_USER=calltelemetry
       - POSTGRES_PASSWORD=postgres
       - POSTGRES_DB=calltelemetry_prod
+      - PGDATA=/bitnami/postgresql/data
     expose:
       - "5432"
     volumes:
-      - ./postgres-data:/var/lib/postgresql
+      - ./postgres-data:/bitnami/postgresql
     networks:
       - ct
 
