@@ -28,13 +28,14 @@ services:
       - ct
 
   db:
-    image: "bitnamilegacy/postgresql:14"
+    image: "calltelemetry/postgres:14"
     user: root
     restart: "always"
     environment:
       - POSTGRES_USER=calltelemetry
       - POSTGRES_PASSWORD=postgres
       - POSTGRES_DB=calltelemetry_prod
+      - PGDATA=/bitnami/postgresql/data
     expose:
       - "5432"
     volumes:
