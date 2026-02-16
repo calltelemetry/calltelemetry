@@ -58,6 +58,7 @@ services:
       - POSTGRES_USER=calltelemetry
       - POSTGRES_PASSWORD=postgres
       - POSTGRES_DB=calltelemetry_prod
+      - PGDATA=/bitnami/postgresql/data
     command: >
       postgres
       -c max_connections=300
