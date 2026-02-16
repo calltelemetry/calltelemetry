@@ -3,10 +3,16 @@ version: "3.8"
 services:
   db:
     image: "calltelemetry/postgres:17"
+    user: root
     shm_size: "8gb"
+    environment:
+      - POSTGRESQL_MAX_CONNECTIONS=300
+      - PGDATA=/bitnami/postgresql/data
     command: >
       postgres
       -c max_connections=300
+    volumes:
+      - ./postgres-data:/bitnami/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U calltelemetry -d calltelemetry_prod"]
       interval: 30s
