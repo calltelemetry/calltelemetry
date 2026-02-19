@@ -128,6 +128,99 @@ get_current_postgres_image() {
   fi
 }
 
+# JTAPI feature state
+JTAPI_OVERLAY_FILE="docker-compose-jtapi.yml"
+JTAPI_STATE_FILE=".jtapi-enabled"
+
+is_jtapi_enabled() {
+  [ -f "$JTAPI_STATE_FILE" ] && [ -f "$JTAPI_OVERLAY_FILE" ]
+}
+
+# Build the compose file flags for all applicable overlays
+get_compose_files() {
+  local files="-f docker-compose.yml"
+  # docker-compose.override.yml is auto-loaded by Docker Compose (postgres)
+  if is_jtapi_enabled; then
+    files="$files -f $JTAPI_OVERLAY_FILE"
+  fi
+  echo "$files"
+}
+
+# Update systemd ExecStart/ExecStop to include/exclude JTAPI overlay
+fix_systemd_compose_files() {
+  local SERVICE_FILE="/etc/systemd/system/docker-compose-app.service"
+  [ -f "$SERVICE_FILE" ] || return 0
+
+  local compose_files
+  compose_files=$(get_compose_files)
+
+  local cmd_path
+  if [ "$DOCKER_COMPOSE_CMD" = "docker compose" ]; then
+    cmd_path="/usr/bin/docker compose"
+  else
+    cmd_path="/usr/bin/docker-compose"
+  fi
+
+  local new_start="ExecStart=$cmd_path $compose_files up -d"
+  local new_stop="ExecStop=$cmd_path $compose_files down"
+
+  if ! grep -qF "$new_start" "$SERVICE_FILE" 2>/dev/null; then
+    sudo cp "$SERVICE_FILE" "${SERVICE_FILE}.backup" 2>/dev/null
+    sudo sed -i "s|^ExecStart=.*|$new_start|" "$SERVICE_FILE"
+    sudo sed -i "s|^ExecStop=.*|$new_stop|" "$SERVICE_FILE"
+    sudo systemctl daemon-reload
+    echo "Updated systemd service compose files"
+  fi
+}
+
+jtapi_cmd() {
+  local subcmd="${1:-}"
+  shift 2>/dev/null || true
+
+  case "$subcmd" in
+    enable)
+      if [ -f "$JTAPI_OVERLAY_FILE" ]; then
+        touch "$JTAPI_STATE_FILE"
+        fix_systemd_compose_files
+        echo "✅ JTAPI enabled"
+        echo ""
+        echo "Bootstrapping sequence:"
+        echo "  1. Restart services:  sudo ./cli.sh restart"
+        echo "  2. Wait for sidecar to start (~90s)"
+        echo "  3. Upload JTAPI JAR via UI (Settings > JTAPI)"
+        echo "  4. Sidecar auto-restarts when JAR is received"
+        echo "  5. Add CUCM server via UI (Settings > JTAPI > Servers)"
+        echo "  6. Sidecar auto-connects when credentials appear in NATS KV"
+      else
+        echo "❌ JTAPI overlay not found: $JTAPI_OVERLAY_FILE"
+        echo "   Run 'sudo ./cli.sh update <version>' to download it"
+      fi
+      ;;
+    disable)
+      rm -f "$JTAPI_STATE_FILE"
+      fix_systemd_compose_files
+      echo "✅ JTAPI disabled"
+      echo "   Restart to apply: sudo ./cli.sh restart"
+      ;;
+    status)
+      if is_jtapi_enabled; then
+        echo "JTAPI: enabled"
+        $DOCKER_COMPOSE_CMD $(get_compose_files) ps jtapi-sidecar ct-media minio 2>/dev/null || true
+      else
+        echo "JTAPI: disabled"
+      fi
+      ;;
+    *)
+      echo "Usage: $0 jtapi {enable|disable|status}"
+      echo ""
+      echo "Commands:"
+      echo "  enable    Enable JTAPI sidecar, ct-media, and MinIO services"
+      echo "  disable   Disable JTAPI services"
+      echo "  status    Show JTAPI status and service health"
+      ;;
+  esac
+}
+
 ensure_grafana_permissions() {
   local dirs=("$@")
 
@@ -310,6 +403,9 @@ show_help() {
   echo "  postgres upgrade <ver> Upgrade PostgreSQL to new major version (backup required)"
   echo "  certs               Show certificate status and expiry"
   echo "  certs reset         Delete and regenerate self-signed certificates"
+  echo "  jtapi               Show JTAPI feature status"
+  echo "  jtapi enable        Enable JTAPI sidecar, ct-media, and MinIO services"
+  echo "  jtapi disable       Disable JTAPI services"
   echo
   echo "Maintenance Commands:"
   echo "  selfupdate          Update CLI script to latest version"
@@ -485,6 +581,12 @@ download_bundle() {
     rm -f "$bundle_name"
     rm -rf "$extract_dir"
     return 1
+  fi
+
+  # docker-compose-jtapi.yml -> JTAPI overlay (always extract if present)
+  if [ -f "$extract_dir/docker-compose-jtapi.yml" ]; then
+    cp "$extract_dir/docker-compose-jtapi.yml" ./docker-compose-jtapi.yml
+    echo "  ✅ docker-compose-jtapi.yml (JTAPI overlay)"
   fi
 
   # cli.sh -> update current script
@@ -1043,6 +1145,12 @@ update() {
     rm -f "$TEMP_FILE"
     return 1
   fi
+  # Also pull JTAPI images if enabled
+  if is_jtapi_enabled && [ -f "$JTAPI_OVERLAY_FILE" ]; then
+    echo "Pulling JTAPI overlay images..."
+    $DOCKER_COMPOSE_CMD -f "$TEMP_FILE" -f "$JTAPI_OVERLAY_FILE" pull jtapi-sidecar ct-media minio 2>/dev/null || \
+      echo "⚠️  Some JTAPI images may not be available yet"
+  fi
   echo "✅ All images pulled successfully"
 
   # Extract and display the image versions
@@ -1112,6 +1220,7 @@ update() {
     configure_ipv6 "$ORIGINAL_FILE" "$enable_ipv6"
 
     fix_systemd_service_if_needed
+    fix_systemd_compose_files
     echo "Restarting Docker Compose service..."
     systemctl restart docker-compose-app.service
     echo "Docker Compose service restarted."
@@ -1190,7 +1299,7 @@ compact_system() {
   docker system prune --all -f
 
   echo "Starting Docker Compose database service..."
-  sudo $DOCKER_COMPOSE_CMD up -d db
+  sudo $DOCKER_COMPOSE_CMD $(get_compose_files) up -d db
 
   echo "Waiting for the database service to be fully operational..."
   sleep 15
@@ -1220,6 +1329,9 @@ wait_for_services() {
   local wait_time=0
   local release_bin=$(get_release_binary)
   local services=("db" "web" "caddy" "vue-web" "traceroute" "nats")
+  if is_jtapi_enabled; then
+    services+=("jtapi-sidecar" "ct-media" "minio")
+  fi
 
   echo ""
   echo "Starting services..."
@@ -2548,11 +2660,18 @@ app_status() {
 
   # Container status
   echo "=== Container Status ==="
-  $DOCKER_COMPOSE_CMD ps
+  $DOCKER_COMPOSE_CMD $(get_compose_files) ps
   echo ""
 
+  # JTAPI feature status
+  if is_jtapi_enabled; then
+    echo "=== JTAPI Status ==="
+    echo "✓ JTAPI: enabled"
+    echo ""
+  fi
+
   # Check if web container is running
-  web_container=$($DOCKER_COMPOSE_CMD ps -q web 2>/dev/null)
+  web_container=$($DOCKER_COMPOSE_CMD $(get_compose_files) ps -q web 2>/dev/null)
   if [ -z "$web_container" ]; then
     echo "❌ Web container not running"
     return 1
@@ -3084,7 +3203,7 @@ case "$1" in
         # Stop services
         echo ""
         echo "Step 3: Stopping all services..."
-        $DOCKER_COMPOSE_CMD down
+        $DOCKER_COMPOSE_CMD $(get_compose_files) down
 
         # Remove old data directory
         echo ""
@@ -3094,7 +3213,7 @@ case "$1" in
         # Start just the database (override file already set in Step 1)
         echo ""
         echo "Step 5: Starting PostgreSQL $target_version..."
-        $DOCKER_COMPOSE_CMD up -d db
+        $DOCKER_COMPOSE_CMD $(get_compose_files) up -d db
 
         echo "Waiting for PostgreSQL to initialize..."
         sleep 10
@@ -3124,7 +3243,7 @@ case "$1" in
         # Start all services
         echo ""
         echo "Step 7: Starting all services..."
-        $DOCKER_COMPOSE_CMD up -d
+        $DOCKER_COMPOSE_CMD $(get_compose_files) up -d
 
         # If upgraded to the base default (17), the override is no longer needed
         if [ "$target_version" = "17" ] && [ -f "$POSTGRES_OVERRIDE_FILE" ]; then
@@ -3176,6 +3295,10 @@ case "$1" in
         exit 1
         ;;
     esac
+    ;;
+
+  jtapi)
+    jtapi_cmd "$2"
     ;;
 
   # Maintenance commands
@@ -3289,6 +3412,15 @@ case "$1" in
 
       local images=$(grep -E '^\s*image:' docker-compose.yml | sed 's/.*image:[[:space:]]*["'\'']*\([^"'\'']*\)["'\'']*[[:space:]]*$/\1/' | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//' | sort -u)
 
+      # Include JTAPI images if overlay exists in bundle
+      if [ -f "docker-compose-jtapi.yml" ]; then
+        local jtapi_images=$(grep -E '^\s*image:' docker-compose-jtapi.yml | sed 's/.*image:[[:space:]]*["'\'']*\([^"'\'']*\)["'\'']*[[:space:]]*$/\1/' | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//' | sort -u)
+        if [ -n "$jtapi_images" ]; then
+          images=$(printf '%s\n%s' "$images" "$jtapi_images" | sort -u)
+          echo "  (Including JTAPI images from overlay)"
+        fi
+      fi
+
       echo "Images to download:"
       echo "$images" | while read img; do [ -n "$img" ] && echo "  - $img"; done
       echo ""
@@ -3398,6 +3530,7 @@ case "$1" in
       [ -f "$inner_dir/Caddyfile" ] && cp "$inner_dir/Caddyfile" ./Caddyfile && echo "  - Caddyfile"
       [ -f "$inner_dir/cli.sh" ] && cp "$inner_dir/cli.sh" ./cli.sh && chmod +x ./cli.sh && echo "  - cli.sh"
       [ -f "$inner_dir/nats.conf" ] && cp "$inner_dir/nats.conf" ./nats.conf && echo "  - nats.conf"
+      [ -f "$inner_dir/docker-compose-jtapi.yml" ] && cp "$inner_dir/docker-compose-jtapi.yml" ./docker-compose-jtapi.yml && echo "  - docker-compose-jtapi.yml (JTAPI overlay)"
 
       # Install prometheus config if present
       if [ -f "$inner_dir/prometheus/prometheus.yml" ]; then
@@ -3421,13 +3554,14 @@ case "$1" in
       echo ""
       echo "Restarting services..."
       fix_systemd_service_if_needed
+      fix_systemd_compose_files
       systemctl restart docker-compose-app.service
 
       echo ""
       echo "=== Offline Bundle Applied ==="
       echo "Verifying containers..."
       sleep 5
-      $DOCKER_COMPOSE_CMD ps
+      $DOCKER_COMPOSE_CMD $(get_compose_files) ps
 
       echo ""
       echo "Check status with: ./cli.sh status"
@@ -3441,6 +3575,16 @@ case "$1" in
       fi
 
       local images=$(grep -E '^\s*image:' docker-compose.yml | sed 's/.*image:[[:space:]]*["'\'']*\([^"'\'']*\)["'\'']*[[:space:]]*$/\1/' | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
+
+      # Include JTAPI overlay images if present
+      if [ -f "docker-compose-jtapi.yml" ]; then
+        local jtapi_images=$(grep -E '^\s*image:' docker-compose-jtapi.yml | sed 's/.*image:[[:space:]]*["'\'']*\([^"'\'']*\)["'\'']*[[:space:]]*$/\1/' | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
+        if [ -n "$jtapi_images" ]; then
+          images=$(printf '%s\n%s' "$images" "$jtapi_images" | sort -u)
+          echo "  (Including JTAPI overlay images)"
+        fi
+      fi
+
       echo ""
       for img in $images; do
         [ -z "$img" ] && continue
@@ -3602,7 +3746,7 @@ case "$1" in
         echo "=== Docker Status ==="
         echo ""
         echo "Containers:"
-        $DOCKER_COMPOSE_CMD ps
+        $DOCKER_COMPOSE_CMD $(get_compose_files) ps
         echo ""
         echo "Images:"
         docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}" | grep -E "calltelemetry|REPOSITORY"

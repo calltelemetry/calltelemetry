@@ -126,6 +126,22 @@ jobs:
             fi
           done
 
+      - name: Copy JTAPI overlay
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          BUNDLE_DIR="${BUNDLE_NAME}-${VERSION}"
+          MANIFEST="ova/bundle-manifest.yml"
+
+          echo "--- JTAPI ---"
+          for file in $(yq '.jtapi[]' "$MANIFEST" 2>/dev/null); do
+            if [ -f "$file" ]; then
+              cp "$file" "$BUNDLE_DIR/"
+              echo "✅ $(basename $file)"
+            else
+              echo "⚠️  Missing: $file (JTAPI overlay not found at repo root)"
+            fi
+          done
+
       - name: Verify version-specific compose exists
         run: |
           VERSION="${{ steps.version.outputs.version }}"
