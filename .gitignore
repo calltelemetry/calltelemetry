@@ -5,3 +5,4 @@ devspace.yaml
 .claude/
 CLAUDE.md
 .tool-versions
+logs/
