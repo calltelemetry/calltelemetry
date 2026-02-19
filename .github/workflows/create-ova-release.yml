@@ -20,6 +20,14 @@ on:
         required: false
         type: string
         default: "0.7.3"
+      jtapi_version:
+        description: "JTAPI sidecar version (leave empty to skip JTAPI pinning)"
+        required: false
+        type: string
+      ct_media_version:
+        description: "ct-media version (leave empty to skip ct-media pinning)"
+        required: false
+        type: string
 
 jobs:
   create-ova-release:
@@ -46,10 +54,19 @@ jobs:
             TRACEROUTE_VERSION="0.7.3"
           fi
 
+          JTAPI_VERSION="${{ inputs.jtapi_version }}"
+          CT_MEDIA_VERSION="${{ inputs.ct_media_version }}"
+
           echo "🐳 Creating OVA release $VERSION with:"
           echo "  - Web/API: $WEB_VERSION"
           echo "  - Vue Frontend: $VUE_VERSION"
           echo "  - Traceroute: $TRACEROUTE_VERSION"
+          if [ -n "$JTAPI_VERSION" ]; then
+            echo "  - JTAPI Sidecar: $JTAPI_VERSION"
+          fi
+          if [ -n "$CT_MEDIA_VERSION" ]; then
+            echo "  - ct-media: $CT_MEDIA_VERSION"
+          fi
 
           # Create the version-specific docker-compose file
           mkdir -p ova/versions
@@ -157,6 +174,32 @@ jobs:
 
           echo "✅ Generated ova/versions/$VERSION.yaml"
 
+      - name: Pin JTAPI overlay image versions
+        run: |
+          JTAPI_VERSION="${{ inputs.jtapi_version }}"
+          CT_MEDIA_VERSION="${{ inputs.ct_media_version }}"
+          OVERLAY="docker-compose-jtapi.yml"
+
+          if [ ! -f "$OVERLAY" ]; then
+            echo "ℹ️  No JTAPI overlay found, skipping version pinning"
+            exit 0
+          fi
+
+          if [ -n "$JTAPI_VERSION" ]; then
+            sed -i 's|jtapi-sidecar:\${JTAPI_VERSION:-latest}|jtapi-sidecar:'"$JTAPI_VERSION"'|' "$OVERLAY"
+            echo "✅ Pinned jtapi-sidecar to $JTAPI_VERSION"
+          fi
+
+          if [ -n "$CT_MEDIA_VERSION" ]; then
+            sed -i 's|ct-media:\${CT_MEDIA_VERSION:-latest}|ct-media:'"$CT_MEDIA_VERSION"'|' "$OVERLAY"
+            echo "✅ Pinned ct-media to $CT_MEDIA_VERSION"
+          fi
+
+          if [ -n "$JTAPI_VERSION" ] || [ -n "$CT_MEDIA_VERSION" ]; then
+            echo "📋 Updated image tags:"
+            grep 'image:' "$OVERLAY"
+          fi
+
       - name: Commit and create release
         run: |
           VERSION="${{ inputs.version }}"
@@ -165,8 +208,9 @@ jobs:
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
 
-          # Add and commit the new version file
+          # Add version file and any modified overlay
           git add ova/versions/$VERSION.yaml
+          git add -u docker-compose-jtapi.yml 2>/dev/null || true
           git commit -m "feat: add OVA release $VERSION
 
           Docker compose configuration for OVA deployment.

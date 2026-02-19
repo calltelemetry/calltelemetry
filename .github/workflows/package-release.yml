@@ -142,6 +142,30 @@ jobs:
             fi
           done
 
+      - name: Pin JTAPI overlay versions from version YAML
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          BUNDLE_DIR="${BUNDLE_NAME}-${VERSION}"
+          OVERLAY="$BUNDLE_DIR/docker-compose-jtapi.yml"
+
+          # Only pin if the overlay was copied into the bundle
+          if [ ! -f "$OVERLAY" ]; then
+            echo "ℹ️  No JTAPI overlay in bundle, skipping version pinning"
+            exit 0
+          fi
+
+          # Extract JTAPI/ct-media versions from the version YAML if they exist
+          # This handles the case where create-ova-release already pinned them
+          # and the overlay was committed with pinned versions
+          if grep -q 'JTAPI_VERSION:-latest' "$OVERLAY"; then
+            echo "⚠️  JTAPI overlay still has :latest defaults — versions not pinned"
+            echo "   Pin versions by providing jtapi_version and ct_media_version"
+            echo "   when running the Create OVA Release workflow"
+          else
+            echo "✅ JTAPI overlay has pinned versions:"
+            grep 'image:' "$OVERLAY"
+          fi
+
       - name: Verify version-specific compose exists
         run: |
           VERSION="${{ steps.version.outputs.version }}"
