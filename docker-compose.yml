@@ -132,6 +132,7 @@ services:
     command: "-c /etc/nats/nats.conf"
     volumes:
       - ./nats.conf:/etc/nats/nats.conf
+      - nats-data:/jetstream/store
     expose:
       - "4222"
     networks:
@@ -194,4 +195,6 @@ volumes:
   prometheus-data:
     driver: local
   grafana-data:
+    driver: local
+  nats-data:
     driver: local
