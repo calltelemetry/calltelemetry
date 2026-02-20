@@ -868,8 +868,12 @@ download_bundle() {
 
   # docker-compose-jtapi.yml -> JTAPI overlay (always extract if present)
   if [ -f "$extract_dir/docker-compose-jtapi.yml" ]; then
-    cp "$extract_dir/docker-compose-jtapi.yml" ./docker-compose-jtapi.yml
-    echo "  ✅ docker-compose-jtapi.yml (JTAPI overlay)"
+    rm -f ./docker-compose-jtapi.yml 2>/dev/null
+    if cp "$extract_dir/docker-compose-jtapi.yml" ./docker-compose-jtapi.yml; then
+      echo "  ✅ docker-compose-jtapi.yml (JTAPI overlay)"
+    else
+      echo "  ⚠️  docker-compose-jtapi.yml (failed to copy — check permissions)"
+    fi
   fi
 
   # cli.sh -> update current script
@@ -886,8 +890,12 @@ download_bundle() {
   # prometheus/prometheus.yml
   if [ -f "$extract_dir/prometheus/prometheus.yml" ]; then
     mkdir -p prometheus
-    mv "$extract_dir/prometheus/prometheus.yml" prometheus/
-    echo "  ✅ prometheus/prometheus.yml"
+    rm -f prometheus/prometheus.yml 2>/dev/null
+    if mv -f "$extract_dir/prometheus/prometheus.yml" prometheus/; then
+      echo "  ✅ prometheus/prometheus.yml"
+    else
+      echo "  ⚠️  prometheus/prometheus.yml (failed to move — check permissions)"
+    fi
   fi
 
   # grafana dashboards and provisioning
@@ -907,14 +915,19 @@ download_bundle() {
 
   # nats.conf
   if [ -f "$extract_dir/nats.conf" ]; then
-    cp "$extract_dir/nats.conf" ./nats.conf
-    echo "  ✅ nats.conf"
+    rm -f ./nats.conf 2>/dev/null
+    if cp "$extract_dir/nats.conf" ./nats.conf; then
+      echo "  ✅ nats.conf"
+    else
+      echo "  ⚠️  nats.conf (failed to copy — check permissions)"
+    fi
   fi
 
   # Caddyfile
   if [ -f "$extract_dir/Caddyfile" ]; then
     if [ -f "./Caddyfile" ]; then
       if ! diff -q "$extract_dir/Caddyfile" "./Caddyfile" >/dev/null 2>&1; then
+        rm -f ./Caddyfile 2>/dev/null
         cp "$extract_dir/Caddyfile" ./Caddyfile
         echo "  ✅ Caddyfile (updated)"
       else
