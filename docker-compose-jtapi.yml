@@ -20,8 +20,6 @@
 #   MINIO_ROOT_PASSWORD in your environment or .env file BEFORE first start.
 #   Changing credentials after data exists requires MinIO reconfiguration.
 
-version: "3.8"
-
 services:
   web:
     environment:
