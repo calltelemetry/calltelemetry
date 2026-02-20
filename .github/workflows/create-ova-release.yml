@@ -186,12 +186,12 @@ jobs:
           fi
 
           if [ -n "$JTAPI_VERSION" ]; then
-            sed -i 's|jtapi-sidecar:\${JTAPI_VERSION:-latest}|jtapi-sidecar:'"$JTAPI_VERSION"'|' "$OVERLAY"
+            sed -i 's|jtapi-sidecar:\${JTAPI_VERSION:-[^}]*}|jtapi-sidecar:'"$JTAPI_VERSION"'|' "$OVERLAY"
             echo "✅ Pinned jtapi-sidecar to $JTAPI_VERSION"
           fi
 
           if [ -n "$CT_MEDIA_VERSION" ]; then
-            sed -i 's|ct-media:\${CT_MEDIA_VERSION:-latest}|ct-media:'"$CT_MEDIA_VERSION"'|' "$OVERLAY"
+            sed -i 's|ct-media:\${CT_MEDIA_VERSION:-[^}]*}|ct-media:'"$CT_MEDIA_VERSION"'|' "$OVERLAY"
             echo "✅ Pinned ct-media to $CT_MEDIA_VERSION"
           fi
 
