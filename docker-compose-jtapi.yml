@@ -47,7 +47,7 @@ services:
         condition: service_healthy
 
   jtapi-sidecar:
-    image: "calltelemetry/jtapi-sidecar:${JTAPI_VERSION:-latest}"
+    image: "calltelemetry/jtapi-sidecar:${JTAPI_VERSION:-1.14.0}"
     restart: unless-stopped
     mem_limit: 1g
     expose:
@@ -91,7 +91,7 @@ services:
       start_period: 90s
 
   ct-media:
-    image: "calltelemetry/ct-media:${CT_MEDIA_VERSION:-latest}"
+    image: "calltelemetry/ct-media:${CT_MEDIA_VERSION:-0.2.4}"
     restart: unless-stopped
     expose:
       - "50053"
