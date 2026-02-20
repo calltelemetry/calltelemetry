@@ -8,11 +8,12 @@
 #   CUCM credentials configured via UI (Settings > JTAPI > Servers)
 #
 # Bootstrapping sequence:
-#   1. sudo ./cli.sh jtapi enable && sudo ./cli.sh restart
-#   2. Sidecar starts, NATS ObjectStore is empty — sidecar waits for JAR
-#   3. Log into CallTelemetry UI > Settings > JTAPI > Upload jtapi.jar
-#   4. Web service uploads JAR to NATS ObjectStore — sidecar auto-restarts (WATCH_JARS=true)
-#   5. Add CUCM server via UI — credentials written to NATS KV — CtiConfigWatcher auto-connects
+#   1. sudo ./cli.sh jtapi enable   (auto-restarts services)
+#   2. Upload JTAPI JAR via UI (Settings > JTAPI)
+#   3. Restart services: sudo ./cli.sh restart
+#      (jtapi-jar-init pulls JAR from NATS ObjectStore to sidecar volume)
+#   4. Add CUCM server via UI (Settings > JTAPI > Servers)
+#      (credentials flow through NATS KV — CtiConfigWatcher auto-connects)
 #
 # MinIO credentials:
 #   Default: minioadmin/minioadmin. For production, set MINIO_ROOT_USER and
@@ -45,6 +46,40 @@ services:
         condition: service_started
       minio:
         condition: service_healthy
+
+  jtapi-jar-init:
+    image: natsio/nats-box:0.14.5
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Checking NATS ObjectStore for JTAPI JAR..."
+        BUCKET="jtapi-jars-$${NATS_ORG_ID:-1}"
+        # Wait for NATS to be ready
+        for i in $$(seq 1 30); do
+          nats -s "$${NATS_URL}" server ping --count=1 2>/dev/null && break
+          echo "  Waiting for NATS... ($$i/30)"
+          sleep 2
+        done
+        # Try to download JAR from ObjectStore
+        if nats -s "$${NATS_URL}" object get "$$BUCKET" jtapi.jar --output /jars/jtapi.jar 2>/dev/null; then
+          SIZE=$$(stat -c%s /jars/jtapi.jar 2>/dev/null || echo "unknown")
+          echo "Downloaded jtapi.jar from NATS ObjectStore ($$SIZE bytes)"
+        elif [ -f /jars/jtapi.jar ]; then
+          echo "JAR already present on volume, skipping download"
+        else
+          echo "No JAR in NATS ObjectStore yet — sidecar will wait for upload via UI"
+        fi
+    environment:
+      - NATS_URL=nats://nats:4222
+      - NATS_ORG_ID=1
+    volumes:
+      - jtapi-jars:/jars
+    depends_on:
+      nats:
+        condition: service_started
+    networks:
+      - ct
 
   jtapi-sidecar:
     image: "calltelemetry/jtapi-sidecar:${JTAPI_VERSION:-1.14.0}"
@@ -79,6 +114,8 @@ services:
     volumes:
       - jtapi-jars:/app/jars
     depends_on:
+      jtapi-jar-init:
+        condition: service_completed_successfully
       nats:
         condition: service_started
     networks:
