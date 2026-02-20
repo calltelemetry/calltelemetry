@@ -182,15 +182,17 @@ jtapi_cmd() {
       if [ -f "$JTAPI_OVERLAY_FILE" ]; then
         touch "$JTAPI_STATE_FILE"
         fix_systemd_compose_files
-        echo "✅ JTAPI enabled"
+        echo "✅ JTAPI enabled — restarting services..."
         echo ""
-        echo "Bootstrapping sequence:"
-        echo "  1. Restart services:  sudo ./cli.sh restart"
-        echo "  2. Wait for sidecar to start (~90s)"
-        echo "  3. Upload JTAPI JAR via UI (Settings > JTAPI)"
-        echo "  4. Sidecar auto-restarts when JAR is received"
-        echo "  5. Add CUCM server via UI (Settings > JTAPI > Servers)"
-        echo "  6. Sidecar auto-connects when credentials appear in NATS KV"
+        systemctl restart docker-compose-app.service
+        echo "Services restarted."
+        echo ""
+        echo "Next steps:"
+        echo "  1. Wait for sidecar to start (~90s)"
+        echo "  2. Upload JTAPI JAR via UI (Settings > JTAPI)"
+        echo "  3. Sidecar auto-restarts when JAR is received"
+        echo "  4. Add CUCM server via UI (Settings > JTAPI > Servers)"
+        echo "  5. Sidecar auto-connects when credentials appear in NATS KV"
       else
         echo "❌ JTAPI overlay not found: $JTAPI_OVERLAY_FILE"
         echo "   Run 'sudo ./cli.sh update <version>' to download it"
@@ -199,8 +201,9 @@ jtapi_cmd() {
     disable)
       rm -f "$JTAPI_STATE_FILE"
       fix_systemd_compose_files
-      echo "✅ JTAPI disabled"
-      echo "   Restart to apply: sudo ./cli.sh restart"
+      echo "✅ JTAPI disabled — restarting services..."
+      systemctl restart docker-compose-app.service
+      echo "Services restarted. JTAPI services removed."
       ;;
     status)
       if is_jtapi_enabled; then
