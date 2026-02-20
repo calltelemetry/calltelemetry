@@ -4,6 +4,7 @@ services:
   caddy:
     image: caddy:2-alpine
     ports:
+      - "80:80"
       - "443:443"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile
@@ -83,7 +84,6 @@ services:
       - 4000
       - 4080
     ports:
-      - "80:4080"
       - "22:3022"
     environment:
       - DB_USER=calltelemetry
