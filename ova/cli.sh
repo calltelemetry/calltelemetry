@@ -185,6 +185,9 @@ jtapi_cmd() {
         echo "✅ JTAPI enabled — restarting services..."
         echo ""
         systemctl restart docker-compose-app.service
+        # Force recreate web to pick up overlay env vars
+        sleep 3
+        $DOCKER_COMPOSE_CMD $(get_compose_files) up -d --force-recreate web 2>/dev/null
         echo "Services restarted."
         echo ""
         echo "Next steps:"
@@ -234,20 +237,41 @@ jtapi_cmd() {
 
       # --- 2. Container Health ---
       echo "--- Container Health ---"
+      export DEFAULT_IPV4="${DEFAULT_IPV4:-}"
       for svc in jtapi-jar-init jtapi-sidecar ct-media minio; do
-        local cstatus
-        cstatus=$($DOCKER_COMPOSE_CMD $(get_compose_files) ps --format '{{.State}}' "$svc" 2>/dev/null || echo "not found")
-        if [ -z "$cstatus" ]; then
-          cstatus="not found"
+        local cid
+        cid=$($DOCKER_COMPOSE_CMD $(get_compose_files) ps -q "$svc" 2>/dev/null)
+        if [ -z "$cid" ]; then
+          # Init container may not show in ps after completion — check all containers
+          cid=$(docker ps -a --filter "name=${svc}" --format '{{.ID}}' 2>/dev/null | head -1)
         fi
-        local restarts
-        restarts=$($DOCKER_COMPOSE_CMD $(get_compose_files) ps --format '{{.Status}}' "$svc" 2>/dev/null || echo "")
-        if [ "$cstatus" = "running" ]; then
-          echo "✓ $svc: $cstatus"
-        elif [ "$cstatus" = "not found" ]; then
-          echo "❌ $svc: not found (not deployed or not in compose files)"
+
+        if [ -z "$cid" ]; then
+          if [ "$svc" = "jtapi-jar-init" ]; then
+            echo "⚠️ $svc: not found (may have been cleaned up after successful run)"
+          else
+            echo "❌ $svc: not found (not deployed or not in compose files)"
+          fi
         else
-          echo "⚠️ $svc: $cstatus"
+          local cstate
+          cstate=$(docker inspect --format='{{.State.Status}}' "$cid" 2>/dev/null || echo "unknown")
+          local exit_code
+          exit_code=$(docker inspect --format='{{.State.ExitCode}}' "$cid" 2>/dev/null || echo "N/A")
+
+          if [ "$svc" = "jtapi-jar-init" ]; then
+            # Init container is expected to exit with code 0
+            if [ "$cstate" = "exited" ] && [ "$exit_code" = "0" ]; then
+              echo "✓ $svc: completed successfully (exit 0)"
+            elif [ "$cstate" = "exited" ]; then
+              echo "❌ $svc: failed (exit $exit_code)"
+            else
+              echo "⚠️ $svc: $cstate"
+            fi
+          elif [ "$cstate" = "running" ]; then
+            echo "✓ $svc: running"
+          else
+            echo "❌ $svc: $cstate (exit $exit_code)"
+          fi
         fi
       done
       # Show restart counts
@@ -262,26 +286,43 @@ jtapi_cmd() {
 
       # --- 3. NATS Connectivity ---
       echo "--- NATS Connectivity ---"
-      local nats_check
-      nats_check=$($DOCKER_COMPOSE_CMD $(get_compose_files) exec -T nats nats-server --help 2>&1 | head -1)
-      if [ -n "$nats_check" ]; then
-        echo "✓ NATS server is responding"
+      # Check NATS is accepting connections via health endpoint
+      local nats_health
+      nats_health=$($DOCKER_COMPOSE_CMD $(get_compose_files) exec -T nats wget -q -O- http://127.0.0.1:8222/healthz 2>&1)
+      if echo "$nats_health" | grep -qi "ok\|status"; then
+        echo "✓ NATS server is healthy"
       else
-        echo "❌ NATS server not responding"
+        # Fallback: check if nats-server process is running
+        local nats_pid
+        nats_pid=$($DOCKER_COMPOSE_CMD $(get_compose_files) exec -T nats pgrep nats-server 2>/dev/null)
+        if [ -n "$nats_pid" ]; then
+          echo "✓ NATS server process is running (PID: $nats_pid)"
+        else
+          echo "❌ NATS server not responding"
+        fi
       fi
       echo ""
+
+      # Use nats-box for KV/ObjectStore checks (nats CLI not in server image)
+      local CT_NETWORK
+      CT_NETWORK=$($DOCKER_COMPOSE_CMD $(get_compose_files) ps --format '{{.Networks}}' nats 2>/dev/null | head -1 | cut -d',' -f1)
+      if [ -z "$CT_NETWORK" ]; then
+        CT_NETWORK="calltelemetry_ct"
+      fi
+
       echo "  NATS KV buckets:"
-      $DOCKER_COMPOSE_CMD $(get_compose_files) exec -T nats nats kv ls 2>&1 | sed 's/^/    /' || echo "    ❌ Could not list KV buckets"
+      docker run --rm --network "$CT_NETWORK" natsio/nats-box:0.14.5 nats -s nats://nats:4222 kv ls 2>&1 | sed 's/^/    /' || echo "    ❌ Could not list KV buckets"
       echo ""
+
       echo "  NATS ObjectStore (jtapi-jars-1):"
       local objstore_result
-      objstore_result=$($DOCKER_COMPOSE_CMD $(get_compose_files) exec -T nats nats object ls jtapi-jars-1 2>&1)
+      objstore_result=$(docker run --rm --network "$CT_NETWORK" natsio/nats-box:0.14.5 nats -s nats://nats:4222 object ls jtapi-jars-1 2>&1)
       if echo "$objstore_result" | grep -q "jtapi.jar"; then
-        echo "    ✓ jtapi-jars-1 bucket exists with jtapi.jar"
+        echo "    ✓ jtapi.jar found in NATS ObjectStore"
       elif echo "$objstore_result" | grep -qi "not found\|no such\|error"; then
-        echo "    ❌ jtapi-jars-1 bucket not found or empty"
+        echo "    ⚠️ jtapi-jars-1 bucket: $objstore_result"
       else
-        echo "    ⚠️ $objstore_result"
+        echo "    $objstore_result" | sed 's/^/    /'
       fi
       echo ""
 
@@ -298,7 +339,7 @@ jtapi_cmd() {
       fi
       echo ""
       echo "  NATS ObjectStore JAR info:"
-      $DOCKER_COMPOSE_CMD $(get_compose_files) exec -T nats nats object info jtapi-jars-1 jtapi.jar 2>&1 | sed 's/^/    /' || echo "    ❌ Could not query NATS ObjectStore"
+      docker run --rm --network "$CT_NETWORK" natsio/nats-box:0.14.5 nats -s nats://nats:4222 object info jtapi-jars-1 jtapi.jar 2>&1 | sed 's/^/    /' || echo "    ❌ Could not query NATS ObjectStore"
       echo ""
 
       # --- 5. Sidecar Health ---
@@ -326,7 +367,7 @@ jtapi_cmd() {
       fi
       echo ""
       echo "  MinIO buckets:"
-      $DOCKER_COMPOSE_CMD $(get_compose_files) exec -T minio mc ls local/ 2>&1 | sed 's/^/    /' || echo "    ⚠️ mc not available or not configured"
+      $DOCKER_COMPOSE_CMD $(get_compose_files) exec -T minio sh -c 'mc alias set local http://localhost:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD} 2>/dev/null; mc ls local/ 2>&1' | sed 's/^/    /' || echo "    ⚠️ Could not list MinIO buckets"
       echo ""
 
       # --- 7. ct-media Health ---
