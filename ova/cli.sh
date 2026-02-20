@@ -292,14 +292,10 @@ jtapi_cmd() {
       if echo "$nats_health" | grep -qi "ok\|status"; then
         echo "✓ NATS server is healthy"
       else
-        # Fallback: check if nats-server process is running
-        local nats_pid
-        nats_pid=$($DOCKER_COMPOSE_CMD $(get_compose_files) exec -T nats pgrep nats-server 2>/dev/null)
-        if [ -n "$nats_pid" ]; then
-          echo "✓ NATS server process is running (PID: $nats_pid)"
-        else
-          echo "❌ NATS server not responding"
-        fi
+        # Fallback: check container health status (pgrep not available in nats:2.11 image)
+        local nats_status
+        nats_status=$($DOCKER_COMPOSE_CMD $(get_compose_files) ps nats --format '{{.Status}}' 2>/dev/null || echo "unknown")
+        echo "  NATS: $nats_status"
       fi
       echo ""
 
@@ -324,6 +320,16 @@ jtapi_cmd() {
       else
         echo "    $objstore_result" | sed 's/^/    /'
       fi
+      echo ""
+
+      echo "--- NATS ObjectStore Buckets ---"
+      docker run --rm --network "$CT_NETWORK" natsio/nats-box:0.14.5 \
+        sh -c 'nats -s nats://nats:4222 object ls 2>/dev/null' 2>/dev/null | sed 's/^/    /' || echo "    Failed to list ObjectStore buckets"
+      echo ""
+
+      echo "--- jtapi-jars-1 bucket contents ---"
+      docker run --rm --network "$CT_NETWORK" natsio/nats-box:0.14.5 \
+        sh -c 'nats -s nats://nats:4222 object ls jtapi-jars-1 2>/dev/null' 2>/dev/null | sed 's/^/    /' || echo "    Bucket jtapi-jars-1 not found or empty"
       echo ""
 
       # --- 4. JAR Status ---
@@ -414,6 +420,73 @@ jtapi_cmd() {
           end)
         end
       ' 2>&1 | sed 's/^/  /' || echo "  ❌ Could not query JTAPI server configuration (web container may not be running)"
+      echo ""
+
+      # --- 10. JTAPI Runtime Diagnostics (from web logs) ---
+      echo ""
+      echo "=== JTAPI Runtime Diagnostics (from web logs) ==="
+      echo ""
+
+      # Check for NatsSupervisor startup messages
+      echo "--- NATS Supervisor Startup ---"
+      local nats_sup_logs
+      nats_sup_logs=$($DOCKER_COMPOSE_CMD $(get_compose_files) logs web --tail=200 2>/dev/null | grep -i "NatsSupervisor\|jtapi_gnat\|JtapiGreeting" | tail -5)
+      if [ -n "$nats_sup_logs" ]; then
+        echo "$nats_sup_logs"
+      else
+        echo "  No JTAPI NATS supervisor messages found in recent logs"
+      fi
+
+      # Check for ObjectStore / JarManager errors
+      echo ""
+      echo "--- JAR Manager / ObjectStore Errors ---"
+      local jar_logs
+      jar_logs=$($DOCKER_COMPOSE_CMD $(get_compose_files) logs web --tail=500 2>/dev/null | grep -i "JarManager\|ObjectStore\|object_store\|jtapi.*jar\|bucket" | tail -10)
+      if [ -n "$jar_logs" ]; then
+        echo "$jar_logs"
+      else
+        echo "  No JAR/ObjectStore errors found in recent logs"
+      fi
+
+      # Check for gRPC client errors
+      echo ""
+      echo "--- gRPC Client Status ---"
+      local grpc_logs
+      grpc_logs=$($DOCKER_COMPOSE_CMD $(get_compose_files) logs web --tail=200 2>/dev/null | grep -i "DirectGrpcClient\|grpc.*connect\|GRPC.*error\|sidecar.*endpoint" | tail -5)
+      if [ -n "$grpc_logs" ]; then
+        echo "$grpc_logs"
+      else
+        echo "  No gRPC client messages found in recent logs"
+      fi
+
+      # --- 11. JTAPI Health API Response ---
+      echo ""
+      echo "=== JTAPI Health API Response ==="
+      echo ""
+
+      # Detect Docker Compose network name (reuse CT_NETWORK if already set)
+      if [ -z "${CT_NETWORK:-}" ]; then
+        CT_NETWORK=$(docker network ls --format '{{.Name}}' 2>/dev/null | grep '_ct$' | head -1)
+        if [ -z "$CT_NETWORK" ]; then
+          CT_NETWORK="${COMPOSE_PROJECT_NAME:-$(basename "$(pwd)")}_ct"
+        fi
+      fi
+
+      # Call the health endpoint directly (org_id=1 for OVA single-org)
+      local health_response
+      health_response=$(docker run --rm --network "$CT_NETWORK" natsio/nats-box:0.14.5 \
+        sh -c 'wget -q -O- http://web:4080/api/org/1/jtapi/sidecar/health 2>&1' 2>/dev/null)
+
+      if [ -n "$health_response" ]; then
+        if command -v jq &>/dev/null; then
+          echo "$health_response" | jq '.' 2>/dev/null || echo "$health_response"
+        else
+          echo "$health_response"
+        fi
+      else
+        echo "  Failed to reach health endpoint (may require auth token)"
+        echo "  Try: curl -s http://localhost/api/org/1/jtapi/sidecar/health (with auth header)"
+      fi
       echo ""
 
       echo "=== Troubleshooting Complete ==="
