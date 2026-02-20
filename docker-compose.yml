@@ -50,7 +50,7 @@ services:
       start_period: 30s
 
   db:
-    image: "calltelemetry/postgres:17"
+    image: "calltelemetry/postgres:14"
     user: root
     restart: "always"
     shm_size: "8gb"
