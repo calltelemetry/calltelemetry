@@ -22,7 +22,11 @@
 
 services:
   web:
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
     environment:
+      # Docker Engine API — enables container management from the web UI
+      - DOCKER_SOCKET=/var/run/docker.sock
       # JTAPI direct mode — API talks to sidecar gRPC without K8s operator
       - JTAPI_MODE=direct
       - JTAPI_SIDECAR_ENDPOINT=jtapi-sidecar:50051
