@@ -1530,8 +1530,15 @@ update() {
 
     echo "Monitoring service startup..."
     wait_for_services
+    services_ok=$?
 
-    if [ $? -eq 0 ]; then
+    # Ensure Node.js is available for @calltelemetry/cli
+    if ! command -v node &>/dev/null; then
+      echo "Installing Node.js..."
+      sudo dnf install -y nodejs npm &>/dev/null && echo "✅ Node.js installed" || echo "⚠️  Node.js install failed (non-critical)"
+    fi
+
+    if [ $services_ok -eq 0 ]; then
       echo "✅ Update complete! All services are running and ready."
     else
       echo "⚠️  Update complete, but some services may still be initializing."
