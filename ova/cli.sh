@@ -213,13 +213,178 @@ jtapi_cmd() {
         echo "JTAPI: disabled"
       fi
       ;;
+    troubleshoot)
+      echo "=== JTAPI Troubleshooting ==="
+      echo ""
+
+      # --- 1. Feature State ---
+      echo "--- Feature State ---"
+      if [ -f "$JTAPI_STATE_FILE" ]; then
+        echo "✓ JTAPI enabled (.jtapi-enabled exists)"
+      else
+        echo "❌ JTAPI disabled (.jtapi-enabled not found)"
+      fi
+      if [ -f "$JTAPI_OVERLAY_FILE" ]; then
+        echo "✓ Overlay file present ($JTAPI_OVERLAY_FILE)"
+      else
+        echo "❌ Overlay file missing ($JTAPI_OVERLAY_FILE)"
+      fi
+      echo "  Compose files: $(get_compose_files)"
+      echo ""
+
+      # --- 2. Container Health ---
+      echo "--- Container Health ---"
+      for svc in jtapi-jar-init jtapi-sidecar ct-media minio; do
+        local cstatus
+        cstatus=$($DOCKER_COMPOSE_CMD $(get_compose_files) ps --format '{{.State}}' "$svc" 2>/dev/null || echo "not found")
+        if [ -z "$cstatus" ]; then
+          cstatus="not found"
+        fi
+        local restarts
+        restarts=$($DOCKER_COMPOSE_CMD $(get_compose_files) ps --format '{{.Status}}' "$svc" 2>/dev/null || echo "")
+        if [ "$cstatus" = "running" ]; then
+          echo "✓ $svc: $cstatus"
+        elif [ "$cstatus" = "not found" ]; then
+          echo "❌ $svc: not found (not deployed or not in compose files)"
+        else
+          echo "⚠️ $svc: $cstatus"
+        fi
+      done
+      # Show restart counts
+      echo ""
+      echo "  Container restart counts:"
+      for svc in jtapi-sidecar ct-media minio; do
+        local restart_count
+        restart_count=$(docker inspect --format='{{.RestartCount}}' "$($DOCKER_COMPOSE_CMD $(get_compose_files) ps -q "$svc" 2>/dev/null)" 2>/dev/null || echo "N/A")
+        echo "    $svc: $restart_count restarts"
+      done
+      echo ""
+
+      # --- 3. NATS Connectivity ---
+      echo "--- NATS Connectivity ---"
+      local nats_check
+      nats_check=$($DOCKER_COMPOSE_CMD $(get_compose_files) exec -T nats nats-server --help 2>&1 | head -1)
+      if [ -n "$nats_check" ]; then
+        echo "✓ NATS server is responding"
+      else
+        echo "❌ NATS server not responding"
+      fi
+      echo ""
+      echo "  NATS KV buckets:"
+      $DOCKER_COMPOSE_CMD $(get_compose_files) exec -T nats nats kv ls 2>&1 | sed 's/^/    /' || echo "    ❌ Could not list KV buckets"
+      echo ""
+      echo "  NATS ObjectStore (jtapi-jars-1):"
+      local objstore_result
+      objstore_result=$($DOCKER_COMPOSE_CMD $(get_compose_files) exec -T nats nats object ls jtapi-jars-1 2>&1)
+      if echo "$objstore_result" | grep -q "jtapi.jar"; then
+        echo "    ✓ jtapi-jars-1 bucket exists with jtapi.jar"
+      elif echo "$objstore_result" | grep -qi "not found\|no such\|error"; then
+        echo "    ❌ jtapi-jars-1 bucket not found or empty"
+      else
+        echo "    ⚠️ $objstore_result"
+      fi
+      echo ""
+
+      # --- 4. JAR Status ---
+      echo "--- JAR Status ---"
+      local jar_vol_check
+      jar_vol_check=$(docker run --rm -v calltelemetry_jtapi-jars:/jars alpine ls -la /jars/jtapi.jar 2>&1)
+      if echo "$jar_vol_check" | grep -q "jtapi.jar"; then
+        echo "✓ JAR found in Docker volume"
+        echo "    $jar_vol_check"
+      else
+        echo "❌ JAR not found in Docker volume"
+        echo "    $jar_vol_check"
+      fi
+      echo ""
+      echo "  NATS ObjectStore JAR info:"
+      $DOCKER_COMPOSE_CMD $(get_compose_files) exec -T nats nats object info jtapi-jars-1 jtapi.jar 2>&1 | sed 's/^/    /' || echo "    ❌ Could not query NATS ObjectStore"
+      echo ""
+
+      # --- 5. Sidecar Health ---
+      echo "--- Sidecar Health ---"
+      local sidecar_health
+      sidecar_health=$($DOCKER_COMPOSE_CMD $(get_compose_files) exec -T jtapi-sidecar wget -q -O- http://127.0.0.1:8080/actuator/health 2>&1 || echo "Sidecar not responding")
+      if echo "$sidecar_health" | grep -qi '"status":"UP"\|"status":"up"'; then
+        echo "✓ Sidecar health: $sidecar_health"
+      else
+        echo "⚠️ Sidecar health: $sidecar_health"
+      fi
+      echo ""
+      echo "  Last 20 lines of sidecar logs:"
+      $DOCKER_COMPOSE_CMD $(get_compose_files) logs --tail=20 jtapi-sidecar 2>&1 | sed 's/^/    /'
+      echo ""
+
+      # --- 6. MinIO Health ---
+      echo "--- MinIO Health ---"
+      local minio_health
+      minio_health=$($DOCKER_COMPOSE_CMD $(get_compose_files) exec -T minio curl -sf http://localhost:9000/minio/health/live 2>&1)
+      if [ $? -eq 0 ]; then
+        echo "✓ MinIO is healthy"
+      else
+        echo "❌ MinIO health check failed: $minio_health"
+      fi
+      echo ""
+      echo "  MinIO buckets:"
+      $DOCKER_COMPOSE_CMD $(get_compose_files) exec -T minio mc ls local/ 2>&1 | sed 's/^/    /' || echo "    ⚠️ mc not available or not configured"
+      echo ""
+
+      # --- 7. ct-media Health ---
+      echo "--- ct-media Health ---"
+      local media_state
+      media_state=$($DOCKER_COMPOSE_CMD $(get_compose_files) ps --format '{{.State}}' ct-media 2>/dev/null || echo "not found")
+      if [ "$media_state" = "running" ]; then
+        echo "✓ ct-media is running"
+      else
+        echo "❌ ct-media state: ${media_state:-not found}"
+      fi
+      echo ""
+      echo "  Last 10 lines of ct-media logs:"
+      $DOCKER_COMPOSE_CMD $(get_compose_files) logs --tail=10 ct-media 2>&1 | sed 's/^/    /'
+      echo ""
+
+      # --- 8. Web Service JTAPI Config ---
+      echo "--- Web Service JTAPI Config ---"
+      echo "  Environment variables:"
+      $DOCKER_COMPOSE_CMD $(get_compose_files) exec -T web env 2>/dev/null | grep -E 'JTAPI|S3_|CT_MEDIA|NATS_URL' | sort | sed 's/^/    /' || echo "    ❌ Could not read web container env"
+      echo ""
+
+      # --- 9. CallManager CTI Credentials Check ---
+      echo "--- CallManager CTI Credentials ---"
+      local release_bin
+      release_bin=$(get_release_binary)
+      $DOCKER_COMPOSE_CMD $(get_compose_files) exec -T web "$release_bin" rpc '
+        alias Cdrcisco.Repo
+        alias Cdrcisco.JTAPI.Servers
+        import Ecto.Query
+
+        servers = Repo.all(from s in Cdrcisco.JTAPI.Server, preload: [:callmanager])
+
+        if servers == [] do
+          IO.puts("No JTAPI servers configured")
+        else
+          Enum.each(servers, fn server ->
+            cm = server.callmanager
+            IO.puts("JTAPI Server: #{server.name || server.hostname}")
+            IO.puts("  CallManager: #{if cm, do: cm.name || cm.hostname, else: "NOT LINKED"}")
+            IO.puts("  CTI Username: #{if cm && cm.cti_username && cm.cti_username != "", do: cm.cti_username, else: "NOT SET"}")
+            IO.puts("  CTI Password: #{if cm && cm.cti_password, do: "****", else: "NOT SET"}")
+            IO.puts("  Status: #{server.status || "unknown"}")
+          end)
+        end
+      ' 2>&1 | sed 's/^/  /' || echo "  ❌ Could not query JTAPI server configuration (web container may not be running)"
+      echo ""
+
+      echo "=== Troubleshooting Complete ==="
+      ;;
     *)
-      echo "Usage: $0 jtapi {enable|disable|status}"
+      echo "Usage: $0 jtapi {enable|disable|status|troubleshoot}"
       echo ""
       echo "Commands:"
-      echo "  enable    Enable JTAPI sidecar, ct-media, and MinIO services"
-      echo "  disable   Disable JTAPI services"
-      echo "  status    Show JTAPI status and service health"
+      echo "  enable        Enable JTAPI sidecar, ct-media, and MinIO services"
+      echo "  disable       Disable JTAPI services"
+      echo "  status        Show JTAPI status and service health"
+      echo "  troubleshoot  Run comprehensive JTAPI diagnostics"
       ;;
   esac
 }
@@ -409,6 +574,7 @@ show_help() {
   echo "  jtapi               Show JTAPI feature status"
   echo "  jtapi enable        Enable JTAPI sidecar, ct-media, and MinIO services"
   echo "  jtapi disable       Disable JTAPI services"
+  echo "  jtapi troubleshoot  Run comprehensive JTAPI diagnostics"
   echo
   echo "Maintenance Commands:"
   echo "  selfupdate          Update CLI script to latest version"
