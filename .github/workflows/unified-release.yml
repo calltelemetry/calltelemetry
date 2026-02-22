@@ -1,0 +1,154 @@
+name: Unified Release
+
+# Single workflow dispatch that stamps ONE version across all repos,
+# triggers Docker builds via workflow_call, waits for completion,
+# then packages the OVA bundle for GCS deployment.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version stamped on ALL repos (e.g., 0.8.6-rc49)"
+        required: true
+        type: string
+      target_branch:
+        description: "Target branch in component repos"
+        required: false
+        type: string
+        default: "0.8.6-release"
+      ct_media_version:
+        description: "ct-media version override (leave empty to keep current: 0.2.5)"
+        required: false
+        type: string
+      skip_component_releases:
+        description: "Skip creating GitHub releases (use existing tags/images)"
+        type: boolean
+        default: false
+      skip_docker_builds:
+        description: "Skip Docker builds (use existing images)"
+        type: boolean
+        default: false
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────
+  # Job 1: Create GitHub releases in all component repos
+  # ─────────────────────────────────────────────────────────────────
+  create-releases:
+    if: ${{ !inputs.skip_component_releases }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create cisco-cdr release
+        env:
+          GH_TOKEN: ${{ secrets.CT_RELEASE_TOKEN }}
+        run: |
+          echo "Creating cisco-cdr release: ${{ inputs.version }}"
+          gh release create "${{ inputs.version }}" \
+            --repo calltelemetry/cisco-cdr \
+            --target "${{ inputs.target_branch }}" \
+            --title "${{ inputs.version }}" \
+            --latest \
+            --notes "Unified release ${{ inputs.version }}"
+
+      - name: Create ct-quasar release
+        env:
+          GH_TOKEN: ${{ secrets.CT_RELEASE_TOKEN }}
+        run: |
+          echo "Creating ct-quasar release: ${{ inputs.version }}"
+          gh release create "${{ inputs.version }}" \
+            --repo calltelemetry/ct-quasar \
+            --target "${{ inputs.target_branch }}" \
+            --title "${{ inputs.version }}" \
+            --latest \
+            --notes "Unified release ${{ inputs.version }}"
+
+      - name: Create jtapi-sidecar release
+        env:
+          GH_TOKEN: ${{ secrets.CT_RELEASE_TOKEN }}
+        run: |
+          echo "Creating jtapi-sidecar release: ${{ inputs.version }}"
+          gh release create "${{ inputs.version }}" \
+            --repo calltelemetry/jtapi-sidecar \
+            --target "${{ inputs.target_branch }}" \
+            --title "${{ inputs.version }}" \
+            --latest \
+            --notes "Unified release ${{ inputs.version }}"
+
+      - name: Summary
+        run: |
+          echo "### Releases Created" >> $GITHUB_STEP_SUMMARY
+          echo "| Repo | Tag | Branch |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| cisco-cdr | ${{ inputs.version }} | ${{ inputs.target_branch }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| ct-quasar | ${{ inputs.version }} | ${{ inputs.target_branch }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| jtapi-sidecar | ${{ inputs.version }} | ${{ inputs.target_branch }} |" >> $GITHUB_STEP_SUMMARY
+
+  # ─────────────────────────────────────────────────────────────────
+  # Jobs 2a/2b/2c: Build Docker images via workflow_call (parallel)
+  # Parent waits via needs: — no polling needed
+  # ─────────────────────────────────────────────────────────────────
+  build-web:
+    needs: create-releases
+    if: ${{ !inputs.skip_docker_builds && always() && (needs.create-releases.result == 'success' || needs.create-releases.result == 'skipped') }}
+    uses: calltelemetry/cisco-cdr/.github/workflows/docker-backend-release.yaml@0.8.6-release
+    with:
+      tag_name: ${{ inputs.version }}
+    secrets: inherit
+
+  build-vue:
+    needs: create-releases
+    if: ${{ !inputs.skip_docker_builds && always() && (needs.create-releases.result == 'success' || needs.create-releases.result == 'skipped') }}
+    uses: calltelemetry/ct-quasar/.github/workflows/publish_docker.yaml@0.8.6-release
+    with:
+      tag_name: ${{ inputs.version }}
+    secrets: inherit
+
+  build-jtapi:
+    needs: create-releases
+    if: ${{ !inputs.skip_docker_builds && always() && (needs.create-releases.result == 'success' || needs.create-releases.result == 'skipped') }}
+    uses: calltelemetry/jtapi-sidecar/.github/workflows/build.yml@0.8.6-release
+    with:
+      tag_name: ${{ inputs.version }}
+    secrets: inherit
+
+  # ─────────────────────────────────────────────────────────────────
+  # Job 3: Trigger OVA release (creates version yaml + GCS bundle)
+  # ─────────────────────────────────────────────────────────────────
+  create-ova-release:
+    needs: [build-web, build-vue, build-jtapi]
+    if: ${{ always() && (needs.build-web.result == 'success' || needs.build-web.result == 'skipped') && (needs.build-vue.result == 'success' || needs.build-vue.result == 'skipped') && (needs.build-jtapi.result == 'success' || needs.build-jtapi.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve ct-media version
+        id: resolve
+        run: |
+          if [ -n "${{ inputs.ct_media_version }}" ]; then
+            echo "ct_media=${{ inputs.ct_media_version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ct_media=0.2.5" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Trigger OVA release
+        env:
+          GH_TOKEN: ${{ secrets.CT_RELEASE_TOKEN }}
+        run: |
+          echo "Triggering OVA release: ${{ inputs.version }}"
+          echo "  jtapi_version: ${{ inputs.version }}"
+          echo "  ct_media_version: ${{ steps.resolve.outputs.ct_media }}"
+          gh workflow run create-ova-release.yml \
+            --repo calltelemetry/calltelemetry \
+            -f version="${{ inputs.version }}" \
+            -f jtapi_version="${{ inputs.version }}" \
+            -f ct_media_version="${{ steps.resolve.outputs.ct_media }}"
+
+      - name: Summary
+        run: |
+          echo "### Unified Release: ${{ inputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Image | Tag |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-----|" >> $GITHUB_STEP_SUMMARY
+          echo "| calltelemetry/web | ${{ inputs.version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| calltelemetry/vue | ${{ inputs.version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| calltelemetry/jtapi-sidecar | ${{ inputs.version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| calltelemetry/ct-media | ${{ steps.resolve.outputs.ct_media }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "OVA release triggered. Monitor \`create-ova-release\` and \`package-release\` workflows for completion." >> $GITHUB_STEP_SUMMARY
