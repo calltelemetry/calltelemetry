@@ -106,89 +106,124 @@ jobs:
     if: ${{ !inputs.skip_docker_builds && always() && (needs.create-releases.result == 'success' || needs.create-releases.result == 'skipped') }}
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger cisco-cdr Docker build
+      - name: Trigger all Docker builds
+        id: trigger
         env:
           GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
         run: |
-          echo "Triggering cisco-cdr Docker build: ${{ inputs.version }}"
+          VERSION="${{ inputs.version }}"
+          CT_MEDIA_TAG="${{ inputs.ct_media_version || inputs.version }}"
+
+          echo "Triggering Docker builds for version: $VERSION"
+          echo "  ct-media version: $CT_MEDIA_TAG"
+          echo ""
+
           gh workflow run docker-backend-release.yaml \
             --repo calltelemetry/cisco-cdr \
-            -f tag_name="${{ inputs.version }}"
+            -f tag_name="$VERSION"
+          echo "  cisco-cdr: triggered"
 
-      - name: Trigger ct-quasar Docker build
-        env:
-          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
-        run: |
-          echo "Triggering ct-quasar Docker build: ${{ inputs.version }}"
           gh workflow run publish_docker.yaml \
             --repo calltelemetry/ct-quasar \
-            -f tag_name="${{ inputs.version }}"
+            -f tag_name="$VERSION"
+          echo "  ct-quasar: triggered"
 
-      - name: Trigger jtapi-sidecar Docker build
-        env:
-          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
-        run: |
-          echo "Triggering jtapi-sidecar Docker build: ${{ inputs.version }}"
           gh workflow run docker-release.yml \
             --repo calltelemetry/jtapi-sidecar \
-            -f tag_name="${{ inputs.version }}"
+            -f tag_name="$VERSION"
+          echo "  jtapi-sidecar: triggered"
 
-      - name: Trigger ct-media Docker build
-        env:
-          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
-        run: |
-          CT_MEDIA_TAG="${{ inputs.ct_media_version || inputs.version }}"
-          echo "Triggering ct-media Docker build: $CT_MEDIA_TAG"
           gh workflow run docker-release.yml \
             --repo calltelemetry/ct-media \
             -f tag_name="$CT_MEDIA_TAG"
+          echo "  ct-media: triggered"
 
-      - name: Wait for builds to complete
+          echo ""
+          echo "All builds triggered at $(date -u '+%H:%M:%S UTC')"
+
+      - name: Capture run IDs
+        id: runs
         env:
           GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
         run: |
-          echo "Waiting for Docker builds to complete..."
-          echo "Builds triggered at $(date -u '+%H:%M:%S UTC')"
+          # Wait for GitHub to register the workflow runs
+          echo "Waiting 15s for workflow runs to register..."
+          sleep 15
+
+          capture_run_id() {
+            local REPO="$1" WORKFLOW="$2" LABEL="$3"
+            local RUN_ID
+            RUN_ID=$(gh run list --repo "$REPO" --workflow "$WORKFLOW" \
+              --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null)
+            if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
+              echo "::error::Failed to capture run ID for $LABEL"
+              exit 1
+            fi
+            echo "  $LABEL: run $RUN_ID"
+            echo "${LABEL}_run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          }
+
+          capture_run_id "calltelemetry/cisco-cdr" "docker-backend-release.yaml" "cisco_cdr"
+          capture_run_id "calltelemetry/ct-quasar" "publish_docker.yaml" "ct_quasar"
+          capture_run_id "calltelemetry/jtapi-sidecar" "docker-release.yml" "jtapi_sidecar"
+          capture_run_id "calltelemetry/ct-media" "docker-release.yml" "ct_media"
+
+          echo ""
+          echo "All run IDs captured."
+
+      - name: Poll builds until complete
+        env:
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+        run: |
+          echo "Polling Docker builds for completion..."
           echo ""
 
-          # Give workflows time to start
-          sleep 30
-
-          # Poll each repo for the most recent workflow run matching our version
-          REPOS=("calltelemetry/cisco-cdr:docker-backend-release.yaml" \
-                 "calltelemetry/ct-quasar:publish_docker.yaml" \
-                 "calltelemetry/jtapi-sidecar:docker-release.yml" \
-                 "calltelemetry/ct-media:docker-release.yml")
+          # Build entries: "label:repo:run_id"
+          BUILDS=( \
+            "cisco-cdr:calltelemetry/cisco-cdr:${{ steps.runs.outputs.cisco_cdr_run_id }}" \
+            "ct-quasar:calltelemetry/ct-quasar:${{ steps.runs.outputs.ct_quasar_run_id }}" \
+            "jtapi-sidecar:calltelemetry/jtapi-sidecar:${{ steps.runs.outputs.jtapi_sidecar_run_id }}" \
+            "ct-media:calltelemetry/ct-media:${{ steps.runs.outputs.ct_media_run_id }}" \
+          )
 
           MAX_WAIT=2400  # 40 minutes
           POLL_INTERVAL=30
           ELAPSED=0
           ALL_DONE=false
+          FAILED=false
+          declare -A DONE_MAP
 
           while [ "$ALL_DONE" != "true" ] && [ $ELAPSED -lt $MAX_WAIT ]; do
             ALL_DONE=true
-            for entry in "${REPOS[@]}"; do
-              REPO="${entry%%:*}"
-              WORKFLOW="${entry##*:}"
-              SHORT_NAME="${REPO##*/}"
+            for entry in "${BUILDS[@]}"; do
+              LABEL="${entry%%:*}"
+              REST="${entry#*:}"
+              REPO="${REST%%:*}"
+              RUN_ID="${REST##*:}"
 
-              # Get most recent run for this workflow
-              STATUS=$(gh run list --repo "$REPO" --workflow "$WORKFLOW" \
-                --limit 1 --json status,conclusion,headBranch \
-                --jq '.[0] | "\(.status):\(.conclusion // "pending")"' 2>/dev/null || echo "unknown:unknown")
+              # Skip already-completed builds
+              if [ "${DONE_MAP[$LABEL]}" = "done" ]; then
+                continue
+              fi
+
+              STATUS=$(gh run view "$RUN_ID" --repo "$REPO" \
+                --json status,conclusion \
+                --jq '"\(.status):\(.conclusion // "pending")"' 2>/dev/null || echo "unknown:unknown")
 
               RUN_STATUS="${STATUS%%:*}"
               RUN_CONCLUSION="${STATUS##*:}"
 
               if [ "$RUN_STATUS" = "completed" ]; then
+                DONE_MAP[$LABEL]="done"
                 if [ "$RUN_CONCLUSION" = "success" ]; then
-                  echo "  $SHORT_NAME: completed (success)"
+                  echo "  $LABEL: completed (success) [run $RUN_ID]"
                 else
-                  echo "  $SHORT_NAME: completed ($RUN_CONCLUSION)"
-                  echo "::error::$SHORT_NAME build failed with conclusion: $RUN_CONCLUSION"
+                  echo "  $LABEL: FAILED ($RUN_CONCLUSION) [run $RUN_ID]"
+                  echo "::error::$LABEL build failed with conclusion: $RUN_CONCLUSION — https://github.com/$REPO/actions/runs/$RUN_ID"
+                  FAILED=true
                 fi
               else
-                echo "  $SHORT_NAME: $RUN_STATUS"
+                echo "  $LABEL: $RUN_STATUS [run $RUN_ID]"
                 ALL_DONE=false
               fi
             done
@@ -201,11 +236,20 @@ jobs:
           done
 
           echo ""
-          if [ "$ALL_DONE" = "true" ]; then
-            echo "All Docker builds completed."
-          else
-            echo "::warning::Timed out waiting for builds after ${MAX_WAIT}s"
+
+          # Hard fail on any build failure
+          if [ "$FAILED" = "true" ]; then
+            echo "::error::One or more Docker builds failed — aborting release"
+            exit 1
           fi
+
+          # Hard fail on timeout
+          if [ "$ALL_DONE" != "true" ]; then
+            echo "::error::Timed out waiting for Docker builds after ${MAX_WAIT}s — aborting release"
+            exit 1
+          fi
+
+          echo "All Docker builds completed successfully."
 
       - name: Resolve ct-media version
         id: ct_media
@@ -236,8 +280,11 @@ jobs:
           done
 
           if [ "$ALL_FOUND" != "true" ]; then
-            echo "::warning::Some images not found on Docker Hub — OVA release may use stale images"
+            echo "::error::Some images not found on Docker Hub — cannot create OVA release"
+            exit 1
           fi
+
+          echo "All images verified on Docker Hub."
     outputs:
       ct_media_version: ${{ steps.ct_media.outputs.version }}
 
