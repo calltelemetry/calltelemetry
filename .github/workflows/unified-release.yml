@@ -17,20 +17,9 @@ on:
         type: string
         default: "0.8.6-release"
       ct_media_version:
-        description: "ct-media version override (leave empty to keep current: 0.2.5)"
+        description: "ct-media version override (leave empty to use unified version)"
         required: false
         type: string
-      ct_media_bump:
-        description: "Trigger ct-media release (auto=conventional commits, patch/minor/major=explicit)"
-        required: false
-        type: choice
-        options:
-          - skip
-          - auto
-          - patch
-          - minor
-          - major
-        default: "skip"
       skip_component_releases:
         description: "Skip creating GitHub releases (use existing tags/images)"
         type: boolean
@@ -84,27 +73,29 @@ jobs:
             --prerelease \
             --notes "Unified release ${{ inputs.version }}"
 
-      - name: Trigger ct-media release
-        if: ${{ inputs.ct_media_bump != 'skip' }}
+      - name: Create ct-media release
         env:
           GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
         run: |
-          echo "Triggering ct-media semantic release (bump: ${{ inputs.ct_media_bump }})"
-          gh workflow run release.yml \
+          CT_MEDIA_TAG="${{ inputs.ct_media_version || inputs.version }}"
+          echo "Creating ct-media release: $CT_MEDIA_TAG"
+          gh release create "$CT_MEDIA_TAG" \
             --repo calltelemetry/ct-media \
-            -f bump_type="${{ inputs.ct_media_bump }}"
+            --target "${{ inputs.target_branch }}" \
+            --title "$CT_MEDIA_TAG" \
+            --prerelease \
+            --notes "Unified release $CT_MEDIA_TAG"
 
       - name: Summary
         run: |
+          CT_MEDIA_TAG="${{ inputs.ct_media_version || inputs.version }}"
           echo "### Releases Created" >> $GITHUB_STEP_SUMMARY
           echo "| Repo | Tag | Branch |" >> $GITHUB_STEP_SUMMARY
           echo "|------|-----|--------|" >> $GITHUB_STEP_SUMMARY
           echo "| cisco-cdr | ${{ inputs.version }} | ${{ inputs.target_branch }} |" >> $GITHUB_STEP_SUMMARY
           echo "| ct-quasar | ${{ inputs.version }} | ${{ inputs.target_branch }} |" >> $GITHUB_STEP_SUMMARY
           echo "| jtapi-sidecar | ${{ inputs.version }} | ${{ inputs.target_branch }} |" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ inputs.ct_media_bump }}" != "skip" ]; then
-            echo "| ct-media | (semantic: ${{ inputs.ct_media_bump }}) | main |" >> $GITHUB_STEP_SUMMARY
-          fi
+          echo "| ct-media | $CT_MEDIA_TAG | ${{ inputs.target_branch }} |" >> $GITHUB_STEP_SUMMARY
 
   # ─────────────────────────────────────────────────────────────────
   # Job 2: Trigger Docker builds and wait for completion
@@ -142,6 +133,16 @@ jobs:
             --repo calltelemetry/jtapi-sidecar \
             -f tag_name="${{ inputs.version }}"
 
+      - name: Trigger ct-media Docker build
+        env:
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+        run: |
+          CT_MEDIA_TAG="${{ inputs.ct_media_version || inputs.version }}"
+          echo "Triggering ct-media Docker build: $CT_MEDIA_TAG"
+          gh workflow run docker-release.yml \
+            --repo calltelemetry/ct-media \
+            -f tag_name="$CT_MEDIA_TAG"
+
       - name: Wait for builds to complete
         env:
           GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
@@ -156,12 +157,8 @@ jobs:
           # Poll each repo for the most recent workflow run matching our version
           REPOS=("calltelemetry/cisco-cdr:docker-backend-release.yaml" \
                  "calltelemetry/ct-quasar:publish_docker.yaml" \
-                 "calltelemetry/jtapi-sidecar:build.yml")
-
-          # Include ct-media if a release was triggered
-          if [ "${{ inputs.ct_media_bump }}" != "skip" ]; then
-            REPOS+=("calltelemetry/ct-media:release.yml")
-          fi
+                 "calltelemetry/jtapi-sidecar:build.yml" \
+                 "calltelemetry/ct-media:docker-release.yml")
 
           MAX_WAIT=2400  # 40 minutes
           POLL_INTERVAL=30
@@ -210,24 +207,12 @@ jobs:
             echo "::warning::Timed out waiting for builds after ${MAX_WAIT}s"
           fi
 
-      - name: Resolve ct-media version from latest release
+      - name: Resolve ct-media version
         id: ct_media
-        env:
-          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
         run: |
-          if [ -n "${{ inputs.ct_media_version }}" ]; then
-            # Explicit override
-            echo "version=${{ inputs.ct_media_version }}" >> "$GITHUB_OUTPUT"
-            echo "ct-media version (override): ${{ inputs.ct_media_version }}"
-          elif [ "${{ inputs.ct_media_bump }}" != "skip" ]; then
-            # Fetch latest release version from ct-media (strip 'v' prefix)
-            LATEST=$(gh release view --repo calltelemetry/ct-media --json tagName --jq '.tagName' 2>/dev/null | sed 's/^v//')
-            echo "version=${LATEST}" >> "$GITHUB_OUTPUT"
-            echo "ct-media version (from latest release): ${LATEST}"
-          else
-            echo "version=0.2.5" >> "$GITHUB_OUTPUT"
-            echo "ct-media version (default): 0.2.5"
-          fi
+          CT_MEDIA_TAG="${{ inputs.ct_media_version || inputs.version }}"
+          echo "version=$CT_MEDIA_TAG" >> "$GITHUB_OUTPUT"
+          echo "ct-media version: $CT_MEDIA_TAG"
 
       - name: Verify images exist on Docker Hub
         run: |
@@ -267,13 +252,9 @@ jobs:
       - name: Resolve ct-media version
         id: resolve
         run: |
-          if [ -n "${{ needs.build-images.outputs.ct_media_version }}" ]; then
-            echo "ct_media=${{ needs.build-images.outputs.ct_media_version }}" >> "$GITHUB_OUTPUT"
-          elif [ -n "${{ inputs.ct_media_version }}" ]; then
-            echo "ct_media=${{ inputs.ct_media_version }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "ct_media=0.2.5" >> "$GITHUB_OUTPUT"
-          fi
+          CT_MEDIA="${{ needs.build-images.outputs.ct_media_version || inputs.ct_media_version || inputs.version }}"
+          echo "ct_media=$CT_MEDIA" >> "$GITHUB_OUTPUT"
+          echo "ct-media version for OVA: $CT_MEDIA"
 
       - name: Trigger OVA release
         env:
