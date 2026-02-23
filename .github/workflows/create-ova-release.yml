@@ -227,13 +227,14 @@ jobs:
           # Push the commit
           git push
 
-          # Determine if this is a pre-release (any -rc, -beta, -alpha suffix)
+          # Pre-release = has extra suffix after rcN (e.g. 0.8.6-rc48-jtapi.1)
+          # Stable     = plain rcN (e.g. 0.8.6-rc48)
           PRERELEASE_FLAG=""
-          if echo "$VERSION" | grep -qE '-(rc|beta|alpha)'; then
+          if echo "$VERSION" | grep -qE '-rc[0-9]+-.+'; then
             PRERELEASE_FLAG="--prerelease"
-            echo "Marking as pre-release (version contains RC/beta/alpha suffix)"
+            echo "Marking as pre-release (extra suffix after rcN: $VERSION)"
           else
-            echo "Marking as stable release (no pre-release suffix)"
+            echo "Marking as stable release: $VERSION"
           fi
 
           # Create GitHub release with both version files
