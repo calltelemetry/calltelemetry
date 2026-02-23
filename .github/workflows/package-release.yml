@@ -293,7 +293,7 @@ jobs:
           gsutil cp "ova/prep.sh" "gs://${GCS_BUCKET}/prep.sh"
           echo "✅ Uploaded cli.sh and prep.sh to bucket root"
 
-          # Upload postgres override files
+          # Upload postgres override files (available for manual `ct config postgres`)
           for pg_file in ova/postgres-*.yaml; do
             if [ -f "$pg_file" ]; then
               gsutil cp "$pg_file" "gs://${GCS_BUCKET}/$(basename $pg_file)"
