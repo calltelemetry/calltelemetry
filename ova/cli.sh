@@ -1222,13 +1222,30 @@ check_disk_space() {
   return 0
 }
 
-# Function to get current version from docker-compose.yml
+# Function to get current version from .env (preferred) or docker-compose.yml (legacy)
 get_current_version() {
+  # Prefer .env — new upgrades write VUE_VERSION here
+  local env_ver
+  env_ver=$(env_get "VUE_VERSION")
+  if [ -n "$env_ver" ]; then
+    echo "$env_ver"
+    return
+  fi
+
+  # Fallback: parse compose file for legacy hardcoded tags
   if [ -f "$ORIGINAL_FILE" ]; then
-    # Extract version from vue-web image tag
-    current_image=$(grep -E "calltelemetry/vue:" "$ORIGINAL_FILE" | head -1 | sed 's/.*calltelemetry\/vue://' | sed 's/".*//')
-    if [ -n "$current_image" ]; then
-      echo "$current_image"
+    local raw_tag
+    raw_tag=$(grep -E "calltelemetry/vue:" "$ORIGINAL_FILE" | head -1 | sed 's/.*calltelemetry\/vue://' | sed 's/".*//')
+    if [ -n "$raw_tag" ]; then
+      # Resolve ${VAR:-default} patterns — extract the default value
+      if echo "$raw_tag" | grep -qE '^\$\{.*:-.*\}$'; then
+        echo "$raw_tag" | sed 's/.*:-//' | sed 's/}$//'
+      elif echo "$raw_tag" | grep -q '^\$'; then
+        # Other env var pattern we can't resolve
+        echo "unknown"
+      else
+        echo "$raw_tag"
+      fi
     else
       echo "unknown"
     fi
