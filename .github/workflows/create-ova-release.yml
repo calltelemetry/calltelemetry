@@ -227,8 +227,18 @@ jobs:
           # Push the commit
           git push
 
+          # Determine if this is a pre-release (any -rc, -beta, -alpha suffix)
+          PRERELEASE_FLAG=""
+          if echo "$VERSION" | grep -qE '-(rc|beta|alpha)'; then
+            PRERELEASE_FLAG="--prerelease"
+            echo "Marking as pre-release (version contains RC/beta/alpha suffix)"
+          else
+            echo "Marking as stable release (no pre-release suffix)"
+          fi
+
           # Create GitHub release with both version files
           gh release create "$VERSION" \
+            $PRERELEASE_FLAG \
             --title "CallTelemetry OVA $VERSION" \
             --notes "$(cat << NOTES_EOF
           ## CallTelemetry $VERSION
