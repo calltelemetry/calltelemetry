@@ -102,8 +102,6 @@ jobs:
 
           # Generate legacy per-version compose file for older cli.sh that expect it
           cat > "ova/versions/${VERSION}.yaml" << 'COMPOSE_EOF'
-          version: "3.8"
-
           services:
             caddy:
               image: caddy:2-alpine
