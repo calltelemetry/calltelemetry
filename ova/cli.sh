@@ -128,25 +128,75 @@ get_current_postgres_image() {
   fi
 }
 
-# JTAPI feature state
+# JTAPI feature state — now driven by COMPOSE_PROFILES in .env
 JTAPI_OVERLAY_FILE="docker-compose-jtapi.yml"
 JTAPI_STATE_FILE=".jtapi-enabled"
+ENV_FILE="${INSTALL_DIR}/.env"
+
+# Read a key from .env (returns empty string if not found)
+env_get() {
+  local key="$1"
+  if [ -f "$ENV_FILE" ]; then
+    grep "^${key}=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2-
+  fi
+}
+
+# Set or update a key in .env (creates file if needed)
+env_set() {
+  local key="$1" value="$2"
+  if [ ! -f "$ENV_FILE" ]; then
+    echo "${key}=${value}" > "$ENV_FILE"
+    return
+  fi
+  if grep -q "^${key}=" "$ENV_FILE" 2>/dev/null; then
+    sed -i "s|^${key}=.*|${key}=${value}|" "$ENV_FILE"
+  else
+    echo "${key}=${value}" >> "$ENV_FILE"
+  fi
+}
+
+# Remove a key from .env
+env_remove() {
+  local key="$1"
+  [ -f "$ENV_FILE" ] && sed -i "/^${key}=/d" "$ENV_FILE"
+}
+
+# Migrate legacy .jtapi-enabled state file to .env COMPOSE_PROFILES
+migrate_jtapi_state() {
+  if [ -f "$JTAPI_STATE_FILE" ]; then
+    echo "Migrating JTAPI state from .jtapi-enabled to .env COMPOSE_PROFILES..."
+    local profiles
+    profiles=$(env_get "COMPOSE_PROFILES")
+    if ! echo "$profiles" | grep -q "jtapi"; then
+      if [ -n "$profiles" ]; then
+        env_set "COMPOSE_PROFILES" "${profiles},jtapi"
+      else
+        env_set "COMPOSE_PROFILES" "jtapi"
+      fi
+    fi
+    # Set JTAPI env vars if not already present
+    [ -z "$(env_get JTAPI_MODE)" ] && env_set "JTAPI_MODE" "direct"
+    [ -z "$(env_get JTAPI_SIDECAR_ENDPOINT)" ] && env_set "JTAPI_SIDECAR_ENDPOINT" "jtapi-sidecar:50051"
+    [ -z "$(env_get JTAPI_SIDECAR_URL)" ] && env_set "JTAPI_SIDECAR_URL" "http://jtapi-sidecar:8080"
+    [ -z "$(env_get S3_ENABLED)" ] && env_set "S3_ENABLED" "true"
+    [ -z "$(env_get CT_MEDIA_ENDPOINT)" ] && env_set "CT_MEDIA_ENDPOINT" "ct-media:50053"
+    rm -f "$JTAPI_STATE_FILE"
+    echo "Migration complete. .jtapi-enabled removed."
+  fi
+}
 
 is_jtapi_enabled() {
-  [ -f "$JTAPI_STATE_FILE" ] && [ -f "$JTAPI_OVERLAY_FILE" ]
+  local profiles
+  profiles=$(env_get "COMPOSE_PROFILES")
+  echo "$profiles" | grep -q "jtapi"
 }
 
-# Build the compose file flags for all applicable overlays
+# Build the compose file flags — overlay no longer needed (profiles handle JTAPI)
 get_compose_files() {
-  local files="-f docker-compose.yml"
-  # docker-compose.override.yml is auto-loaded by Docker Compose (postgres)
-  if is_jtapi_enabled; then
-    files="$files -f $JTAPI_OVERLAY_FILE"
-  fi
-  echo "$files"
+  echo "-f docker-compose.yml"
 }
 
-# Update systemd ExecStart/ExecStop to include/exclude JTAPI overlay
+# Update systemd ExecStart/ExecStop (simplified — no overlay to toggle)
 fix_systemd_compose_files() {
   local SERVICE_FILE="/etc/systemd/system/docker-compose-app.service"
   [ -f "$SERVICE_FILE" ] || return 0
@@ -166,6 +216,7 @@ fix_systemd_compose_files() {
 
   if ! grep -qF "$new_start" "$SERVICE_FILE" 2>/dev/null; then
     sudo cp "$SERVICE_FILE" "${SERVICE_FILE}.backup" 2>/dev/null
+    # Strip any leftover -f docker-compose-jtapi.yml from systemd
     sudo sed -i "s|^ExecStart=.*|$new_start|" "$SERVICE_FILE"
     sudo sed -i "s|^ExecStop=.*|$new_stop|" "$SERVICE_FILE"
     sudo systemctl daemon-reload
@@ -177,31 +228,59 @@ jtapi_cmd() {
   local subcmd="${1:-}"
   shift 2>/dev/null || true
 
+  # Auto-migrate legacy state file on any jtapi command
+  migrate_jtapi_state
+
   case "$subcmd" in
     enable)
-      if [ -f "$JTAPI_OVERLAY_FILE" ]; then
-        touch "$JTAPI_STATE_FILE"
-        fix_systemd_compose_files
-        echo "✅ JTAPI enabled — restarting services..."
-        echo ""
-        systemctl restart docker-compose-app.service
-        # Force recreate web to pick up overlay env vars
-        sleep 3
-        $DOCKER_COMPOSE_CMD $(get_compose_files) up -d --force-recreate web 2>/dev/null
-        echo "Services restarted."
-        echo ""
-        echo "Next steps:"
-        echo "  1. Wait for sidecar to start (~90s)"
-        echo "  2. Upload JTAPI JAR via UI (Settings > JTAPI)"
-        echo "  3. Sidecar auto-restarts when JAR is received"
-        echo "  4. Add CUCM server via UI (Settings > JTAPI > Servers)"
-        echo "  5. Sidecar auto-connects when credentials appear in NATS KV"
-      else
-        echo "❌ JTAPI overlay not found: $JTAPI_OVERLAY_FILE"
-        echo "   Run 'sudo ./cli.sh update <version>' to download it"
+      # Add jtapi to COMPOSE_PROFILES
+      local profiles
+      profiles=$(env_get "COMPOSE_PROFILES")
+      if ! echo "$profiles" | grep -q "jtapi"; then
+        if [ -n "$profiles" ]; then
+          env_set "COMPOSE_PROFILES" "${profiles},jtapi"
+        else
+          env_set "COMPOSE_PROFILES" "jtapi"
+        fi
       fi
+      # Set JTAPI env vars
+      env_set "JTAPI_MODE" "direct"
+      env_set "JTAPI_SIDECAR_ENDPOINT" "jtapi-sidecar:50051"
+      env_set "JTAPI_SIDECAR_URL" "http://jtapi-sidecar:8080"
+      env_set "S3_ENABLED" "true"
+      env_set "CT_MEDIA_ENDPOINT" "ct-media:50053"
+      # Clean up legacy state file if present
+      rm -f "$JTAPI_STATE_FILE"
+      fix_systemd_compose_files
+      echo "✅ JTAPI enabled — restarting services..."
+      echo ""
+      systemctl restart docker-compose-app.service
+      # Force recreate web to pick up new env vars
+      sleep 3
+      $DOCKER_COMPOSE_CMD $(get_compose_files) up -d --force-recreate web 2>/dev/null
+      echo "Services restarted."
+      echo ""
+      echo "Next steps:"
+      echo "  1. Wait for sidecar to start (~90s)"
+      echo "  2. Upload JTAPI JAR via UI (Settings > JTAPI)"
+      echo "  3. Sidecar auto-restarts when JAR is received"
+      echo "  4. Add CUCM server via UI (Settings > JTAPI > Servers)"
+      echo "  5. Sidecar auto-connects when credentials appear in NATS KV"
       ;;
     disable)
+      # Remove jtapi from COMPOSE_PROFILES
+      local profiles
+      profiles=$(env_get "COMPOSE_PROFILES")
+      local new_profiles
+      new_profiles=$(echo "$profiles" | sed 's/,*jtapi,*//' | sed 's/^,//' | sed 's/,$//')
+      env_set "COMPOSE_PROFILES" "$new_profiles"
+      # Clear JTAPI env vars
+      env_remove "JTAPI_MODE"
+      env_remove "JTAPI_SIDECAR_ENDPOINT"
+      env_remove "JTAPI_SIDECAR_URL"
+      env_remove "S3_ENABLED"
+      env_remove "CT_MEDIA_ENDPOINT"
+      # Clean up legacy state file if present
       rm -f "$JTAPI_STATE_FILE"
       fix_systemd_compose_files
       echo "✅ JTAPI disabled — restarting services..."
@@ -222,16 +301,12 @@ jtapi_cmd() {
 
       # --- 1. Feature State ---
       echo "--- Feature State ---"
-      if [ -f "$JTAPI_STATE_FILE" ]; then
-        echo "✓ JTAPI enabled (.jtapi-enabled exists)"
+      if is_jtapi_enabled; then
+        echo "✓ JTAPI enabled (COMPOSE_PROFILES includes jtapi)"
       else
-        echo "❌ JTAPI disabled (.jtapi-enabled not found)"
+        echo "❌ JTAPI disabled (COMPOSE_PROFILES does not include jtapi)"
       fi
-      if [ -f "$JTAPI_OVERLAY_FILE" ]; then
-        echo "✓ Overlay file present ($JTAPI_OVERLAY_FILE)"
-      else
-        echo "❌ Overlay file missing ($JTAPI_OVERLAY_FILE)"
-      fi
+      echo "  COMPOSE_PROFILES=$(env_get COMPOSE_PROFILES)"
       echo "  Compose files: $(get_compose_files)"
       echo ""
 
@@ -866,11 +941,36 @@ download_bundle() {
     return 1
   fi
 
-  # docker-compose-jtapi.yml -> JTAPI overlay (always extract if present)
+  # .env -> merge version pins from bundle into existing .env
+  # Only update version keys; preserve user customizations (secrets, network, profiles)
+  if [ -f "$extract_dir/.env" ]; then
+    if [ -f "$ENV_FILE" ]; then
+      # Merge only version keys from bundle .env into existing .env
+      for key in WEB_VERSION VUE_VERSION TRACEROUTE_VERSION JTAPI_VERSION CT_MEDIA_VERSION; do
+        local val
+        val=$(grep "^${key}=" "$extract_dir/.env" 2>/dev/null | head -1 | cut -d= -f2-)
+        if [ -n "$val" ]; then
+          env_set "$key" "$val"
+        fi
+      done
+      echo "  ✅ .env (version pins merged)"
+    else
+      cp "$extract_dir/.env" "$ENV_FILE"
+      echo "  ✅ .env (created from bundle)"
+    fi
+  fi
+
+  # .env.example -> always overwrite template
+  if [ -f "$extract_dir/.env.example" ]; then
+    cp "$extract_dir/.env.example" ./.env.example
+    echo "  ✅ .env.example"
+  fi
+
+  # docker-compose-jtapi.yml -> legacy overlay (kept for backwards compat)
   if [ -f "$extract_dir/docker-compose-jtapi.yml" ]; then
     rm -f ./docker-compose-jtapi.yml 2>/dev/null
     if cp "$extract_dir/docker-compose-jtapi.yml" ./docker-compose-jtapi.yml; then
-      echo "  ✅ docker-compose-jtapi.yml (JTAPI overlay)"
+      echo "  ✅ docker-compose-jtapi.yml (legacy overlay)"
     else
       echo "  ⚠️  docker-compose-jtapi.yml (failed to copy — check permissions)"
     fi
@@ -1441,10 +1541,10 @@ update() {
     rm -f "$TEMP_FILE"
     return 1
   fi
-  # Also pull JTAPI images if enabled
-  if is_jtapi_enabled && [ -f "$JTAPI_OVERLAY_FILE" ]; then
-    echo "Pulling JTAPI overlay images..."
-    $DOCKER_COMPOSE_CMD -f "$TEMP_FILE" -f "$JTAPI_OVERLAY_FILE" pull jtapi-sidecar ct-media minio 2>/dev/null || \
+  # Also pull JTAPI images if enabled (profiles are read from .env automatically)
+  if is_jtapi_enabled; then
+    echo "Pulling JTAPI profile images..."
+    $DOCKER_COMPOSE_CMD -f "$TEMP_FILE" --profile jtapi pull jtapi-sidecar ct-media minio 2>/dev/null || \
       echo "⚠️  Some JTAPI images may not be available yet"
   fi
   echo "✅ All images pulled successfully"
@@ -3349,6 +3449,9 @@ certs_cmd() {
       ;;
   esac
 }
+
+# Auto-migrate legacy .jtapi-enabled to .env on any CLI invocation
+migrate_jtapi_state
 
 # Main script logic
 case "$1" in

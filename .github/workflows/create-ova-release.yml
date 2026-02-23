@@ -7,25 +7,16 @@ on:
         description: "OVA Release version (e.g., X.Y.Z-rcN)"
         required: true
         type: string
-      web_version:
-        description: "Web/API version (leave empty to use version above)"
-        required: false
-        type: string
-      vue_version:
-        description: "Vue frontend version (leave empty to use version above)"
-        required: false
-        type: string
       traceroute_version:
-        description: "Traceroute version (leave empty for latest)"
+        description: "Traceroute version override (leave empty for default: 0.8.5-rc27)"
         required: false
         type: string
-        default: "0.7.3"
       jtapi_version:
-        description: "JTAPI sidecar version (leave empty to skip JTAPI pinning)"
+        description: "JTAPI sidecar version override (leave empty to use main version)"
         required: false
         type: string
       ct_media_version:
-        description: "ct-media version (leave empty to skip ct-media pinning)"
+        description: "ct-media version override (leave empty for default: 0.2.5)"
         required: false
         type: string
 
@@ -36,41 +27,79 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Generate OVA docker-compose file
+      - name: Resolve versions
+        id: resolve
         run: |
           VERSION="${{ inputs.version }}"
-          WEB_VERSION="${{ inputs.web_version }}"
-          VUE_VERSION="${{ inputs.vue_version }}"
+
+          # Unified version for web and vue (always match main version)
+          WEB_VERSION="$VERSION"
+          VUE_VERSION="$VERSION"
+
+          # Traceroute has its own release cadence
           TRACEROUTE_VERSION="${{ inputs.traceroute_version }}"
-
-          # Use main version if specific versions not provided
-          if [[ -z "$WEB_VERSION" ]]; then
-            WEB_VERSION="$VERSION"
-          fi
-          if [[ -z "$VUE_VERSION" ]]; then
-            VUE_VERSION="$VERSION"
-          fi
-          if [[ -z "$TRACEROUTE_VERSION" ]]; then
-            TRACEROUTE_VERSION="0.7.3"
+          if [ -z "$TRACEROUTE_VERSION" ]; then
+            TRACEROUTE_VERSION="0.8.5-rc27"
           fi
 
+          # JTAPI defaults to main version (unified release stamps all repos)
           JTAPI_VERSION="${{ inputs.jtapi_version }}"
-          CT_MEDIA_VERSION="${{ inputs.ct_media_version }}"
+          if [ -z "$JTAPI_VERSION" ]; then
+            JTAPI_VERSION="$VERSION"
+          fi
 
-          echo "🐳 Creating OVA release $VERSION with:"
+          # ct-media has its own version
+          CT_MEDIA_VERSION="${{ inputs.ct_media_version }}"
+          if [ -z "$CT_MEDIA_VERSION" ]; then
+            CT_MEDIA_VERSION="0.2.5"
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "web_version=$WEB_VERSION" >> "$GITHUB_OUTPUT"
+          echo "vue_version=$VUE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "traceroute_version=$TRACEROUTE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "jtapi_version=$JTAPI_VERSION" >> "$GITHUB_OUTPUT"
+          echo "ct_media_version=$CT_MEDIA_VERSION" >> "$GITHUB_OUTPUT"
+
+          echo "Creating OVA release $VERSION with:"
           echo "  - Web/API: $WEB_VERSION"
           echo "  - Vue Frontend: $VUE_VERSION"
           echo "  - Traceroute: $TRACEROUTE_VERSION"
-          if [ -n "$JTAPI_VERSION" ]; then
-            echo "  - JTAPI Sidecar: $JTAPI_VERSION"
-          fi
-          if [ -n "$CT_MEDIA_VERSION" ]; then
-            echo "  - ct-media: $CT_MEDIA_VERSION"
-          fi
+          echo "  - JTAPI Sidecar: $JTAPI_VERSION"
+          echo "  - ct-media: $CT_MEDIA_VERSION"
 
-          # Create the version-specific docker-compose file
+      - name: Generate version .env file
+        run: |
+          VERSION="${{ steps.resolve.outputs.version }}"
           mkdir -p ova/versions
-          cat > ova/versions/$VERSION.yaml << EOF
+
+          cat > "ova/versions/${VERSION}.env" << EOF
+          # CallTelemetry OVA Release — ${VERSION}
+          # Generated: $(date -u '+%Y-%m-%d %H:%M:%S UTC')
+
+          # ─── Image Versions ───
+          WEB_VERSION=${{ steps.resolve.outputs.web_version }}
+          VUE_VERSION=${{ steps.resolve.outputs.vue_version }}
+          TRACEROUTE_VERSION=${{ steps.resolve.outputs.traceroute_version }}
+          JTAPI_VERSION=${{ steps.resolve.outputs.jtapi_version }}
+          CT_MEDIA_VERSION=${{ steps.resolve.outputs.ct_media_version }}
+          EOF
+
+          # Strip leading whitespace from heredoc
+          sed -i 's/^          //' "ova/versions/${VERSION}.env"
+
+          echo "Generated ova/versions/${VERSION}.env:"
+          cat "ova/versions/${VERSION}.env"
+
+      - name: Generate legacy version YAML (backwards compat)
+        run: |
+          VERSION="${{ steps.resolve.outputs.version }}"
+          WEB_VERSION="${{ steps.resolve.outputs.web_version }}"
+          VUE_VERSION="${{ steps.resolve.outputs.vue_version }}"
+          TRACEROUTE_VERSION="${{ steps.resolve.outputs.traceroute_version }}"
+
+          # Generate legacy per-version compose file for older cli.sh that expect it
+          cat > "ova/versions/${VERSION}.yaml" << 'COMPOSE_EOF'
           version: "3.8"
 
           services:
@@ -85,7 +114,7 @@ jobs:
                 - ct
 
             vue-web:
-              image: "calltelemetry/vue:$VUE_VERSION"
+              image: "calltelemetry/vue:VUE_VERSION_PLACEHOLDER"
               restart: "always"
               expose:
                 - "80"
@@ -93,7 +122,7 @@ jobs:
                 - ct
 
             traceroute:
-              image: "calltelemetry/traceroute:$TRACEROUTE_VERSION"
+              image: "calltelemetry/traceroute:TRACEROUTE_VERSION_PLACEHOLDER"
               user: root
               expose:
                 - "4100"
@@ -101,7 +130,7 @@ jobs:
                 - ct
 
             db:
-              image: "bitnamilegacy/postgresql:14"
+              image: "calltelemetry/postgres:14"
               user: root
               restart: "always"
               environment:
@@ -116,7 +145,7 @@ jobs:
                 - ct
 
             web:
-              image: "calltelemetry/web:$WEB_VERSION"
+              image: "calltelemetry/web:WEB_VERSION_PLACEHOLDER"
               restart: "always"
               user: root
               expose:
@@ -131,7 +160,7 @@ jobs:
                 - DB_HOSTNAME=db
                 - DB_NAME=calltelemetry_prod
                 - DB_PORT=5432
-                - EXTERNAL_IP=\$DEFAULT_IPV4
+                - EXTERNAL_IP=$DEFAULT_IPV4
                 - LOGGING_LEVEL=warning
                 - ADMIN_NODE=TRUE
                 - WORKER_NODE=TRUE
@@ -170,65 +199,70 @@ jobs:
               driver: local
             traefik-logs:
               driver: local
-          EOF
+          COMPOSE_EOF
 
-          echo "✅ Generated ova/versions/$VERSION.yaml"
+          # Strip leading whitespace and substitute version placeholders
+          sed -i 's/^          //' "ova/versions/${VERSION}.yaml"
+          sed -i "s|WEB_VERSION_PLACEHOLDER|${WEB_VERSION}|g" "ova/versions/${VERSION}.yaml"
+          sed -i "s|VUE_VERSION_PLACEHOLDER|${VUE_VERSION}|g" "ova/versions/${VERSION}.yaml"
+          sed -i "s|TRACEROUTE_VERSION_PLACEHOLDER|${TRACEROUTE_VERSION}|g" "ova/versions/${VERSION}.yaml"
 
-      - name: Pin JTAPI overlay image versions
-        run: |
-          JTAPI_VERSION="${{ inputs.jtapi_version }}"
-          CT_MEDIA_VERSION="${{ inputs.ct_media_version }}"
-          OVERLAY="docker-compose-jtapi.yml"
-
-          if [ ! -f "$OVERLAY" ]; then
-            echo "ℹ️  No JTAPI overlay found, skipping version pinning"
-            exit 0
-          fi
-
-          if [ -n "$JTAPI_VERSION" ]; then
-            sed -i 's|jtapi-sidecar:\${JTAPI_VERSION:-[^}]*}|jtapi-sidecar:'"$JTAPI_VERSION"'|' "$OVERLAY"
-            echo "✅ Pinned jtapi-sidecar to $JTAPI_VERSION"
-          fi
-
-          if [ -n "$CT_MEDIA_VERSION" ]; then
-            sed -i 's|ct-media:\${CT_MEDIA_VERSION:-[^}]*}|ct-media:'"$CT_MEDIA_VERSION"'|' "$OVERLAY"
-            echo "✅ Pinned ct-media to $CT_MEDIA_VERSION"
-          fi
-
-          if [ -n "$JTAPI_VERSION" ] || [ -n "$CT_MEDIA_VERSION" ]; then
-            echo "📋 Updated image tags:"
-            grep 'image:' "$OVERLAY"
-          fi
+          echo "Generated legacy ova/versions/${VERSION}.yaml"
 
       - name: Commit and create release
         run: |
-          VERSION="${{ inputs.version }}"
+          VERSION="${{ steps.resolve.outputs.version }}"
 
           # Configure git
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
 
-          # Add version file and any modified overlay
-          git add ova/versions/$VERSION.yaml
-          git add -u docker-compose-jtapi.yml 2>/dev/null || true
+          # Add version files
+          git add "ova/versions/${VERSION}.env"
+          git add "ova/versions/${VERSION}.yaml"
           git commit -m "feat: add OVA release $VERSION
 
-          Docker compose configuration for OVA deployment.
-
-          🤖 Generated with [Claude Code](https://claude.ai/code)
-
-          Co-Authored-By: Claude <noreply@anthropic.com>"
+          Version-pinned .env and compose configuration for OVA deployment."
 
           # Push the commit
           git push
 
-          # Create GitHub release with the docker-compose file
+          # Create GitHub release with both version files
           gh release create "$VERSION" \
             --title "CallTelemetry OVA $VERSION" \
-            --notes "Docker compose configuration for OVA deployment with version-specific service images." \
-            ova/versions/$VERSION.yaml
+            --notes "$(cat << NOTES_EOF
+          ## CallTelemetry $VERSION
 
-          echo "✅ Created release $VERSION"
-          echo "📦 Docker compose file: ova/versions/$VERSION.yaml"
+          | Image | Version |
+          |-------|---------|
+          | calltelemetry/web | ${{ steps.resolve.outputs.web_version }} |
+          | calltelemetry/vue | ${{ steps.resolve.outputs.vue_version }} |
+          | calltelemetry/traceroute | ${{ steps.resolve.outputs.traceroute_version }} |
+          | calltelemetry/jtapi-sidecar | ${{ steps.resolve.outputs.jtapi_version }} |
+          | calltelemetry/ct-media | ${{ steps.resolve.outputs.ct_media_version }} |
+
+          ### Upgrade
+          \`\`\`bash
+          sudo ./cli.sh update $VERSION
+          \`\`\`
+          NOTES_EOF
+          )" \
+            "ova/versions/${VERSION}.env" \
+            "ova/versions/${VERSION}.yaml"
+
+          echo "Created release $VERSION"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Summary
+        run: |
+          VERSION="${{ steps.resolve.outputs.version }}"
+          echo "### OVA Release: $VERSION" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Image | Version |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|---------|" >> $GITHUB_STEP_SUMMARY
+          echo "| calltelemetry/web | ${{ steps.resolve.outputs.web_version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| calltelemetry/vue | ${{ steps.resolve.outputs.vue_version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| calltelemetry/traceroute | ${{ steps.resolve.outputs.traceroute_version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| calltelemetry/jtapi-sidecar | ${{ steps.resolve.outputs.jtapi_version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| calltelemetry/ct-media | ${{ steps.resolve.outputs.ct_media_version }} |" >> $GITHUB_STEP_SUMMARY

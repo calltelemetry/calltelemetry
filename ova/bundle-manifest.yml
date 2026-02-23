@@ -30,9 +30,14 @@ grafana:
     - versions/grafana/provisioning/datasources/calltelemetry.yml
     - versions/grafana/provisioning/dashboards/calltelemetry.yaml
 
-# JTAPI overlay (optional feature, lives at repo root not ova/)
+# JTAPI overlay (deprecated — kept for backwards compat with older cli.sh)
+# JTAPI services now live in the base docker-compose.yml via profiles.
 jtapi:
   - docker-compose-jtapi.yml
 
-# Docker compose is handled separately (version-specific)
-# The workflow will use: ova/versions/{version}.yml or root docker-compose.yml
+# Environment template (new deployments copy this to .env)
+env:
+  - .env.example
+
+# Docker compose + .env are handled separately (version-specific)
+# The workflow copies: ova/versions/{version}.yaml and ova/versions/{version}.env

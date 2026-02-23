@@ -1,6 +1,15 @@
-# JTAPI Sidecar overlay for Docker Compose appliance deployments.
+# DEPRECATED: JTAPI services are now in the base docker-compose.yml using
+# Docker Compose profiles. Enable with COMPOSE_PROFILES=jtapi in .env.
 #
-# Usage:
+# This overlay file is kept for backwards compatibility with older cli.sh
+# versions that reference it via -f flags. It will be removed in a future release.
+#
+# Migration:
+#   1. Set COMPOSE_PROFILES=jtapi in .env (ct-cli jtapi enable does this)
+#   2. Run: docker compose up -d
+#   3. The -f docker-compose-jtapi.yml flag is no longer needed
+#
+# Legacy usage (still works but deprecated):
 #   docker compose -f docker-compose.yml -f docker-compose-jtapi.yml up -d
 #
 # Prerequisites:
