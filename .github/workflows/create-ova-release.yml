@@ -26,6 +26,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_RELEASE_TOKEN }}
 
       - name: Resolve versions
         id: resolve
@@ -252,7 +254,7 @@ jobs:
 
           echo "Created release $VERSION"
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
 
       - name: Summary
         run: |
