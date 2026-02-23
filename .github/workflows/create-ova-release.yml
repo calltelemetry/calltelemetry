@@ -12,7 +12,7 @@ on:
         required: false
         type: string
       jtapi_version:
-        description: "JTAPI sidecar version override (leave empty to use main version)"
+        description: "JTAPI sidecar version override (leave empty for default: 1.14.5)"
         required: false
         type: string
       ct_media_version:
@@ -44,10 +44,10 @@ jobs:
             TRACEROUTE_VERSION="0.8.5-rc27"
           fi
 
-          # JTAPI defaults to main version (unified release stamps all repos)
+          # JTAPI sidecar has its own version scheme (1.x.x, not 0.8.x-rcN)
           JTAPI_VERSION="${{ inputs.jtapi_version }}"
           if [ -z "$JTAPI_VERSION" ]; then
-            JTAPI_VERSION="$VERSION"
+            JTAPI_VERSION="1.14.5"
           fi
 
           # ct-media has its own version
