@@ -23,7 +23,7 @@ services:
       start_period: 30s
 
   vue-web:
-    image: "calltelemetry/vue:0.8.6-rc1"
+    image: "calltelemetry/vue:${VUE_VERSION:-0.8.6-rc1}"
     restart: "always"
     expose:
       - "80"
@@ -37,7 +37,7 @@ services:
       start_period: 30s
 
   traceroute:
-    image: "calltelemetry/traceroute:0.8.5-rc27"
+    image: "calltelemetry/traceroute:${TRACEROUTE_VERSION:-0.8.5-rc27}"
     user: root
     expose:
       - "4100"
@@ -77,7 +77,7 @@ services:
       start_period: 30s
 
   web:
-    image: "calltelemetry/web:0.8.6-rc1"
+    image: "calltelemetry/web:${WEB_VERSION:-0.8.6-rc1}"
     restart: "always"
     user: root
     expose:
@@ -105,6 +105,18 @@ services:
       - PROM_EX_UPLOAD_DASHBOARDS=${PROM_EX_UPLOAD_DASHBOARDS:-false}
       - GRAFANA_HOST=${GRAFANA_HOST_INTERNAL:-http://grafana:3000/grafana}
       - GRAFANA_TOKEN=${GRAFANA_TOKEN:-secret-token}
+      # JTAPI / phone control (populated by ct-cli or cli.sh when JTAPI is enabled)
+      - JTAPI_MODE=${JTAPI_MODE:-}
+      - JTAPI_SIDECAR_ENDPOINT=${JTAPI_SIDECAR_ENDPOINT:-}
+      - JTAPI_SIDECAR_URL=${JTAPI_SIDECAR_URL:-}
+      - S3_ENABLED=${S3_ENABLED:-false}
+      - S3_ENDPOINT=${S3_ENDPOINT:-http://minio:9000}
+      - S3_ACCESS_KEY_ID=${MINIO_ROOT_USER:-minioadmin}
+      - S3_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - S3_REGION=us-east-1
+      - CT_MEDIA_ENDPOINT=${CT_MEDIA_ENDPOINT:-}
+      - DOCKER_SOCKET=/var/run/docker.sock
+      - NATS_URL=nats://nats:4222
     tmpfs:
       - /var/log:rw,mode=0555,size=5000m
     networks:
@@ -114,6 +126,7 @@ services:
       - ./crash-dumps:/tmp/crash-dumps:rw
       # Persistent org-scoped media storage (JTAPI audio, recordings, etc)
       - ./org-data:/data:rw
+      - /var/run/docker.sock:/var/run/docker.sock
     logging:
       driver: "json-file"
       options:
@@ -181,6 +194,129 @@ services:
     networks:
       - ct
 
+  # ─────────────────────────────────────────────────────────────────
+  # JTAPI Phone Control Stack (activate with COMPOSE_PROFILES=jtapi)
+  # ─────────────────────────────────────────────────────────────────
+
+  jtapi-jar-init:
+    profiles: ["jtapi"]
+    image: natsio/nats-box:0.14.5
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Checking NATS ObjectStore for JTAPI JAR..."
+        BUCKET="jtapi-jars-$${NATS_ORG_ID:-1}"
+        # Wait for NATS to be ready
+        for i in $$(seq 1 30); do
+          nats -s "$${NATS_URL}" server ping --count=1 2>/dev/null && break
+          echo "  Waiting for NATS... ($$i/30)"
+          sleep 2
+        done
+        # Try to download JAR from ObjectStore
+        if nats -s "$${NATS_URL}" object get "$$BUCKET" jtapi.jar --output /jars/jtapi.jar 2>/dev/null; then
+          SIZE=$$(stat -c%s /jars/jtapi.jar 2>/dev/null || echo "unknown")
+          echo "Downloaded jtapi.jar from NATS ObjectStore ($$SIZE bytes)"
+        elif [ -f /jars/jtapi.jar ]; then
+          echo "JAR already present on volume, skipping download"
+        else
+          echo "No JAR in NATS ObjectStore yet — sidecar will wait for upload via UI"
+        fi
+    environment:
+      - NATS_URL=nats://nats:4222
+      - NATS_ORG_ID=1
+    volumes:
+      - jtapi-jars:/jars
+    depends_on:
+      nats:
+        condition: service_started
+    networks:
+      - ct
+
+  jtapi-sidecar:
+    profiles: ["jtapi"]
+    image: "calltelemetry/jtapi-sidecar:${JTAPI_VERSION:-1.14.5}"
+    restart: unless-stopped
+    mem_limit: 1g
+    expose:
+      - "50051"
+      - "8080"
+    environment:
+      - SPRING_PROFILES_ACTIVE=standalone
+      - NATS_URL=nats://nats:4222
+      - NATS_ORG_ID=1
+      - POD_NAME=jtapi-sidecar-1
+      - GRPC_PORT=50051
+      - JTAPI_PORT=8080
+      # Auto-connect/configure via NATS KV (CtiConfigWatcher)
+      - CTI_POOL_AUTO_CONNECT=true
+      - CTI_POOL_AUTO_CONFIGURE=true
+      - CTI_POOL_SOURCE=nats
+      - CTI_POOL_ENABLE_MEDIA=true
+      # MinIO for audio storage
+      - MINIO_ENABLED=true
+      - MINIO_ENDPOINT=http://minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+      # JAR auto-restart when downloaded from NATS ObjectStore
+      - WATCH_JARS=true
+      # Disable OpenTelemetry SDK by default (no collector in Docker Compose)
+      - OTEL_SDK_DISABLED=true
+    volumes:
+      - jtapi-jars:/app/jars
+    depends_on:
+      jtapi-jar-init:
+        condition: service_completed_successfully
+      nats:
+        condition: service_started
+    networks:
+      - ct
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8080/actuator/health || curl -sf http://127.0.0.1:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+
+  ct-media:
+    profiles: ["jtapi"]
+    image: "calltelemetry/ct-media:${CT_MEDIA_VERSION:-0.2.5}"
+    restart: unless-stopped
+    expose:
+      - "50053"
+    environment:
+      - GRPC_PORT=50053
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+    networks:
+      - ct
+    depends_on:
+      minio:
+        condition: service_healthy
+
+  minio:
+    profiles: ["jtapi"]
+    image: minio/minio:RELEASE.2024-11-07T00-52-20Z
+    command: server /data --console-address ":9001"
+    restart: unless-stopped
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minioadmin}
+    expose:
+      - "9000"
+      - "9001"
+    volumes:
+      - minio-data:/data
+    networks:
+      - ct
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9000/minio/health/live || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
 networks:
   ct:
     # enable_ipv6: true
@@ -197,4 +333,8 @@ volumes:
   grafana-data:
     driver: local
   nats-data:
+    driver: local
+  jtapi-jars:
+    driver: local
+  minio-data:
     driver: local

@@ -126,13 +126,13 @@ jobs:
             fi
           done
 
-      - name: Copy JTAPI overlay
+      - name: Copy JTAPI overlay (backwards compat)
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           BUNDLE_DIR="${BUNDLE_NAME}-${VERSION}"
           MANIFEST="ova/bundle-manifest.yml"
 
-          echo "--- JTAPI ---"
+          echo "--- JTAPI (legacy overlay — kept for backwards compat) ---"
           for file in $(yq '.jtapi[]' "$MANIFEST" 2>/dev/null); do
             if [ -f "$file" ]; then
               cp "$file" "$BUNDLE_DIR/"
@@ -142,31 +142,20 @@ jobs:
             fi
           done
 
-      - name: Pin JTAPI overlay versions from version YAML
+      - name: Copy .env.example
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           BUNDLE_DIR="${BUNDLE_NAME}-${VERSION}"
-          OVERLAY="$BUNDLE_DIR/docker-compose-jtapi.yml"
 
-          # Only pin if the overlay was copied into the bundle
-          if [ ! -f "$OVERLAY" ]; then
-            echo "ℹ️  No JTAPI overlay in bundle, skipping version pinning"
-            exit 0
-          fi
-
-          # Extract JTAPI/ct-media versions from the version YAML if they exist
-          # This handles the case where create-ova-release already pinned them
-          # and the overlay was committed with pinned versions
-          if grep -q 'JTAPI_VERSION:-latest' "$OVERLAY"; then
-            echo "⚠️  JTAPI overlay still has :latest defaults — versions not pinned"
-            echo "   Pin versions by providing jtapi_version and ct_media_version"
-            echo "   when running the Create OVA Release workflow"
+          echo "--- Environment Template ---"
+          if [ -f ".env.example" ]; then
+            cp ".env.example" "$BUNDLE_DIR/.env.example"
+            echo "✅ .env.example"
           else
-            echo "✅ JTAPI overlay has pinned versions:"
-            grep 'image:' "$OVERLAY"
+            echo "⚠️  .env.example not found"
           fi
 
-      - name: Verify version-specific compose exists
+      - name: Verify version-specific files exist
         run: |
           VERSION="${{ steps.version.outputs.version }}"
 
@@ -190,17 +179,32 @@ jobs:
             exit 1
           fi
 
-      - name: Copy docker-compose for version
+          # Check for version .env (new approach)
+          if [ -f "ova/versions/${VERSION}.env" ]; then
+            echo "✅ Found: ova/versions/${VERSION}.env"
+          else
+            echo "⚠️  No version .env found (ova/versions/${VERSION}.env)"
+            echo "   Older releases may not have a .env file — this is OK"
+          fi
+
+      - name: Copy docker-compose and .env for version
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           BUNDLE_DIR="${BUNDLE_NAME}-${VERSION}"
 
+          # Copy version-specific compose file (legacy approach, still needed)
           if [ -f "ova/versions/${VERSION}.yml" ]; then
             cp "ova/versions/${VERSION}.yml" "$BUNDLE_DIR/docker-compose.yml"
             echo "✅ Copied: ova/versions/${VERSION}.yml"
           else
             cp "ova/versions/${VERSION}.yaml" "$BUNDLE_DIR/docker-compose.yml"
             echo "✅ Copied: ova/versions/${VERSION}.yaml"
+          fi
+
+          # Copy version-pinned .env if available (new approach)
+          if [ -f "ova/versions/${VERSION}.env" ]; then
+            cp "ova/versions/${VERSION}.env" "$BUNDLE_DIR/.env"
+            echo "✅ Copied: ova/versions/${VERSION}.env -> .env"
           fi
 
           echo ""

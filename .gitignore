@@ -6,3 +6,5 @@ devspace.yaml
 CLAUDE.md
 .tool-versions
 logs/
+.env
+.jtapi-enabled
