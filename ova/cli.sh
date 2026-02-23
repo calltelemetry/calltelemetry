@@ -1615,23 +1615,9 @@ update() {
 
   # Config files (nats.conf, Caddyfile, prometheus, grafana) already extracted by download_bundle()
   if [ -f "$TEMP_FILE" ]; then
-    # --- PostgreSQL version guard ---
-    # Detect current PG image from the EXISTING docker-compose.yml before replacing it.
-    # If customer is on PG < 17 and has no override, auto-pin their version
-    # to prevent PG 17 from trying to read PG 14 data format.
-    if [ -f "$ORIGINAL_FILE" ]; then
-      current_pg_image=$(grep -A1 "^  db:" "$ORIGINAL_FILE" | grep "image:" | sed 's/.*image: *"\?\([^"]*\)"\?.*/\1/' | head -1)
-      current_pg_ver=$(echo "$current_pg_image" | grep -o '[0-9]\+$')
-
-      if [ -n "$current_pg_ver" ] && [ "$current_pg_ver" != "17" ] && [ ! -f "$POSTGRES_OVERRIDE_FILE" ]; then
-        echo ""
-        echo "PostgreSQL version guard: Your database is on PostgreSQL $current_pg_ver"
-        echo "  New default is PostgreSQL 17. Auto-pinning to PostgreSQL $current_pg_ver for safety."
-        echo "  To upgrade later: cli.sh postgres upgrade 17"
-        echo ""
-        set_postgres_version "$current_pg_ver"
-      fi
-    fi
+    # NOTE: PostgreSQL version guard removed — no longer auto-downloads
+    # docker-compose.override.yml during upgrades. Users who need a specific
+    # PG version can run: cli.sh postgres set <version>
 
     mv "$TEMP_FILE" "$ORIGINAL_FILE"
     echo "New docker-compose.yml moved to production."
