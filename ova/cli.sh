@@ -847,8 +847,14 @@ cli_update() {
 # Resolves ${VAR:-default} patterns using values from .env
 extract_images() {
   local compose_file="$1"
-  local env_file="${compose_file%/*}/.env"
-  [ "$env_file" = ".env" ] && env_file="./.env"
+  # Resolve .env path from compose file directory (handle bare filenames without /)
+  local compose_dir
+  if echo "$compose_file" | grep -q '/'; then
+    compose_dir="${compose_file%/*}"
+  else
+    compose_dir="."
+  fi
+  local env_file="${compose_dir}/.env"
 
   # Source .env to get version variables (if it exists)
   local env_vars=""

@@ -21,7 +21,7 @@ services:
       start_period: 30s
 
   vue-web:
-    image: "calltelemetry/vue:${VUE_VERSION:-0.8.6-rc1}"
+    image: "calltelemetry/vue:${VUE_VERSION:-0.8.6-rc47}"
     restart: "always"
     expose:
       - "80"
@@ -75,7 +75,7 @@ services:
       start_period: 30s
 
   web:
-    image: "calltelemetry/web:${WEB_VERSION:-0.8.6-rc1}"
+    image: "calltelemetry/web:${WEB_VERSION:-0.8.6-rc47}"
     restart: "always"
     user: root
     expose:
