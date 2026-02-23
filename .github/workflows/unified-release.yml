@@ -129,7 +129,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
         run: |
           echo "Triggering jtapi-sidecar Docker build: ${{ inputs.version }}"
-          gh workflow run build.yml \
+          gh workflow run docker-release.yml \
             --repo calltelemetry/jtapi-sidecar \
             -f tag_name="${{ inputs.version }}"
 
@@ -157,7 +157,7 @@ jobs:
           # Poll each repo for the most recent workflow run matching our version
           REPOS=("calltelemetry/cisco-cdr:docker-backend-release.yaml" \
                  "calltelemetry/ct-quasar:publish_docker.yaml" \
-                 "calltelemetry/jtapi-sidecar:build.yml" \
+                 "calltelemetry/jtapi-sidecar:docker-release.yml" \
                  "calltelemetry/ct-media:docker-release.yml")
 
           MAX_WAIT=2400  # 40 minutes
