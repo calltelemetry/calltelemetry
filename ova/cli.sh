@@ -844,9 +844,33 @@ cli_update() {
 }
 
 # Function to extract image tags from a docker-compose file
+# Resolves ${VAR:-default} patterns using values from .env
 extract_images() {
   local compose_file="$1"
-  grep -E "image.*calltelemetry" "$compose_file" | sed 's/.*image: *"//' | sed 's/".*//' | grep -v "^$"
+  local env_file="${compose_file%/*}/.env"
+  [ "$env_file" = ".env" ] && env_file="./.env"
+
+  # Source .env to get version variables (if it exists)
+  local env_vars=""
+  if [ -f "$env_file" ]; then
+    env_vars=$(grep -E '^[A-Z_]+=.' "$env_file" | grep -v '^#')
+  fi
+
+  # Extract raw image lines and resolve env vars
+  grep -E "image.*calltelemetry" "$compose_file" | sed 's/.*image: *"//' | sed 's/".*//' | grep -v "^$" | while read -r img; do
+    # Resolve ${VAR:-default} patterns
+    resolved="$img"
+    while echo "$resolved" | grep -qE '\$\{[A-Z_]+:-[^}]*\}'; do
+      var_expr=$(echo "$resolved" | grep -oE '\$\{[A-Z_]+:-[^}]*\}' | head -1)
+      var_name=$(echo "$var_expr" | sed 's/\${//;s/:-.*//')
+      var_default=$(echo "$var_expr" | sed 's/.*:-//;s/}//')
+      # Look up in .env first, fall back to default
+      var_value=$(echo "$env_vars" | grep "^${var_name}=" | head -1 | cut -d= -f2-)
+      [ -z "$var_value" ] && var_value="$var_default"
+      resolved=$(echo "$resolved" | sed "s|\${${var_name}:-[^}]*}|${var_value}|")
+    done
+    echo "$resolved"
+  done
 }
 
 # Function to check if Docker images are available
