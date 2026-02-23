@@ -1,7 +1,7 @@
 name: Unified Release
 
 # Single workflow dispatch that stamps ONE version across all repos,
-# triggers Docker builds via workflow_call, waits for completion,
+# triggers Docker builds via workflow_dispatch, polls for completion,
 # then packages the OVA bundle for GCS deployment.
 
 on:
@@ -83,39 +83,133 @@ jobs:
           echo "| jtapi-sidecar | ${{ inputs.version }} | ${{ inputs.target_branch }} |" >> $GITHUB_STEP_SUMMARY
 
   # ─────────────────────────────────────────────────────────────────
-  # Jobs 2a/2b/2c: Build Docker images via workflow_call (parallel)
-  # Parent waits via needs: — no polling needed
+  # Job 2: Trigger Docker builds and wait for completion
+  # Uses workflow_dispatch + polling (private repos can't use workflow_call)
   # ─────────────────────────────────────────────────────────────────
-  build-web:
+  build-images:
     needs: create-releases
     if: ${{ !inputs.skip_docker_builds && always() && (needs.create-releases.result == 'success' || needs.create-releases.result == 'skipped') }}
-    uses: calltelemetry/cisco-cdr/.github/workflows/docker-backend-release.yaml@0.8.6-release
-    with:
-      tag_name: ${{ inputs.version }}
-    secrets: inherit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger cisco-cdr Docker build
+        env:
+          GH_TOKEN: ${{ secrets.CT_RELEASE_TOKEN }}
+        run: |
+          echo "Triggering cisco-cdr Docker build: ${{ inputs.version }}"
+          gh workflow run docker-backend-release.yaml \
+            --repo calltelemetry/cisco-cdr \
+            -f tag_name="${{ inputs.version }}"
 
-  build-vue:
-    needs: create-releases
-    if: ${{ !inputs.skip_docker_builds && always() && (needs.create-releases.result == 'success' || needs.create-releases.result == 'skipped') }}
-    uses: calltelemetry/ct-quasar/.github/workflows/publish_docker.yaml@0.8.6-release
-    with:
-      tag_name: ${{ inputs.version }}
-    secrets: inherit
+      - name: Trigger ct-quasar Docker build
+        env:
+          GH_TOKEN: ${{ secrets.CT_RELEASE_TOKEN }}
+        run: |
+          echo "Triggering ct-quasar Docker build: ${{ inputs.version }}"
+          gh workflow run publish_docker.yaml \
+            --repo calltelemetry/ct-quasar \
+            -f tag_name="${{ inputs.version }}"
 
-  build-jtapi:
-    needs: create-releases
-    if: ${{ !inputs.skip_docker_builds && always() && (needs.create-releases.result == 'success' || needs.create-releases.result == 'skipped') }}
-    uses: calltelemetry/jtapi-sidecar/.github/workflows/build.yml@0.8.6-release
-    with:
-      tag_name: ${{ inputs.version }}
-    secrets: inherit
+      - name: Trigger jtapi-sidecar Docker build
+        env:
+          GH_TOKEN: ${{ secrets.CT_RELEASE_TOKEN }}
+        run: |
+          echo "Triggering jtapi-sidecar Docker build: ${{ inputs.version }}"
+          gh workflow run build.yml \
+            --repo calltelemetry/jtapi-sidecar \
+            -f tag_name="${{ inputs.version }}"
+
+      - name: Wait for builds to complete
+        env:
+          GH_TOKEN: ${{ secrets.CT_RELEASE_TOKEN }}
+        run: |
+          echo "Waiting for Docker builds to complete..."
+          echo "Builds triggered at $(date -u '+%H:%M:%S UTC')"
+          echo ""
+
+          # Give workflows time to start
+          sleep 30
+
+          # Poll each repo for the most recent workflow run matching our version
+          REPOS=("calltelemetry/cisco-cdr:docker-backend-release.yaml" \
+                 "calltelemetry/ct-quasar:publish_docker.yaml" \
+                 "calltelemetry/jtapi-sidecar:build.yml")
+
+          MAX_WAIT=2400  # 40 minutes
+          POLL_INTERVAL=30
+          ELAPSED=0
+          ALL_DONE=false
+
+          while [ "$ALL_DONE" != "true" ] && [ $ELAPSED -lt $MAX_WAIT ]; do
+            ALL_DONE=true
+            for entry in "${REPOS[@]}"; do
+              REPO="${entry%%:*}"
+              WORKFLOW="${entry##*:}"
+              SHORT_NAME="${REPO##*/}"
+
+              # Get most recent run for this workflow
+              STATUS=$(gh run list --repo "$REPO" --workflow "$WORKFLOW" \
+                --limit 1 --json status,conclusion,headBranch \
+                --jq '.[0] | "\(.status):\(.conclusion // "pending")"' 2>/dev/null || echo "unknown:unknown")
+
+              RUN_STATUS="${STATUS%%:*}"
+              RUN_CONCLUSION="${STATUS##*:}"
+
+              if [ "$RUN_STATUS" = "completed" ]; then
+                if [ "$RUN_CONCLUSION" = "success" ]; then
+                  echo "  $SHORT_NAME: completed (success)"
+                else
+                  echo "  $SHORT_NAME: completed ($RUN_CONCLUSION)"
+                  echo "::error::$SHORT_NAME build failed with conclusion: $RUN_CONCLUSION"
+                fi
+              else
+                echo "  $SHORT_NAME: $RUN_STATUS"
+                ALL_DONE=false
+              fi
+            done
+
+            if [ "$ALL_DONE" != "true" ]; then
+              echo "  --- Waiting ${POLL_INTERVAL}s (${ELAPSED}s / ${MAX_WAIT}s) ---"
+              sleep $POLL_INTERVAL
+              ELAPSED=$((ELAPSED + POLL_INTERVAL))
+            fi
+          done
+
+          echo ""
+          if [ "$ALL_DONE" = "true" ]; then
+            echo "All Docker builds completed."
+          else
+            echo "::warning::Timed out waiting for builds after ${MAX_WAIT}s"
+          fi
+
+      - name: Verify images exist on Docker Hub
+        run: |
+          VERSION="${{ inputs.version }}"
+          echo "Verifying Docker Hub images for $VERSION..."
+
+          IMAGES=("calltelemetry/web:$VERSION" \
+                  "calltelemetry/vue:$VERSION" \
+                  "calltelemetry/jtapi-sidecar:$VERSION")
+
+          ALL_FOUND=true
+          for IMAGE in "${IMAGES[@]}"; do
+            if docker manifest inspect "$IMAGE" > /dev/null 2>&1; then
+              echo "  $IMAGE: found"
+            else
+              echo "  $IMAGE: NOT FOUND"
+              ALL_FOUND=false
+            fi
+          done
+
+          if [ "$ALL_FOUND" != "true" ]; then
+            echo "::warning::Some images not found on Docker Hub — OVA release may use stale images"
+          fi
 
   # ─────────────────────────────────────────────────────────────────
   # Job 3: Trigger OVA release (creates version yaml + GCS bundle)
   # ─────────────────────────────────────────────────────────────────
   create-ova-release:
-    needs: [build-web, build-vue, build-jtapi]
-    if: ${{ always() && (needs.build-web.result == 'success' || needs.build-web.result == 'skipped') && (needs.build-vue.result == 'success' || needs.build-vue.result == 'skipped') && (needs.build-jtapi.result == 'success' || needs.build-jtapi.result == 'skipped') }}
+    needs: [build-images]
+    if: ${{ always() && (needs.build-images.result == 'success' || needs.build-images.result == 'skipped') }}
     runs-on: ubuntu-latest
     steps:
       - name: Resolve ct-media version
