@@ -192,19 +192,33 @@ jobs:
           VERSION="${{ steps.version.outputs.version }}"
           BUNDLE_DIR="${BUNDLE_NAME}-${VERSION}"
 
-          # Copy version-specific compose file (legacy approach, still needed)
-          if [ -f "ova/versions/${VERSION}.yml" ]; then
-            cp "ova/versions/${VERSION}.yml" "$BUNDLE_DIR/docker-compose.yml"
-            echo "✅ Copied: ova/versions/${VERSION}.yml"
+          # Primary: copy the REAL docker-compose.yml from repo root
+          # This is the single source of truth — versions come from .env
+          if [ -f "docker-compose.yml" ]; then
+            cp "docker-compose.yml" "$BUNDLE_DIR/docker-compose.yml"
+            echo "✅ Copied: docker-compose.yml (repo root — primary)"
           else
-            cp "ova/versions/${VERSION}.yaml" "$BUNDLE_DIR/docker-compose.yml"
-            echo "✅ Copied: ova/versions/${VERSION}.yaml"
+            echo "❌ ERROR: docker-compose.yml not found at repo root"
+            exit 1
           fi
 
-          # Copy version-pinned .env if available (new approach)
+          # Copy version-pinned .env (sets image tags for this release)
           if [ -f "ova/versions/${VERSION}.env" ]; then
             cp "ova/versions/${VERSION}.env" "$BUNDLE_DIR/.env"
             echo "✅ Copied: ova/versions/${VERSION}.env -> .env"
+          else
+            echo "❌ ERROR: No version .env found (ova/versions/${VERSION}.env)"
+            echo "   The .env file is required — it pins image versions for this release."
+            exit 1
+          fi
+
+          # Legacy: keep version-specific YAML for older cli.sh (backwards compat)
+          if [ -f "ova/versions/${VERSION}.yaml" ]; then
+            cp "ova/versions/${VERSION}.yaml" "$BUNDLE_DIR/docker-compose-legacy.yml"
+            echo "✅ Copied: ova/versions/${VERSION}.yaml -> docker-compose-legacy.yml (backwards compat)"
+          elif [ -f "ova/versions/${VERSION}.yml" ]; then
+            cp "ova/versions/${VERSION}.yml" "$BUNDLE_DIR/docker-compose-legacy.yml"
+            echo "✅ Copied: ova/versions/${VERSION}.yml -> docker-compose-legacy.yml (backwards compat)"
           fi
 
           echo ""
