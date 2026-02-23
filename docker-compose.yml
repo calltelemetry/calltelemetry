@@ -54,9 +54,9 @@ services:
     restart: "always"
     shm_size: "8gb"
     environment:
-      - POSTGRES_USER=calltelemetry
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=calltelemetry_prod
+      - POSTGRES_USER=${POSTGRES_USER:-calltelemetry}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_DB=${POSTGRES_DB:-calltelemetry_prod}
       - PGDATA=/bitnami/postgresql/data
     command: >
       postgres
@@ -68,7 +68,7 @@ services:
     networks:
       - ct
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U calltelemetry -d calltelemetry_prod"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-calltelemetry} -d $${POSTGRES_DB:-calltelemetry_prod}"]
       interval: 30s
       timeout: 5s
       retries: 5
@@ -84,10 +84,10 @@ services:
     ports:
       - "22:3022"
     environment:
-      - DB_USER=calltelemetry
-      - DB_PASSWORD=postgres
+      - DB_USER=${POSTGRES_USER:-calltelemetry}
+      - DB_PASSWORD=${POSTGRES_PASSWORD:-postgres}
       - DB_HOSTNAME=db
-      - DB_NAME=calltelemetry_prod
+      - DB_NAME=${POSTGRES_DB:-calltelemetry_prod}
       - DB_PORT=5432
       - EXTERNAL_IP=${DEFAULT_IPV4:-127.0.0.1}
       - LOGGING_LEVEL=warning
@@ -102,7 +102,7 @@ services:
       - ERL_CRASH_DUMP_NICE=1
       - PROM_EX_UPLOAD_DASHBOARDS=${PROM_EX_UPLOAD_DASHBOARDS:-false}
       - GRAFANA_HOST=${GRAFANA_HOST_INTERNAL:-http://grafana:3000/grafana}
-      - GRAFANA_TOKEN=${GRAFANA_TOKEN:-secret-token}
+      - GRAFANA_TOKEN=${GRAFANA_TOKEN:-}
       # JTAPI / phone control (populated by ct-cli or cli.sh when JTAPI is enabled)
       - JTAPI_MODE=${JTAPI_MODE:-disabled}
       - JTAPI_SIDECAR_ENDPOINT=${JTAPI_SIDECAR_ENDPOINT:-}
@@ -115,6 +115,9 @@ services:
       - CT_MEDIA_ENDPOINT=${CT_MEDIA_ENDPOINT:-}
       - DOCKER_SOCKET=/var/run/docker.sock
       - NATS_URL=nats://nats:4222
+      # OpenTelemetry (enable with COMPOSE_PROFILES=otel and OTEL_ENABLED=true in .env)
+      - OTEL_ENABLED=${OTEL_ENABLED:-false}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}
     tmpfs:
       - /var/log:rw,mode=0555,size=5000m
     networks:
@@ -157,7 +160,6 @@ services:
       - "9090:9090"
     command:
       - --config.file=/etc/prometheus/prometheus.yml
-      # Retain a modest retention window to cap disk usage.
       - --storage.tsdb.path=/prometheus
       - --storage.tsdb.retention.time=15d
       - --web.console.libraries=/usr/share/prometheus/console_libraries
@@ -189,6 +191,24 @@ services:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana-data:/var/lib/grafana
+    networks:
+      - ct
+
+  # ─────────────────────────────────────────────────────────────────
+  # OpenTelemetry Collector (activate with COMPOSE_PROFILES=otel)
+  # Receives OTLP from web + sidecar, exports metrics to Prometheus.
+  # ─────────────────────────────────────────────────────────────────
+
+  otel-collector:
+    profiles: ["otel"]
+    image: otel/opentelemetry-collector-contrib:0.96.0
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./otel-collector/otel-collector-config.yaml:/etc/otelcol/config.yaml:ro
+    expose:
+      - "4317"   # OTLP gRPC
+      - "4318"   # OTLP HTTP
+      - "8889"   # Prometheus metrics
     networks:
       - ct
 
@@ -258,8 +278,9 @@ services:
       - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
       # JAR auto-restart when downloaded from NATS ObjectStore
       - WATCH_JARS=true
-      # Disable OpenTelemetry SDK by default (no collector in Docker Compose)
-      - OTEL_SDK_DISABLED=true
+      # OpenTelemetry (set OTEL_SDK_DISABLED=false + COMPOSE_PROFILES=otel to enable)
+      - OTEL_SDK_DISABLED=${OTEL_SDK_DISABLED:-true}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
     volumes:
       - jtapi-jars:/app/jars
     depends_on:
