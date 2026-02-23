@@ -89,7 +89,7 @@ services:
       - DB_HOSTNAME=db
       - DB_NAME=calltelemetry_prod
       - DB_PORT=5432
-      - EXTERNAL_IP=$DEFAULT_IPV4
+      - EXTERNAL_IP=${DEFAULT_IPV4:-127.0.0.1}
       - LOGGING_LEVEL=warning
       - ADMIN_NODE=TRUE
       - WORKER_NODE=TRUE
@@ -104,7 +104,7 @@ services:
       - GRAFANA_HOST=${GRAFANA_HOST_INTERNAL:-http://grafana:3000/grafana}
       - GRAFANA_TOKEN=${GRAFANA_TOKEN:-secret-token}
       # JTAPI / phone control (populated by ct-cli or cli.sh when JTAPI is enabled)
-      - JTAPI_MODE=${JTAPI_MODE:-}
+      - JTAPI_MODE=${JTAPI_MODE:-disabled}
       - JTAPI_SIDECAR_ENDPOINT=${JTAPI_SIDECAR_ENDPOINT:-}
       - JTAPI_SIDECAR_URL=${JTAPI_SIDECAR_URL:-}
       - S3_ENABLED=${S3_ENABLED:-false}
