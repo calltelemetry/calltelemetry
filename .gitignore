@@ -8,3 +8,6 @@ CLAUDE.md
 logs/
 .env
 .jtapi-enabled
+crash-dumps/
+org-data/
+certs/
