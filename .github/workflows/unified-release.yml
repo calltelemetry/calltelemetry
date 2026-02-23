@@ -39,7 +39,7 @@ jobs:
     steps:
       - name: Create cisco-cdr release
         env:
-          GH_TOKEN: ${{ secrets.CT_RELEASE_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
         run: |
           echo "Creating cisco-cdr release: ${{ inputs.version }}"
           gh release create "${{ inputs.version }}" \
@@ -51,7 +51,7 @@ jobs:
 
       - name: Create ct-quasar release
         env:
-          GH_TOKEN: ${{ secrets.CT_RELEASE_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
         run: |
           echo "Creating ct-quasar release: ${{ inputs.version }}"
           gh release create "${{ inputs.version }}" \
@@ -63,7 +63,7 @@ jobs:
 
       - name: Create jtapi-sidecar release
         env:
-          GH_TOKEN: ${{ secrets.CT_RELEASE_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
         run: |
           echo "Creating jtapi-sidecar release: ${{ inputs.version }}"
           gh release create "${{ inputs.version }}" \
@@ -93,7 +93,7 @@ jobs:
     steps:
       - name: Trigger cisco-cdr Docker build
         env:
-          GH_TOKEN: ${{ secrets.CT_RELEASE_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
         run: |
           echo "Triggering cisco-cdr Docker build: ${{ inputs.version }}"
           gh workflow run docker-backend-release.yaml \
@@ -102,7 +102,7 @@ jobs:
 
       - name: Trigger ct-quasar Docker build
         env:
-          GH_TOKEN: ${{ secrets.CT_RELEASE_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
         run: |
           echo "Triggering ct-quasar Docker build: ${{ inputs.version }}"
           gh workflow run publish_docker.yaml \
@@ -111,7 +111,7 @@ jobs:
 
       - name: Trigger jtapi-sidecar Docker build
         env:
-          GH_TOKEN: ${{ secrets.CT_RELEASE_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
         run: |
           echo "Triggering jtapi-sidecar Docker build: ${{ inputs.version }}"
           gh workflow run build.yml \
@@ -120,7 +120,7 @@ jobs:
 
       - name: Wait for builds to complete
         env:
-          GH_TOKEN: ${{ secrets.CT_RELEASE_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
         run: |
           echo "Waiting for Docker builds to complete..."
           echo "Builds triggered at $(date -u '+%H:%M:%S UTC')"
@@ -223,7 +223,7 @@ jobs:
 
       - name: Trigger OVA release
         env:
-          GH_TOKEN: ${{ secrets.CT_RELEASE_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
         run: |
           echo "Triggering OVA release: ${{ inputs.version }}"
           echo "  jtapi_version: ${{ inputs.version }}"
