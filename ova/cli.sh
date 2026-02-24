@@ -129,7 +129,6 @@ get_current_postgres_image() {
 }
 
 # JTAPI feature state — now driven by COMPOSE_PROFILES in .env
-JTAPI_OVERLAY_FILE="docker-compose-jtapi.yml"
 JTAPI_STATE_FILE=".jtapi-enabled"
 ENV_FILE="${INSTALL_DIR}/.env"
 
@@ -994,16 +993,6 @@ download_bundle() {
   if [ -f "$extract_dir/.env.example" ]; then
     cp "$extract_dir/.env.example" ./.env.example
     echo "  ✅ .env.example"
-  fi
-
-  # docker-compose-jtapi.yml -> legacy overlay (kept for backwards compat)
-  if [ -f "$extract_dir/docker-compose-jtapi.yml" ]; then
-    rm -f ./docker-compose-jtapi.yml 2>/dev/null
-    if cp "$extract_dir/docker-compose-jtapi.yml" ./docker-compose-jtapi.yml; then
-      echo "  ✅ docker-compose-jtapi.yml (legacy overlay)"
-    else
-      echo "  ⚠️  docker-compose-jtapi.yml (failed to copy — check permissions)"
-    fi
   fi
 
   # cli.sh -> update current script
@@ -3851,15 +3840,6 @@ case "$1" in
 
       local images=$(grep -E '^\s*image:' docker-compose.yml | sed 's/.*image:[[:space:]]*["'\'']*\([^"'\'']*\)["'\'']*[[:space:]]*$/\1/' | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//' | sort -u)
 
-      # Include JTAPI images if overlay exists in bundle
-      if [ -f "docker-compose-jtapi.yml" ]; then
-        local jtapi_images=$(grep -E '^\s*image:' docker-compose-jtapi.yml | sed 's/.*image:[[:space:]]*["'\'']*\([^"'\'']*\)["'\'']*[[:space:]]*$/\1/' | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//' | sort -u)
-        if [ -n "$jtapi_images" ]; then
-          images=$(printf '%s\n%s' "$images" "$jtapi_images" | sort -u)
-          echo "  (Including JTAPI images from overlay)"
-        fi
-      fi
-
       echo "Images to download:"
       echo "$images" | while read img; do [ -n "$img" ] && echo "  - $img"; done
       echo ""
@@ -3969,7 +3949,6 @@ case "$1" in
       [ -f "$inner_dir/Caddyfile" ] && cp "$inner_dir/Caddyfile" ./Caddyfile && echo "  - Caddyfile"
       [ -f "$inner_dir/cli.sh" ] && cp "$inner_dir/cli.sh" ./cli.sh && chmod +x ./cli.sh && echo "  - cli.sh"
       [ -f "$inner_dir/nats.conf" ] && cp "$inner_dir/nats.conf" ./nats.conf && echo "  - nats.conf"
-      [ -f "$inner_dir/docker-compose-jtapi.yml" ] && cp "$inner_dir/docker-compose-jtapi.yml" ./docker-compose-jtapi.yml && echo "  - docker-compose-jtapi.yml (JTAPI overlay)"
 
       # Install prometheus config if present
       if [ -f "$inner_dir/prometheus/prometheus.yml" ]; then
@@ -4014,15 +3993,6 @@ case "$1" in
       fi
 
       local images=$(grep -E '^\s*image:' docker-compose.yml | sed 's/.*image:[[:space:]]*["'\'']*\([^"'\'']*\)["'\'']*[[:space:]]*$/\1/' | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
-
-      # Include JTAPI overlay images if present
-      if [ -f "docker-compose-jtapi.yml" ]; then
-        local jtapi_images=$(grep -E '^\s*image:' docker-compose-jtapi.yml | sed 's/.*image:[[:space:]]*["'\'']*\([^"'\'']*\)["'\'']*[[:space:]]*$/\1/' | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
-        if [ -n "$jtapi_images" ]; then
-          images=$(printf '%s\n%s' "$images" "$jtapi_images" | sort -u)
-          echo "  (Including JTAPI overlay images)"
-        fi
-      fi
 
       echo ""
       for img in $images; do

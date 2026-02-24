@@ -30,11 +30,6 @@ grafana:
     - versions/grafana/provisioning/datasources/calltelemetry.yml
     - versions/grafana/provisioning/dashboards/calltelemetry.yaml
 
-# JTAPI overlay (deprecated — kept for backwards compat with older cli.sh)
-# JTAPI services now live in the base docker-compose.yml via profiles.
-jtapi:
-  - docker-compose-jtapi.yml
-
 # Environment template (new deployments copy this to .env)
 env:
   - .env.example
