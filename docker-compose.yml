@@ -281,10 +281,13 @@ services:
       # JAR auto-restart when downloaded from NATS ObjectStore
       - WATCH_JARS=true
       # OpenTelemetry (enable via: ct otel enable)
+      - OTEL_ENABLED=${OTEL_ENABLED:-false}
       - OTEL_SDK_DISABLED=${OTEL_SDK_DISABLED:-true}
       - OTEL_TRACES_EXPORTER=${OTEL_TRACES_EXPORTER:-none}
       - OTEL_METRICS_EXPORTER=${OTEL_METRICS_EXPORTER:-none}
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
+      # Disable Spring Boot tracing autoconfiguration when OTel is off
+      - MANAGEMENT_TRACING_ENABLED=${OTEL_ENABLED:-false}
     volumes:
       - jtapi-jars:/app/jars
     depends_on:

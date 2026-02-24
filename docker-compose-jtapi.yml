@@ -118,10 +118,12 @@ services:
       - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
       # JAR auto-restart when downloaded from NATS ObjectStore
       - WATCH_JARS=true
-      # Disable OpenTelemetry SDK by default (no collector in Docker Compose)
+      # Disable OpenTelemetry by default (no collector in Docker Compose)
+      - OTEL_ENABLED=false
       - OTEL_SDK_DISABLED=true
-      # OpenTelemetry (to enable: set OTEL_SDK_DISABLED=false and uncomment below)
-      # - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318/v1/traces
+      - MANAGEMENT_TRACING_ENABLED=false
+      # OpenTelemetry (to enable: set OTEL_ENABLED=true, OTEL_SDK_DISABLED=false, MANAGEMENT_TRACING_ENABLED=true)
+      # - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       # - OTEL_TRACING_SAMPLING_PROBABILITY=1.0
     volumes:
       - jtapi-jars:/app/jars

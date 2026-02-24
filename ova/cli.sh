@@ -253,7 +253,11 @@ jtapi_cmd() {
       fix_systemd_compose_files
       echo "✅ JTAPI enabled — restarting services..."
       echo ""
-      systemctl restart docker-compose-app.service
+      if ! restart_service "jtapi enable"; then
+        echo "❌ Service restart failed. JTAPI config was saved but services may not be running."
+        echo "   Retry with: systemctl restart docker-compose-app.service"
+        return 1
+      fi
       # Force recreate web to pick up new env vars
       sleep 3
       $DOCKER_COMPOSE_CMD $(get_compose_files) up -d --force-recreate web 2>/dev/null
@@ -283,8 +287,12 @@ jtapi_cmd() {
       rm -f "$JTAPI_STATE_FILE"
       fix_systemd_compose_files
       echo "✅ JTAPI disabled — restarting services..."
-      systemctl restart docker-compose-app.service
-      echo "Services restarted. JTAPI services removed."
+      if ! restart_service "jtapi disable"; then
+        echo "❌ Service restart failed. JTAPI config was saved but services may not be running."
+        echo "   Retry with: systemctl restart docker-compose-app.service"
+        return 1
+      fi
+      echo "JTAPI services removed."
       ;;
     status)
       if is_jtapi_enabled; then
@@ -719,6 +727,58 @@ fix_systemd_service_if_needed() {
   if [ "$needs_reload" = true ]; then
     sudo systemctl daemon-reload
   fi
+}
+
+# Restart the docker-compose systemd service with error handling.
+# Checks exit code, logs diagnostics on failure, retries once.
+# Returns 0 on success, 1 on failure.
+restart_service() {
+  local context="${1:-}" # optional caller context for log messages
+  local service="docker-compose-app.service"
+
+  echo "Restarting Docker Compose service..."
+
+  if systemctl restart "$service" 2>/dev/null; then
+    echo "Docker Compose service restarted."
+    return 0
+  fi
+
+  # First attempt failed — capture diagnostics
+  local exit_code=$?
+  echo "⚠️  Service restart failed (exit code: $exit_code). Gathering diagnostics..."
+  echo ""
+
+  # Show recent journal entries for context
+  echo "--- systemd journal (last 15 lines) ---"
+  journalctl -u "$service" --no-pager -n 15 2>/dev/null || true
+  echo "--- end journal ---"
+  echo ""
+
+  # Check if the service file itself is valid
+  if ! systemctl cat "$service" >/dev/null 2>&1; then
+    echo "❌ Service unit file is invalid or missing."
+    echo "   Check: /etc/systemd/system/$service"
+    return 1
+  fi
+
+  # Reload daemon in case unit file was modified
+  echo "Reloading systemd daemon and retrying..."
+  systemctl daemon-reload 2>/dev/null
+
+  if systemctl restart "$service" 2>/dev/null; then
+    echo "✅ Service restarted on retry."
+    return 0
+  fi
+
+  # Second attempt also failed
+  echo ""
+  echo "❌ Service restart failed after retry."
+  echo "   Status: $(systemctl is-active "$service" 2>/dev/null || echo 'unknown')"
+  echo "   Debug:  journalctl -u $service --no-pager -n 50"
+  if [ -n "$context" ]; then
+    echo "   Context: $context"
+  fi
+  return 1
 }
 
 # Function to display help
@@ -1307,9 +1367,10 @@ ipv6_toggle() {
       configure_ipv6 "$ORIGINAL_FILE" true
       echo ""
       fix_systemd_service_if_needed
-      echo "Restarting Docker Compose service..."
-      systemctl restart docker-compose-app.service
-      echo "Docker Compose service restarted."
+      if ! restart_service "ipv6 enable"; then
+        echo "❌ Service restart failed after IPv6 enable."
+        return 1
+      fi
       echo ""
       wait_for_services
       ;;
@@ -1318,9 +1379,10 @@ ipv6_toggle() {
       configure_ipv6 "$ORIGINAL_FILE" false
       echo ""
       fix_systemd_service_if_needed
-      echo "Restarting Docker Compose service..."
-      systemctl restart docker-compose-app.service
-      echo "Docker Compose service restarted."
+      if ! restart_service "ipv6 disable"; then
+        echo "❌ Service restart failed after IPv6 disable."
+        return 1
+      fi
       echo ""
       wait_for_services
       ;;
@@ -1639,9 +1701,16 @@ update() {
 
     fix_systemd_service_if_needed
     fix_systemd_compose_files
-    echo "Restarting Docker Compose service..."
-    systemctl restart docker-compose-app.service
-    echo "Docker Compose service restarted."
+    if ! restart_service "upgrade"; then
+      echo ""
+      echo "❌ Update FAILED — Docker Compose service could not be restarted."
+      echo "   The new docker-compose.yml is in place but services are not running."
+      echo "   To retry:  systemctl restart docker-compose-app.service"
+      echo "   To revert: cli.sh rollback"
+      rm -f "$caddyfile_tmp"
+      rm -f "${INSTALL_DIR}/.ssh/authorized_keys"
+      return 1
+    fi
 
     if [ "$skip_cleanup" = false ]; then
       echo "Cleaning up unused Docker resources..."
@@ -1663,7 +1732,7 @@ update() {
     if [ $services_ok -eq 0 ]; then
       echo "✅ Update complete! All services are running and ready."
     else
-      echo "⚠️  Update complete, but some services may still be initializing."
+      echo "⚠️  Update complete, but some services may need attention."
       echo "This is normal during major upgrades with SQL index rebuilds."
       echo "Monitor progress with: $DOCKER_COMPOSE_CMD logs -f"
       echo "Check CPU usage with: top (high postgresql CPU is normal during index rebuilds)"
@@ -1685,9 +1754,12 @@ rollback() {
     cp "$BACKUP_FILE" "$ORIGINAL_FILE"
     echo "Rolled back to the previous docker-compose configuration from $BACKUP_FILE."
     fix_systemd_service_if_needed
-    echo "Restarting Docker Compose service..."
-    systemctl restart docker-compose-app.service
-    echo "Docker Compose service restarted."
+    if ! restart_service "rollback"; then
+      echo "❌ Service restart failed after rollback."
+      echo "   The rollback configuration is in place but services may not be running."
+      echo "   Retry with: systemctl restart docker-compose-app.service"
+      return 1
+    fi
   else
     echo "No backup file found to rollback."
   fi
@@ -1748,6 +1820,7 @@ compact_system() {
 
 # Function to wait for services to be ready
 # Flow: 1) Wait for containers 2) Wait for DB 3) Wait for migrations 4) Health check
+# Returns 0 on full success, 1 if any phase failed or timed out
 wait_for_services() {
   local max_wait=600
   local poll_interval=5
@@ -1758,12 +1831,17 @@ wait_for_services() {
     services+=("jtapi-sidecar" "ct-media" "minio")
   fi
 
+  # Track failures across phases
+  local phase_failures=0
+  local failed_phases=""
+
   echo ""
   echo "Starting services..."
   echo ""
 
   # Phase 1: Wait for containers to be running
   echo "Phase 1: Waiting for containers..."
+  local containers_ok=false
   while [ $wait_time -lt 120 ]; do
     local all_running=true
     local status_line=""
@@ -1789,26 +1867,44 @@ wait_for_services() {
     if [ "$all_running" = true ]; then
       echo ""
       echo "  ✓ All containers running"
+      containers_ok=true
       break
     fi
 
     sleep 3
     wait_time=$((wait_time + 3))
   done
+
+  if [ "$containers_ok" != true ]; then
+    echo ""
+    echo "  ❌ Container startup timed out after 120s"
+    echo "  Not running:%s" "$(echo "$status_line" | grep -oE '(✗|⏳)[^ ]+' | tr '\n' ' ')"
+    phase_failures=$((phase_failures + 1))
+    failed_phases="$failed_phases containers"
+  fi
   echo ""
 
   # Phase 2: Wait for database to accept connections
   echo "Phase 2: Waiting for database..."
+  local db_ok=false
   wait_time=0
   while [ $wait_time -lt 120 ]; do
     if $DOCKER_COMPOSE_CMD exec -T db pg_isready -U calltelemetry -d calltelemetry_prod >/dev/null 2>&1; then
       echo "  ✓ Database accepting connections"
+      db_ok=true
       break
     fi
     printf "\r  Database: connecting... (%ds)" "$wait_time"
     sleep 3
     wait_time=$((wait_time + 3))
   done
+
+  if [ "$db_ok" != true ]; then
+    echo ""
+    echo "  ❌ Database connection timed out after 120s"
+    phase_failures=$((phase_failures + 1))
+    failed_phases="$failed_phases database"
+  fi
   echo ""
 
   # Phase 3: Wait for migrations to complete
@@ -1878,8 +1974,10 @@ wait_for_services() {
 
   if [ "$migrations_complete" != true ]; then
     echo ""
-    echo "  ⚠️  Migration status unclear after ${max_wait}s"
+    echo "  ❌ Migration status unclear after ${max_wait}s"
     echo "  Check logs: $DOCKER_COMPOSE_CMD logs -f web"
+    phase_failures=$((phase_failures + 1))
+    failed_phases="$failed_phases migrations"
   fi
   echo ""
 
@@ -1899,7 +1997,9 @@ wait_for_services() {
   if [ "$web_healthy" = true ]; then
     echo "  ✓ Web application healthy"
   else
-    echo "  ⚠️  Web health check pending"
+    echo "  ❌ Web health check failed after 20s"
+    phase_failures=$((phase_failures + 1))
+    failed_phases="$failed_phases health-check"
   fi
 
   # Check for startup issues in logs
@@ -1914,19 +2014,22 @@ wait_for_services() {
   if [[ "$rpc_ok" == *"ok"* ]]; then
     echo "  ✓ Application RPC responding"
   else
-    echo "  ⚠️  Application RPC not ready"
+    echo "  ❌ Application RPC not responding"
+    phase_failures=$((phase_failures + 1))
+    failed_phases="$failed_phases rpc"
   fi
 
   echo ""
   show_system_activity
   echo ""
 
-  if [ "$migrations_complete" = true ] && [ "$web_healthy" = true ]; then
+  if [ $phase_failures -eq 0 ]; then
     echo "✅ Startup complete!"
     return 0
   else
-    echo "⚠️  Startup complete with warnings. Run 'cli.sh app_status' for details."
-    return 0
+    echo "❌ Startup failed — $phase_failures phase(s) had errors:$failed_phases"
+    echo "   Run 'cli.sh status' for details or check logs with: $DOCKER_COMPOSE_CMD logs -f"
+    return 1
   fi
 }
 
@@ -3269,9 +3372,10 @@ logging_toggle() {
       echo "Logging level set to $level"
       echo ""
       fix_systemd_service_if_needed
-      echo "Restarting Docker Compose service..."
-      systemctl restart docker-compose-app.service
-      echo "Docker Compose service restarted."
+      if ! restart_service "logging $level"; then
+        echo "❌ Service restart failed after logging level change."
+        return 1
+      fi
       echo ""
       wait_for_services
       ;;
@@ -4007,7 +4111,12 @@ case "$1" in
       echo "Restarting services..."
       fix_systemd_service_if_needed
       fix_systemd_compose_files
-      systemctl restart docker-compose-app.service
+      if ! restart_service "offline apply"; then
+        echo "❌ Service restart failed after offline bundle apply."
+        echo "   Images are loaded but services may not be running."
+        echo "   Retry with: systemctl restart docker-compose-app.service"
+        return 1
+      fi
 
       echo ""
       echo "=== Offline Bundle Applied ==="
