@@ -107,26 +107,30 @@ jobs:
     if: ${{ !inputs.skip_docker_builds && always() && (needs.create-releases.result == 'success' || needs.create-releases.result == 'skipped') }}
     runs-on: ubuntu-latest
     steps:
-      - name: Capture run IDs from release-triggered builds
+      - name: Capture run IDs from release-triggered builds (with dispatch fallback)
         id: runs
         env:
           GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
         run: |
-          # Release-published events from Job 1 already triggered Docker
-          # builds. Wait for them to register, then capture their run IDs.
+          # Release-published events from Job 1 should trigger Docker builds.
+          # If a release event doesn't propagate (flaky cross-repo webhooks),
+          # fall back to workflow_dispatch to guarantee the build runs.
           echo "Waiting 30s for release-triggered Docker builds to register..."
           sleep 30
 
-          capture_run_id() {
-            local REPO="$1" WORKFLOW="$2" LABEL="$3"
-            local RUN_ID ATTEMPTS=0 MAX_ATTEMPTS=6
+          # Try to find a release-triggered run; if not found, dispatch manually
+          capture_or_dispatch() {
+            local REPO="$1" WORKFLOW="$2" LABEL="$3" TAG="$4"
+            local RUN_ID ATTEMPTS=0 MAX_ATTEMPTS=4
+
+            # Phase 1: Look for release-triggered run
             while [ $ATTEMPTS -lt $MAX_ATTEMPTS ]; do
               RUN_ID=$(gh run list --repo "$REPO" --workflow "$WORKFLOW" \
                 --event release --limit 1 \
                 --json databaseId,displayTitle \
-                --jq '.[] | select(.displayTitle | test("${{ inputs.version }}")) | .databaseId' 2>/dev/null)
+                --jq ".[] | select(.displayTitle | test(\"$TAG\")) | .databaseId" 2>/dev/null)
               if [ -n "$RUN_ID" ] && [ "$RUN_ID" != "null" ]; then
-                echo "  $LABEL: run $RUN_ID"
+                echo "  $LABEL: release-triggered run $RUN_ID"
                 echo "${LABEL}_run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
                 return 0
               fi
@@ -134,14 +138,40 @@ jobs:
               echo "  $LABEL: not found yet, retrying in 10s ($ATTEMPTS/$MAX_ATTEMPTS)"
               sleep 10
             done
-            echo "::error::Failed to find release-triggered run for $LABEL"
+
+            # Phase 2: Release event didn't propagate — dispatch manually
+            echo "  $LABEL: release event not detected, triggering via workflow_dispatch"
+            gh workflow run "$WORKFLOW" --repo "$REPO" -f tag_name="$TAG"
+            sleep 15
+
+            # Phase 3: Capture the dispatched run
+            ATTEMPTS=0
+            while [ $ATTEMPTS -lt $MAX_ATTEMPTS ]; do
+              RUN_ID=$(gh run list --repo "$REPO" --workflow "$WORKFLOW" \
+                --event workflow_dispatch --limit 1 \
+                --json databaseId,displayTitle,createdAt \
+                --jq ".[0].databaseId" 2>/dev/null)
+              if [ -n "$RUN_ID" ] && [ "$RUN_ID" != "null" ]; then
+                echo "  $LABEL: dispatched run $RUN_ID"
+                echo "${LABEL}_run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+                return 0
+              fi
+              ATTEMPTS=$((ATTEMPTS + 1))
+              echo "  $LABEL: dispatch not registered yet, retrying in 10s ($ATTEMPTS/$MAX_ATTEMPTS)"
+              sleep 10
+            done
+
+            echo "::error::Failed to trigger or find Docker build for $LABEL"
             exit 1
           }
 
-          capture_run_id "calltelemetry/cisco-cdr" "docker-backend-release.yaml" "cisco_cdr"
-          capture_run_id "calltelemetry/ct-quasar" "publish_docker.yaml" "ct_quasar"
-          capture_run_id "calltelemetry/jtapi-sidecar" "docker-release.yml" "jtapi_sidecar"
-          capture_run_id "calltelemetry/ct-media" "docker-release.yml" "ct_media"
+          VERSION="${{ inputs.version }}"
+          CT_MEDIA_TAG="${{ inputs.ct_media_version || inputs.version }}"
+
+          capture_or_dispatch "calltelemetry/cisco-cdr" "docker-backend-release.yaml" "cisco_cdr" "$VERSION"
+          capture_or_dispatch "calltelemetry/ct-quasar" "publish_docker.yaml" "ct_quasar" "$VERSION"
+          capture_or_dispatch "calltelemetry/jtapi-sidecar" "docker-release.yml" "jtapi_sidecar" "$VERSION"
+          capture_or_dispatch "calltelemetry/ct-media" "docker-release.yml" "ct_media" "$CT_MEDIA_TAG"
 
           echo ""
           echo "All run IDs captured."
