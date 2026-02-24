@@ -98,69 +98,44 @@ jobs:
           echo "| ct-media | $CT_MEDIA_TAG | ${{ inputs.target_branch }} |" >> $GITHUB_STEP_SUMMARY
 
   # ─────────────────────────────────────────────────────────────────
-  # Job 2: Trigger Docker builds and wait for completion
-  # Uses workflow_dispatch + polling (private repos can't use workflow_call)
+  # Job 2: Wait for Docker builds (triggered by release:published)
+  # The release events from Job 1 already trigger Docker workflows
+  # in each repo. This job just polls until they complete.
   # ─────────────────────────────────────────────────────────────────
   build-images:
     needs: create-releases
     if: ${{ !inputs.skip_docker_builds && always() && (needs.create-releases.result == 'success' || needs.create-releases.result == 'skipped') }}
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger all Docker builds
-        id: trigger
-        env:
-          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
-        run: |
-          VERSION="${{ inputs.version }}"
-          CT_MEDIA_TAG="${{ inputs.ct_media_version || inputs.version }}"
-
-          echo "Triggering Docker builds for version: $VERSION"
-          echo "  ct-media version: $CT_MEDIA_TAG"
-          echo ""
-
-          gh workflow run docker-backend-release.yaml \
-            --repo calltelemetry/cisco-cdr \
-            -f tag_name="$VERSION"
-          echo "  cisco-cdr: triggered"
-
-          gh workflow run publish_docker.yaml \
-            --repo calltelemetry/ct-quasar \
-            -f tag_name="$VERSION"
-          echo "  ct-quasar: triggered"
-
-          gh workflow run docker-release.yml \
-            --repo calltelemetry/jtapi-sidecar \
-            -f tag_name="$VERSION"
-          echo "  jtapi-sidecar: triggered"
-
-          gh workflow run docker-release.yml \
-            --repo calltelemetry/ct-media \
-            -f tag_name="$CT_MEDIA_TAG"
-          echo "  ct-media: triggered"
-
-          echo ""
-          echo "All builds triggered at $(date -u '+%H:%M:%S UTC')"
-
-      - name: Capture run IDs
+      - name: Capture run IDs from release-triggered builds
         id: runs
         env:
           GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
         run: |
-          # Wait for GitHub to register the workflow runs
-          echo "Waiting 15s for workflow runs to register..."
-          sleep 15
+          # Release-published events from Job 1 already triggered Docker
+          # builds. Wait for them to register, then capture their run IDs.
+          echo "Waiting 30s for release-triggered Docker builds to register..."
+          sleep 30
 
           capture_run_id() {
             local REPO="$1" WORKFLOW="$2" LABEL="$3"
-            local RUN_ID
-            RUN_ID=$(gh run list --repo "$REPO" --workflow "$WORKFLOW" \
-              --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null)
-            if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
-              echo "::error::Failed to capture run ID for $LABEL"
-              exit 1
-            fi
-            echo "  $LABEL: run $RUN_ID"
-            echo "${LABEL}_run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+            local RUN_ID ATTEMPTS=0 MAX_ATTEMPTS=6
+            while [ $ATTEMPTS -lt $MAX_ATTEMPTS ]; do
+              RUN_ID=$(gh run list --repo "$REPO" --workflow "$WORKFLOW" \
+                --event release --limit 1 \
+                --json databaseId,displayTitle \
+                --jq '.[] | select(.displayTitle | test("${{ inputs.version }}")) | .databaseId' 2>/dev/null)
+              if [ -n "$RUN_ID" ] && [ "$RUN_ID" != "null" ]; then
+                echo "  $LABEL: run $RUN_ID"
+                echo "${LABEL}_run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+                return 0
+              fi
+              ATTEMPTS=$((ATTEMPTS + 1))
+              echo "  $LABEL: not found yet, retrying in 10s ($ATTEMPTS/$MAX_ATTEMPTS)"
+              sleep 10
+            done
+            echo "::error::Failed to find release-triggered run for $LABEL"
+            exit 1
           }
 
           capture_run_id "calltelemetry/cisco-cdr" "docker-backend-release.yaml" "cisco_cdr"
