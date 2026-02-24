@@ -174,9 +174,13 @@ migrate_jtapi_state() {
       fi
     fi
     # Set JTAPI env vars if not already present
+    # Sidecar runs with network_mode:host — other containers reach it via host IP
+    local host_ip
+    host_ip=$(env_get "DEFAULT_IPV4")
+    [ -z "$host_ip" ] && host_ip="127.0.0.1"
     [ -z "$(env_get JTAPI_MODE)" ] && env_set "JTAPI_MODE" "direct"
-    [ -z "$(env_get JTAPI_SIDECAR_ENDPOINT)" ] && env_set "JTAPI_SIDECAR_ENDPOINT" "jtapi-sidecar:50051"
-    [ -z "$(env_get JTAPI_SIDECAR_URL)" ] && env_set "JTAPI_SIDECAR_URL" "http://jtapi-sidecar:8080"
+    [ -z "$(env_get JTAPI_SIDECAR_ENDPOINT)" ] && env_set "JTAPI_SIDECAR_ENDPOINT" "${host_ip}:50051"
+    [ -z "$(env_get JTAPI_SIDECAR_URL)" ] && env_set "JTAPI_SIDECAR_URL" "http://${host_ip}:8080"
     [ -z "$(env_get S3_ENABLED)" ] && env_set "S3_ENABLED" "true"
     [ -z "$(env_get CT_MEDIA_ENDPOINT)" ] && env_set "CT_MEDIA_ENDPOINT" "ct-media:50053"
     rm -f "$JTAPI_STATE_FILE"
@@ -243,9 +247,13 @@ jtapi_cmd() {
         fi
       fi
       # Set JTAPI env vars
+      # Sidecar runs with network_mode:host — other containers reach it via host IP
+      local host_ip
+      host_ip=$(env_get "DEFAULT_IPV4")
+      [ -z "$host_ip" ] && host_ip="127.0.0.1"
       env_set "JTAPI_MODE" "direct"
-      env_set "JTAPI_SIDECAR_ENDPOINT" "jtapi-sidecar:50051"
-      env_set "JTAPI_SIDECAR_URL" "http://jtapi-sidecar:8080"
+      env_set "JTAPI_SIDECAR_ENDPOINT" "${host_ip}:50051"
+      env_set "JTAPI_SIDECAR_URL" "http://${host_ip}:8080"
       env_set "S3_ENABLED" "true"
       env_set "CT_MEDIA_ENDPOINT" "ct-media:50053"
       # Clean up legacy state file if present
