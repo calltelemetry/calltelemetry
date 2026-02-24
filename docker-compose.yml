@@ -149,8 +149,6 @@ services:
       - nats-data:/jetstream/store
     expose:
       - "4222"
-    ports:
-      - "4222:4222"
     networks:
       - ct
 
@@ -260,14 +258,12 @@ services:
     image: "calltelemetry/jtapi-sidecar:${JTAPI_VERSION:-1.14.5}"
     restart: unless-stopped
     mem_limit: 1g
-    # Host networking required for RTP media: CUCM registers the sidecar's IP for
-    # RTP output, and phones send UDP packets to dynamic ports. Bridge networking
-    # hides the container behind a Docker IP that CUCM/phones cannot reach.
-    network_mode: host
+    expose:
+      - "50051"
+      - "8080"
     environment:
       - SPRING_PROFILES_ACTIVE=standalone
-      # Host networking: Docker DNS unavailable, use localhost for co-located services
-      - NATS_URL=nats://127.0.0.1:4222
+      - NATS_URL=nats://nats:4222
       - NATS_ORG_ID=1
       - POD_NAME=jtapi-sidecar-1
       - GRPC_PORT=50051
@@ -277,9 +273,9 @@ services:
       - CTI_POOL_AUTO_CONFIGURE=true
       - CTI_POOL_SOURCE=nats
       - CTI_POOL_ENABLE_MEDIA=true
-      # MinIO for audio storage (host networking: use localhost)
+      # MinIO for audio storage
       - MINIO_ENABLED=true
-      - MINIO_ENDPOINT=http://127.0.0.1:9000
+      - MINIO_ENDPOINT=http://minio:9000
       - MINIO_ACCESS_KEY=${MINIO_ROOT_USER:-minioadmin}
       - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
       # JAR auto-restart when downloaded from NATS ObjectStore
@@ -289,7 +285,7 @@ services:
       - OTEL_SDK_DISABLED=${OTEL_SDK_DISABLED:-true}
       - OTEL_TRACES_EXPORTER=${OTEL_TRACES_EXPORTER:-none}
       - OTEL_METRICS_EXPORTER=${OTEL_METRICS_EXPORTER:-none}
-      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://127.0.0.1:4317}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
       # Disable Spring Boot tracing autoconfiguration when OTel is off
       - MANAGEMENT_TRACING_ENABLED=${OTEL_ENABLED:-false}
     volumes:
@@ -299,6 +295,8 @@ services:
         condition: service_completed_successfully
       nats:
         condition: service_started
+    networks:
+      - ct
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8080/actuator/health || curl -sf http://127.0.0.1:8080/actuator/health"]
       interval: 30s
@@ -312,8 +310,6 @@ services:
     restart: unless-stopped
     expose:
       - "50053"
-    ports:
-      - "50053:50053"
     environment:
       - GRPC_PORT=50053
       - MINIO_ENDPOINT=minio:9000
@@ -347,9 +343,6 @@ services:
     expose:
       - "9000"
       - "9001"
-    ports:
-      - "9000:9000"
-      - "9001:9001"
     volumes:
       - minio-data:/data
     networks:
