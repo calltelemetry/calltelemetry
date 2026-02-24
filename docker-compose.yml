@@ -115,7 +115,7 @@ services:
       - CT_MEDIA_ENDPOINT=${CT_MEDIA_ENDPOINT:-}
       - DOCKER_SOCKET=/var/run/docker.sock
       - NATS_URL=nats://nats:4222
-      # OpenTelemetry (enable with COMPOSE_PROFILES=otel and OTEL_ENABLED=true in .env)
+      # OpenTelemetry (enable via: ct otel enable)
       - OTEL_ENABLED=${OTEL_ENABLED:-false}
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}
     tmpfs:
@@ -197,11 +197,13 @@ services:
   # ─────────────────────────────────────────────────────────────────
   # OpenTelemetry Collector (activate with COMPOSE_PROFILES=otel)
   # Receives OTLP from web + sidecar, exports metrics to Prometheus.
+  # Enable via: ct otel enable  (or COMPOSE_PROFILES=otel)
   # ─────────────────────────────────────────────────────────────────
 
   otel-collector:
     profiles: ["otel"]
     image: otel/opentelemetry-collector-contrib:0.96.0
+    restart: unless-stopped
     command: ["--config=/etc/otelcol/config.yaml"]
     volumes:
       - ./otel-collector/otel-collector-config.yaml:/etc/otelcol/config.yaml:ro
@@ -278,8 +280,10 @@ services:
       - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
       # JAR auto-restart when downloaded from NATS ObjectStore
       - WATCH_JARS=true
-      # OpenTelemetry (set OTEL_SDK_DISABLED=false + COMPOSE_PROFILES=otel to enable)
+      # OpenTelemetry (enable via: ct otel enable)
       - OTEL_SDK_DISABLED=${OTEL_SDK_DISABLED:-true}
+      - OTEL_TRACES_EXPORTER=${OTEL_TRACES_EXPORTER:-none}
+      - OTEL_METRICS_EXPORTER=${OTEL_METRICS_EXPORTER:-none}
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
     volumes:
       - jtapi-jars:/app/jars
@@ -308,6 +312,10 @@ services:
       - MINIO_ENDPOINT=minio:9000
       - MINIO_ACCESS_KEY=${MINIO_ROOT_USER:-minioadmin}
       - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+      # OpenTelemetry (enable via: ct otel enable)
+      - OTEL_ENABLED=${OTEL_ENABLED:-false}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
+      - OTEL_SERVICE_NAME=ct-media
     networks:
       - ct
     healthcheck:
@@ -322,7 +330,7 @@ services:
 
   minio:
     profiles: ["jtapi"]
-    image: minio/minio:RELEASE.2024-11-07T00-52-20Z
+    image: alpine/minio:RELEASE.2025-10-15T17-29-55Z
     command: server /data --console-address ":9001"
     restart: unless-stopped
     environment:
