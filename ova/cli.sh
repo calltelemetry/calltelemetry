@@ -3162,6 +3162,40 @@ app_status() {
   fi
   echo ""
 
+  # Host-facing service ports
+  echo "=== Service Ports ==="
+  local port_ok=true
+
+  # CURRI HTTP (Caddy port 80)
+  if probe_host_port 80 2; then
+    echo "✓ CURRI HTTP (port 80): reachable"
+  else
+    echo "✗ CURRI HTTP (port 80): not reachable"
+    port_ok=false
+  fi
+
+  # Admin HTTPS (Caddy port 443)
+  if probe_host_port 443 2; then
+    echo "✓ Admin HTTPS (port 443): reachable"
+  else
+    echo "✗ Admin HTTPS (port 443): not reachable"
+    port_ok=false
+  fi
+
+  # SFTP (port 22)
+  if probe_host_port 22 2; then
+    echo "✓ SFTP (port 22): reachable"
+  else
+    echo "✗ SFTP (port 22): not reachable"
+    port_ok=false
+  fi
+
+  if $port_ok; then
+    echo ""
+    echo "✓ All service ports healthy"
+  fi
+  echo ""
+
   # Check for scheduler/startup errors
   echo "=== Recent Startup Messages ==="
   $DOCKER_COMPOSE_CMD logs --tail 50 web 2>&1 | grep -E "(Migration|completed|scheduler|not started|error|Error|started)" | tail -15
