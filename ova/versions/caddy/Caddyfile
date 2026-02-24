@@ -1,4 +1,16 @@
 # Caddyfile
+
+# HTTP: proxy CURRI/XCC/phone-portal paths to Phoenix, redirect everything else to HTTPS
+:80 {
+    @backend path /api/* /healthz /org/* /socket/* /live/*
+    handle @backend {
+        reverse_proxy web:4080
+    }
+    handle {
+        redir https://{host}{uri} permanent
+    }
+}
+
 :443 {
     reverse_proxy /api* web:4000
 
