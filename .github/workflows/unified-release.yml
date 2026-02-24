@@ -46,7 +46,6 @@ jobs:
             --repo calltelemetry/cisco-cdr \
             --target "${{ inputs.target_branch }}" \
             --title "${{ inputs.version }}" \
-            --prerelease \
             --notes "Unified release ${{ inputs.version }}"
 
       - name: Create ct-quasar release
@@ -58,7 +57,6 @@ jobs:
             --repo calltelemetry/ct-quasar \
             --target "${{ inputs.target_branch }}" \
             --title "${{ inputs.version }}" \
-            --prerelease \
             --notes "Unified release ${{ inputs.version }}"
 
       - name: Create jtapi-sidecar release
@@ -70,7 +68,6 @@ jobs:
             --repo calltelemetry/jtapi-sidecar \
             --target "${{ inputs.target_branch }}" \
             --title "${{ inputs.version }}" \
-            --prerelease \
             --notes "Unified release ${{ inputs.version }}"
 
       - name: Create ct-media release
@@ -83,7 +80,6 @@ jobs:
             --repo calltelemetry/ct-media \
             --target "${{ inputs.target_branch }}" \
             --title "$CT_MEDIA_TAG" \
-            --prerelease \
             --notes "Unified release $CT_MEDIA_TAG"
 
       - name: Summary
