@@ -297,7 +297,7 @@ jtapi_cmd() {
     status)
       if is_jtapi_enabled; then
         echo "JTAPI: enabled"
-        $DOCKER_COMPOSE_CMD $(get_compose_files) ps jtapi-sidecar ct-media minio 2>/dev/null || true
+        $DOCKER_COMPOSE_CMD $(get_compose_files) ps jtapi-sidecar ct-media seaweedfs 2>/dev/null || true
       else
         echo "JTAPI: disabled"
       fi
@@ -320,7 +320,7 @@ jtapi_cmd() {
       # --- 2. Container Health ---
       echo "--- Container Health ---"
       export DEFAULT_IPV4="${DEFAULT_IPV4:-}"
-      for svc in jtapi-jar-init jtapi-sidecar ct-media minio; do
+      for svc in jtapi-jar-init jtapi-sidecar ct-media seaweedfs; do
         local cid
         cid=$($DOCKER_COMPOSE_CMD $(get_compose_files) ps -q "$svc" 2>/dev/null)
         if [ -z "$cid" ]; then
@@ -359,7 +359,7 @@ jtapi_cmd() {
       # Show restart counts
       echo ""
       echo "  Container restart counts:"
-      for svc in jtapi-sidecar ct-media minio; do
+      for svc in jtapi-sidecar ct-media seaweedfs; do
         local restart_count
         restart_count=$(docker inspect --format='{{.RestartCount}}' "$($DOCKER_COMPOSE_CMD $(get_compose_files) ps -q "$svc" 2>/dev/null)" 2>/dev/null || echo "N/A")
         echo "    $svc: $restart_count restarts"
@@ -444,18 +444,18 @@ jtapi_cmd() {
       $DOCKER_COMPOSE_CMD $(get_compose_files) logs --tail=20 jtapi-sidecar 2>&1 | sed 's/^/    /'
       echo ""
 
-      # --- 6. MinIO Health ---
-      echo "--- MinIO Health ---"
-      local minio_health
-      minio_health=$($DOCKER_COMPOSE_CMD $(get_compose_files) exec -T minio curl -sf http://localhost:9000/minio/health/live 2>&1)
+      # --- 6. SeaweedFS Health ---
+      echo "--- SeaweedFS Health ---"
+      local seaweedfs_health
+      seaweedfs_health=$($DOCKER_COMPOSE_CMD $(get_compose_files) exec -T seaweedfs curl -sf http://127.0.0.1:9333/cluster/healthz 2>&1)
       if [ $? -eq 0 ]; then
-        echo "✓ MinIO is healthy"
+        echo "✓ SeaweedFS is healthy"
       else
-        echo "❌ MinIO health check failed: $minio_health"
+        echo "❌ SeaweedFS health check failed: $seaweedfs_health"
       fi
       echo ""
-      echo "  MinIO buckets:"
-      $DOCKER_COMPOSE_CMD $(get_compose_files) exec -T minio sh -c 'mc alias set local http://localhost:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD} 2>/dev/null; mc ls local/ 2>&1' | sed 's/^/    /' || echo "    ⚠️ Could not list MinIO buckets"
+      echo "  SeaweedFS buckets:"
+      $DOCKER_COMPOSE_CMD $(get_compose_files) exec -T seaweedfs curl -sf http://localhost:9333/cluster/healthz 2>&1 | sed 's/^/    /' || echo "    ⚠️ Could not check SeaweedFS cluster status"
       echo ""
 
       # --- 7. ct-media Health ---
@@ -577,7 +577,7 @@ jtapi_cmd() {
       echo "Usage: $0 jtapi {enable|disable|status|troubleshoot}"
       echo ""
       echo "Commands:"
-      echo "  enable        Enable JTAPI sidecar, ct-media, and MinIO services"
+      echo "  enable        Enable JTAPI sidecar, ct-media, and SeaweedFS services"
       echo "  disable       Disable JTAPI services"
       echo "  status        Show JTAPI status and service health"
       echo "  troubleshoot  Run comprehensive JTAPI diagnostics"
@@ -820,7 +820,7 @@ show_help() {
   echo "  certs               Show certificate status and expiry"
   echo "  certs reset         Delete and regenerate self-signed certificates"
   echo "  jtapi               Show JTAPI feature status"
-  echo "  jtapi enable        Enable JTAPI sidecar, ct-media, and MinIO services"
+  echo "  jtapi enable        Enable JTAPI sidecar, ct-media, and SeaweedFS services"
   echo "  jtapi disable       Disable JTAPI services"
   echo "  jtapi troubleshoot  Run comprehensive JTAPI diagnostics"
   echo
@@ -1642,7 +1642,7 @@ update() {
   # Also pull JTAPI images if enabled (profiles are read from .env automatically)
   if is_jtapi_enabled; then
     echo "Pulling JTAPI profile images..."
-    $DOCKER_COMPOSE_CMD -f "$TEMP_FILE" --profile jtapi pull jtapi-sidecar ct-media minio 2>/dev/null || \
+    $DOCKER_COMPOSE_CMD -f "$TEMP_FILE" --profile jtapi pull jtapi-sidecar ct-media seaweedfs 2>/dev/null || \
       echo "⚠️  Some JTAPI images may not be available yet"
   fi
   echo "✅ All images pulled successfully"
@@ -1828,7 +1828,7 @@ wait_for_services() {
   local release_bin=$(get_release_binary)
   local services=("db" "web" "caddy" "vue-web" "traceroute" "nats")
   if is_jtapi_enabled; then
-    services+=("jtapi-sidecar" "ct-media" "minio")
+    services+=("jtapi-sidecar" "ct-media" "seaweedfs")
   fi
 
   # Track failures across phases
