@@ -24,10 +24,10 @@
 #   4. Add CUCM server via UI (Settings > JTAPI > Servers)
 #      (credentials flow through NATS KV — CtiConfigWatcher auto-connects)
 #
-# MinIO credentials:
-#   Default: minioadmin/minioadmin. For production, set MINIO_ROOT_USER and
-#   MINIO_ROOT_PASSWORD in your environment or .env file BEFORE first start.
-#   Changing credentials after data exists requires MinIO reconfiguration.
+# SeaweedFS credentials:
+#   Default: minioadmin/minioadmin. For production, set S3_ACCESS_KEY_ID and
+#   S3_SECRET_ACCESS_KEY in your environment or .env file BEFORE first start.
+#   Changing credentials after data exists requires reconfiguration.
 
 services:
   web:
@@ -42,11 +42,11 @@ services:
       - JTAPI_SIDECAR_URL=http://jtapi-sidecar:8080
       # NATS for KV credential distribution + ObjectStore JAR storage
       - NATS_URL=nats://nats:4222
-      # MinIO S3 for audio storage (greetings, recordings)
+      # SeaweedFS S3 for audio storage (greetings, recordings)
       - S3_ENABLED=true
-      - S3_ENDPOINT=http://minio:9000
-      - S3_ACCESS_KEY_ID=${MINIO_ROOT_USER:-minioadmin}
-      - S3_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - S3_ENDPOINT=http://seaweedfs:8333
+      - S3_ACCESS_KEY_ID=${S3_ACCESS_KEY_ID:-minioadmin}
+      - S3_SECRET_ACCESS_KEY=${S3_SECRET_ACCESS_KEY:-minioadmin}
       - S3_REGION=us-east-1
       # ct-media gRPC for audio transcoding (G.711 encoding for JTAPI greetings)
       - CT_MEDIA_ENDPOINT=ct-media:50053
@@ -55,7 +55,7 @@ services:
     depends_on:
       jtapi-sidecar:
         condition: service_started
-      minio:
+      seaweedfs:
         condition: service_healthy
 
   jtapi-jar-init:
@@ -111,11 +111,11 @@ services:
       - CTI_POOL_AUTO_CONFIGURE=true
       - CTI_POOL_SOURCE=nats
       - CTI_POOL_ENABLE_MEDIA=true
-      # MinIO for audio storage
-      - MINIO_ENABLED=true
-      - MINIO_ENDPOINT=http://minio:9000
-      - MINIO_ACCESS_KEY=${MINIO_ROOT_USER:-minioadmin}
-      - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+      # SeaweedFS for audio storage
+      - S3_ENABLED=true
+      - S3_ENDPOINT=http://seaweedfs:8333
+      - S3_ACCESS_KEY_ID=${S3_ACCESS_KEY_ID:-minioadmin}
+      - S3_SECRET_ACCESS_KEY=${S3_SECRET_ACCESS_KEY:-minioadmin}
       # JAR auto-restart when downloaded from NATS ObjectStore
       - WATCH_JARS=true
       # Disable OpenTelemetry by default (no collector in Docker Compose)
@@ -148,31 +148,30 @@ services:
       - "50053"
     environment:
       - GRPC_PORT=50053
-      - MINIO_ENDPOINT=minio:9000
-      - MINIO_ACCESS_KEY=${MINIO_ROOT_USER:-minioadmin}
-      - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - S3_ENDPOINT=seaweedfs:8333
+      - S3_ACCESS_KEY_ID=${S3_ACCESS_KEY_ID:-minioadmin}
+      - S3_SECRET_ACCESS_KEY=${S3_SECRET_ACCESS_KEY:-minioadmin}
     networks:
       - ct
     depends_on:
-      minio:
+      seaweedfs:
         condition: service_healthy
 
-  minio:
-    image: minio/minio:RELEASE.2024-11-07T00-52-20Z
-    command: server /data --console-address ":9001"
+  seaweedfs:
+    image: chrislusf/seaweedfs:latest
+    command: "server -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json -master.volumeSizeLimitMB=100"
     restart: unless-stopped
-    environment:
-      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
-      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minioadmin}
     expose:
-      - "9000"
-      - "9001"
+      - "8333"   # S3 API
+      - "8888"   # Filer
+      - "9333"   # Master
     volumes:
-      - minio-data:/data
+      - seaweedfs-data:/data
+      - ./seaweedfs-s3.json:/etc/seaweedfs/s3.json:ro
     networks:
       - ct
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:9000/minio/health/live || exit 1"]
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:9333/cluster/healthz || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -181,5 +180,5 @@ services:
 volumes:
   jtapi-jars:
     driver: local
-  minio-data:
+  seaweedfs-data:
     driver: local
