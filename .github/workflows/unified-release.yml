@@ -46,8 +46,12 @@ jobs:
             --repo calltelemetry/cisco-cdr \
             --target "${{ inputs.target_branch }}" \
             --title "${{ inputs.version }}" \
-            --prerelease \
-            --notes "Unified release ${{ inputs.version }}"
+            --latest \
+            --notes "Unified release ${{ inputs.version }}
+
+---
+
+**Appliance Upgrade Instructions:** https://docs.calltelemetry.com/troubleshoot/upgrade"
 
       - name: Create ct-quasar release
         env:
@@ -58,8 +62,12 @@ jobs:
             --repo calltelemetry/ct-quasar \
             --target "${{ inputs.target_branch }}" \
             --title "${{ inputs.version }}" \
-            --prerelease \
-            --notes "Unified release ${{ inputs.version }}"
+            --latest \
+            --notes "Unified release ${{ inputs.version }}
+
+---
+
+**Appliance Upgrade Instructions:** https://docs.calltelemetry.com/troubleshoot/upgrade"
 
       - name: Create jtapi-sidecar release
         env:
@@ -70,8 +78,12 @@ jobs:
             --repo calltelemetry/jtapi-sidecar \
             --target "${{ inputs.target_branch }}" \
             --title "${{ inputs.version }}" \
-            --prerelease \
-            --notes "Unified release ${{ inputs.version }}"
+            --latest \
+            --notes "Unified release ${{ inputs.version }}
+
+---
+
+**Appliance Upgrade Instructions:** https://docs.calltelemetry.com/troubleshoot/upgrade"
 
       - name: Create ct-media release
         env:
@@ -83,8 +95,12 @@ jobs:
             --repo calltelemetry/ct-media \
             --target "${{ inputs.target_branch }}" \
             --title "$CT_MEDIA_TAG" \
-            --prerelease \
-            --notes "Unified release $CT_MEDIA_TAG"
+            --latest \
+            --notes "Unified release $CT_MEDIA_TAG
+
+---
+
+**Appliance Upgrade Instructions:** https://docs.calltelemetry.com/troubleshoot/upgrade"
 
       - name: Summary
         run: |
