@@ -1120,7 +1120,7 @@ download_bundle() {
 
   # seaweedfs-s3.json (required for JTAPI S3 storage)
   if [ -f "$extract_dir/seaweedfs-s3.json" ]; then
-    rm -f ./seaweedfs-s3.json 2>/dev/null
+    rm -rf ./seaweedfs-s3.json 2>/dev/null
     if cp "$extract_dir/seaweedfs-s3.json" ./seaweedfs-s3.json; then
       echo "  ✅ seaweedfs-s3.json"
     else
