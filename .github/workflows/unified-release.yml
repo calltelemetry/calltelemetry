@@ -42,48 +42,57 @@ jobs:
           GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
         run: |
           echo "Creating cisco-cdr release: ${{ inputs.version }}"
+          NOTES=$(cat <<'NOTES_EOF'
+          Unified release ${{ inputs.version }}
+
+          **Appliance Upgrade Instructions:** https://docs.calltelemetry.com/troubleshoot/upgrade
+          NOTES_EOF
+          )
+          NOTES=$(echo "$NOTES" | sed 's/^          //')
           gh release create "${{ inputs.version }}" \
             --repo calltelemetry/cisco-cdr \
             --target "${{ inputs.target_branch }}" \
             --title "${{ inputs.version }}" \
             --latest \
-            --notes "Unified release ${{ inputs.version }}
-
----
-
-**Appliance Upgrade Instructions:** https://docs.calltelemetry.com/troubleshoot/upgrade"
+            --notes "$NOTES"
 
       - name: Create ct-quasar release
         env:
           GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
         run: |
           echo "Creating ct-quasar release: ${{ inputs.version }}"
+          NOTES=$(cat <<'NOTES_EOF'
+          Unified release ${{ inputs.version }}
+
+          **Appliance Upgrade Instructions:** https://docs.calltelemetry.com/troubleshoot/upgrade
+          NOTES_EOF
+          )
+          NOTES=$(echo "$NOTES" | sed 's/^          //')
           gh release create "${{ inputs.version }}" \
             --repo calltelemetry/ct-quasar \
             --target "${{ inputs.target_branch }}" \
             --title "${{ inputs.version }}" \
             --latest \
-            --notes "Unified release ${{ inputs.version }}
-
----
-
-**Appliance Upgrade Instructions:** https://docs.calltelemetry.com/troubleshoot/upgrade"
+            --notes "$NOTES"
 
       - name: Create jtapi-sidecar release
         env:
           GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
         run: |
           echo "Creating jtapi-sidecar release: ${{ inputs.version }}"
+          NOTES=$(cat <<'NOTES_EOF'
+          Unified release ${{ inputs.version }}
+
+          **Appliance Upgrade Instructions:** https://docs.calltelemetry.com/troubleshoot/upgrade
+          NOTES_EOF
+          )
+          NOTES=$(echo "$NOTES" | sed 's/^          //')
           gh release create "${{ inputs.version }}" \
             --repo calltelemetry/jtapi-sidecar \
             --target "${{ inputs.target_branch }}" \
             --title "${{ inputs.version }}" \
             --latest \
-            --notes "Unified release ${{ inputs.version }}
-
----
-
-**Appliance Upgrade Instructions:** https://docs.calltelemetry.com/troubleshoot/upgrade"
+            --notes "$NOTES"
 
       - name: Create ct-media release
         env:
@@ -91,16 +100,19 @@ jobs:
         run: |
           CT_MEDIA_TAG="${{ inputs.ct_media_version || inputs.version }}"
           echo "Creating ct-media release: $CT_MEDIA_TAG"
+          NOTES=$(cat <<'NOTES_EOF'
+          Unified release $CT_MEDIA_TAG
+
+          **Appliance Upgrade Instructions:** https://docs.calltelemetry.com/troubleshoot/upgrade
+          NOTES_EOF
+          )
+          NOTES=$(echo "$NOTES" | sed 's/^          //')
           gh release create "$CT_MEDIA_TAG" \
             --repo calltelemetry/ct-media \
             --target "${{ inputs.target_branch }}" \
             --title "$CT_MEDIA_TAG" \
             --latest \
-            --notes "Unified release $CT_MEDIA_TAG
-
----
-
-**Appliance Upgrade Instructions:** https://docs.calltelemetry.com/troubleshoot/upgrade"
+            --notes "$NOTES"
 
       - name: Summary
         run: |
