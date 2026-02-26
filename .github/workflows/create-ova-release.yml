@@ -240,7 +240,7 @@ jobs:
           # Create GitHub release with both version files
           gh release create "$VERSION" \
             $PRERELEASE_FLAG \
-            --title "CallTelemetry OVA $VERSION" \
+            --title "$VERSION" \
             --notes "$(cat << NOTES_EOF
           ## CallTelemetry $VERSION
 
@@ -256,6 +256,10 @@ jobs:
           \`\`\`bash
           sudo ./cli.sh update $VERSION
           \`\`\`
+
+          ---
+
+          **Appliance Upgrade Instructions:** https://docs.calltelemetry.com/troubleshoot/upgrade
           NOTES_EOF
           )" \
             "ova/versions/${VERSION}.env" \
