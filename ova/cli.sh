@@ -724,6 +724,34 @@ fix_systemd_service_if_needed() {
     echo "Systemd service updated to use '$target_cmd'."
   fi
 
+  # Add restart-on-failure policy if missing (boot resilience)
+  if ! grep -q "^Restart=" "$SERVICE_FILE" 2>/dev/null; then
+    echo "Adding restart-on-failure policy to systemd service..."
+    if [ "$needs_reload" != true ]; then
+      sudo cp "$SERVICE_FILE" "${SERVICE_FILE}.backup" 2>/dev/null
+    fi
+    # Add Restart=on-failure and RestartSec=60 after TimeoutStartSec line
+    if grep -q "^TimeoutStartSec=" "$SERVICE_FILE"; then
+      sudo sed -i '/^TimeoutStartSec=/a Restart=on-failure\nRestartSec=60' "$SERVICE_FILE"
+    else
+      # Fallback: add before [Install] section
+      sudo sed -i '/^\[Install\]/i Restart=on-failure\nRestartSec=60' "$SERVICE_FILE"
+    fi
+    needs_reload=true
+    echo "Restart policy added (on-failure, 60s delay)."
+  fi
+
+  # Add network-online.target dependency if missing (boot ordering)
+  if ! grep -q "network-online.target" "$SERVICE_FILE" 2>/dev/null; then
+    echo "Adding network-online.target dependency to systemd service..."
+    if [ "$needs_reload" != true ]; then
+      sudo cp "$SERVICE_FILE" "${SERVICE_FILE}.backup" 2>/dev/null
+    fi
+    sudo sed -i '/^After=docker.service/a Wants=network-online.target\nAfter=network-online.target' "$SERVICE_FILE"
+    needs_reload=true
+    echo "Network dependency added."
+  fi
+
   if [ "$needs_reload" = true ]; then
     sudo systemctl daemon-reload
   fi
