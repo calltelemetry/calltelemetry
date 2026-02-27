@@ -221,6 +221,7 @@ services:
   jtapi-jar-init:
     profiles: ["jtapi"]
     image: natsio/nats-box:0.14.5
+    pull_policy: if_not_present
     restart: "no"
     entrypoint: ["/bin/sh", "-c"]
     command:
@@ -333,7 +334,8 @@ services:
 
   seaweedfs:
     profiles: ["jtapi"]
-    image: chrislusf/seaweedfs:latest
+    image: chrislusf/seaweedfs:4.13
+    pull_policy: if_not_present
     command: >
       server -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json
       -master.volumeSizeLimitMB=100

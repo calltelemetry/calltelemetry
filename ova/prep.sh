@@ -121,6 +121,8 @@ Requires=setup-network-environment.service
 After=setup-network-environment.service
 Requires=docker.service
 After=docker.service
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 Type=oneshot
@@ -129,7 +131,9 @@ WorkingDirectory=${INSTALL_DIR}
 EnvironmentFile=/etc/network-environment
 ExecStart=${DOCKER_COMPOSE_CMD} up -d --remove-orphans
 ExecStop=${DOCKER_COMPOSE_CMD} down
-TimeoutStartSec=0
+TimeoutStartSec=120
+Restart=on-failure
+RestartSec=60
 
 [Install]
 WantedBy=multi-user.target
