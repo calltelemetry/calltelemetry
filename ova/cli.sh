@@ -809,6 +809,233 @@ restart_service() {
   return 1
 }
 
+# ===========================================================================
+# OS Automatic Updates (systemd timer for dnf update)
+# ===========================================================================
+
+CT_OS_UPDATES_SERVICE="/etc/systemd/system/ct-os-updates.service"
+CT_OS_UPDATES_TIMER="/etc/systemd/system/ct-os-updates.timer"
+
+# Resolve a schedule keyword to a systemd OnCalendar expression and label
+os_updates_resolve_schedule() {
+  local schedule="$1"
+  case "$schedule" in
+    daily)
+      OS_UPDATE_CALENDAR="*-*-* 03:00:00"
+      OS_UPDATE_LABEL="Daily at 3:00 AM"
+      ;;
+    weekly)
+      OS_UPDATE_CALENDAR="Sun *-*-* 03:00:00"
+      OS_UPDATE_LABEL="Weekly (Sunday at 3:00 AM)"
+      ;;
+    monthly)
+      OS_UPDATE_CALENDAR="*-*-01 03:00:00"
+      OS_UPDATE_LABEL="Monthly (1st at 3:00 AM)"
+      ;;
+    *)
+      # Treat as a custom OnCalendar string
+      OS_UPDATE_CALENDAR="$schedule"
+      OS_UPDATE_LABEL="Custom ($schedule)"
+      ;;
+  esac
+}
+
+os_updates_status() {
+  echo "OS Automatic Updates"
+  echo "===================="
+
+  if systemctl is-enabled ct-os-updates.timer &>/dev/null; then
+    echo "Status:     Enabled"
+
+    # Extract schedule from timer file
+    local calendar
+    calendar=$(grep "^OnCalendar=" "$CT_OS_UPDATES_TIMER" 2>/dev/null | cut -d= -f2-)
+    if [ -n "$calendar" ]; then
+      # Map back to friendly label
+      case "$calendar" in
+        "*-*-* 03:00:00")       echo "Schedule:   Daily at 3:00 AM" ;;
+        "Sun *-*-* 03:00:00")   echo "Schedule:   Weekly (Sunday at 3:00 AM)" ;;
+        "*-*-01 03:00:00")      echo "Schedule:   Monthly (1st at 3:00 AM)" ;;
+        *)                      echo "Schedule:   Custom ($calendar)" ;;
+      esac
+    fi
+
+    # Next and last trigger times
+    local next_run last_run
+    next_run=$(systemctl show ct-os-updates.timer --property=NextElapseUSecRealtime --value 2>/dev/null)
+    last_run=$(systemctl show ct-os-updates.timer --property=LastTriggerUSec --value 2>/dev/null)
+
+    if [ -n "$next_run" ] && [ "$next_run" != "n/a" ]; then
+      echo "Next run:   $next_run"
+    fi
+    if [ -n "$last_run" ] && [ "$last_run" != "n/a" ]; then
+      echo "Last run:   $last_run"
+    fi
+
+    echo "Jitter:     up to 30 minutes"
+  else
+    echo "Status:     Disabled"
+    echo ""
+    echo "Enable with:"
+    echo "  cli.sh os-updates enable daily      Every day at 3 AM"
+    echo "  cli.sh os-updates enable weekly     Every Sunday at 3 AM"
+    echo "  cli.sh os-updates enable monthly    1st of each month at 3 AM"
+  fi
+
+  echo ""
+
+  # Show recent journal entries if any exist
+  local log_lines
+  log_lines=$(journalctl -u ct-os-updates.service --no-pager -n 5 --output=short-iso 2>/dev/null | grep -v "^-- ")
+  if [ -n "$log_lines" ]; then
+    echo "Recent update history:"
+    echo "$log_lines" | sed 's/^/  /'
+  fi
+}
+
+os_updates_enable() {
+  local schedule="${1:-weekly}"
+
+  os_updates_resolve_schedule "$schedule"
+
+  echo "OS Automatic Updates"
+  echo "===================="
+  echo "Setting up $OS_UPDATE_LABEL OS updates..."
+  echo ""
+
+  # Write the service unit
+  sudo tee "$CT_OS_UPDATES_SERVICE" > /dev/null <<EOF
+[Unit]
+Description=CallTelemetry Automatic OS Updates
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/dnf update -y --refresh
+StandardOutput=journal
+StandardError=journal
+EOF
+  echo "  Created:  $CT_OS_UPDATES_SERVICE"
+
+  # Write the timer unit
+  sudo tee "$CT_OS_UPDATES_TIMER" > /dev/null <<EOF
+[Unit]
+Description=CallTelemetry OS Update Schedule ($OS_UPDATE_LABEL)
+
+[Timer]
+OnCalendar=$OS_UPDATE_CALENDAR
+Persistent=true
+RandomizedDelaySec=1800
+
+[Install]
+WantedBy=timers.target
+EOF
+  echo "  Created:  $CT_OS_UPDATES_TIMER"
+
+  # Reload, enable, and start
+  sudo systemctl daemon-reload
+  sudo systemctl enable ct-os-updates.timer &>/dev/null
+  echo "  Enabled:  ct-os-updates.timer"
+  sudo systemctl start ct-os-updates.timer
+  echo "  Started:  ct-os-updates.timer"
+
+  echo ""
+
+  # Show next run
+  local next_run
+  next_run=$(systemctl show ct-os-updates.timer --property=NextElapseUSecRealtime --value 2>/dev/null)
+  if [ -n "$next_run" ] && [ "$next_run" != "n/a" ]; then
+    echo "Next scheduled update: $next_run"
+  fi
+
+  echo ""
+  echo "To check status:  cli.sh os-updates"
+  echo "To disable:       cli.sh os-updates disable"
+  echo "To run now:       cli.sh os-updates run"
+}
+
+os_updates_disable() {
+  echo "Disabling automatic OS updates..."
+
+  if systemctl is-enabled ct-os-updates.timer &>/dev/null; then
+    sudo systemctl stop ct-os-updates.timer 2>/dev/null
+    echo "  Stopped:  ct-os-updates.timer"
+    sudo systemctl disable ct-os-updates.timer &>/dev/null
+    echo "  Disabled: ct-os-updates.timer"
+  fi
+
+  if [ -f "$CT_OS_UPDATES_TIMER" ]; then
+    sudo rm -f "$CT_OS_UPDATES_TIMER"
+    echo "  Removed:  $CT_OS_UPDATES_TIMER"
+  fi
+
+  if [ -f "$CT_OS_UPDATES_SERVICE" ]; then
+    sudo rm -f "$CT_OS_UPDATES_SERVICE"
+    echo "  Removed:  $CT_OS_UPDATES_SERVICE"
+  fi
+
+  sudo systemctl daemon-reload
+
+  echo ""
+  echo "Automatic OS updates have been disabled."
+}
+
+os_updates_run() {
+  echo "Running OS update now..."
+  echo "================================================"
+  sudo dnf update -y --refresh
+  local exit_code=$?
+  echo "================================================"
+  if [ $exit_code -eq 0 ]; then
+    echo "OS update complete."
+  else
+    echo "OS update finished with exit code $exit_code."
+  fi
+}
+
+os_updates_log() {
+  echo "OS Update History (last 20 entries)"
+  echo "===================================="
+  journalctl -u ct-os-updates.service --no-pager -n 50 --output=short-iso 2>/dev/null || echo "No update history found."
+}
+
+os_updates_cmd() {
+  local action="${1:-}"
+  shift 2>/dev/null || true
+
+  case "$action" in
+    ""|status)
+      os_updates_status
+      ;;
+    enable)
+      os_updates_enable "$@"
+      ;;
+    disable)
+      os_updates_disable
+      ;;
+    run)
+      os_updates_run
+      ;;
+    log|logs|history)
+      os_updates_log
+      ;;
+    *)
+      echo "Unknown os-updates command: $action"
+      echo ""
+      echo "Usage: cli.sh os-updates <command>"
+      echo ""
+      echo "Commands:"
+      echo "  status              Show current schedule (default)"
+      echo "  enable <schedule>   Enable automatic updates (daily|weekly|monthly)"
+      echo "  disable             Disable automatic updates"
+      echo "  run                 Run OS update immediately"
+      echo "  log                 Show recent update history"
+      return 1
+      ;;
+  esac
+}
+
 # Function to display help
 show_help() {
   echo "Usage: cli.sh <command> [options]"
@@ -858,6 +1085,13 @@ show_help() {
   echo "  docker              Show Docker status (containers, images, networks)"
   echo "  docker network      Show detailed network configuration"
   echo "  docker prune        Remove unused Docker resources"
+  echo
+  echo "OS Update Commands:"
+  echo "  os-updates              Show automatic update schedule"
+  echo "  os-updates enable <s>   Enable auto-updates (daily|weekly|monthly)"
+  echo "  os-updates disable      Disable automatic OS updates"
+  echo "  os-updates run          Run OS update now (dnf update)"
+  echo "  os-updates log          Show recent update history"
   echo
   echo "Offline/Air-Gap Commands:"
   echo "  offline fetch <version>     Download pre-built bundle from cloud (fast)"
@@ -3940,6 +4174,12 @@ case "$1" in
     echo "Service file updated successfully."
     echo "To apply changes, restart the service with:"
     echo "  sudo systemctl restart docker-compose-app.service"
+    ;;
+
+  # OS automatic update scheduling
+  os-updates)
+    shift
+    os_updates_cmd "$@"
     ;;
 
   # Offline/Air-Gap commands for environments without internet access
