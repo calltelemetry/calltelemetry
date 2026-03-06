@@ -604,6 +604,33 @@ ensure_grafana_permissions() {
   done
 }
 
+sanitize_metadata_artifacts() {
+  local dirs=("$@")
+  local cleaned=0
+
+  for dir in "${dirs[@]}"; do
+    [ -n "$dir" ] || continue
+    [ -e "$dir" ] || continue
+
+    while IFS= read -r path; do
+      [ -n "$path" ] || continue
+      rm -rf "$path"
+      cleaned=$((cleaned + 1))
+    done < <(find "$dir" \
+      \( -type f \( -name '._*' -o -name '.DS_Store' \) \) -o \
+      \( -type d -name '__MACOSX' \) \
+      2>/dev/null)
+  done
+
+  if [ "$cleaned" -gt 0 ]; then
+    echo "Removed $cleaned metadata artifact(s) from extracted assets."
+  fi
+}
+
+sanitize_grafana_assets() {
+  sanitize_metadata_artifacts "$@"
+}
+
 # Ensure necessary directories exist and have correct permissions
 mkdir -p "$BACKUP_DIR"
 mkdir -p "$BACKUP_FOLDER_PATH"
@@ -1280,6 +1307,8 @@ download_bundle() {
     return 1
   fi
 
+  sanitize_metadata_artifacts "$extract_dir"
+
   # Move files to proper locations
   # docker-compose.yml -> temp file for validation
   if [ -f "$extract_dir/docker-compose.yml" ]; then
@@ -1352,6 +1381,8 @@ download_bundle() {
     if [ -d "$extract_dir/grafana/provisioning" ]; then
       cp -r "$extract_dir/grafana/provisioning/"* grafana/provisioning/ 2>/dev/null && echo "  ✅ grafana/provisioning"
     fi
+
+    sanitize_grafana_assets grafana/dashboards grafana/provisioning
   fi
 
   # nats.conf
@@ -1498,6 +1529,7 @@ download_grafana_assets() {
     fi
   done
 
+  sanitize_grafana_assets "$provisioning_mount" "$dashboards_mount"
   ensure_grafana_permissions "$provisioning_mount" "$dashboards_mount"
 }
 
@@ -4239,6 +4271,7 @@ case "$1" in
       rm -rf "$bundle_dir"
       mkdir -p "$bundle_dir"
       tar -xzf "$config_bundle" -C "$bundle_dir" --strip-components=1
+      sanitize_metadata_artifacts "$bundle_dir"
       rm -f "$config_bundle"
       echo "✅ Config bundle extracted"
       echo ""
@@ -4339,6 +4372,7 @@ case "$1" in
 
       echo "Extracting bundle..."
       tar -xzf "$bundle_file" -C "$extract_dir"
+      sanitize_metadata_artifacts "$extract_dir"
 
       # Find the inner directory (bundle creates a subdirectory)
       local inner_dir=$(find "$extract_dir" -maxdepth 1 -type d -name "offline-bundle-*" | head -1)
@@ -4379,6 +4413,7 @@ case "$1" in
         [ -f "$inner_dir/grafana/provisioning/datasources/calltelemetry.yml" ] && cp "$inner_dir/grafana/provisioning/datasources/calltelemetry.yml" ./grafana/provisioning/datasources/
         [ -f "$inner_dir/grafana/provisioning/dashboards/calltelemetry.yaml" ] && cp "$inner_dir/grafana/provisioning/dashboards/calltelemetry.yaml" ./grafana/provisioning/dashboards/
         [ -f "$inner_dir/grafana/dashboards/calltelemetry-overview.json" ] && cp "$inner_dir/grafana/dashboards/calltelemetry-overview.json" ./grafana/dashboards/
+        sanitize_grafana_assets ./grafana/provisioning ./grafana/dashboards
         echo "  - grafana configs"
       fi
 
