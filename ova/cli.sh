@@ -3764,11 +3764,11 @@ prep_cluster_node() {
   # Install K9s Kubernetes Management tool
   echo "Installing k9s toolkit - https://github.com/derailed/k9s/"
   K9S_LATEST_VERSION=$(curl -s https://api.github.com/repos/derailed/k9s/releases/latest | grep "tag_name" | cut -d '"' -f 4)
-  wget https://github.com/derailed/k9s/releases/download/$K9S_LATEST_VERSION/k9s_Linux_x86_64.tar.gz
-  tar -xzf k9s_Linux_x86_64.tar.gz
+  wget https://github.com/derailed/k9s/releases/download/$K9S_LATEST_VERSION/k9s_Linux_amd64.tar.gz
+  tar -xzf k9s_Linux_amd64.tar.gz
   sudo mv k9s /usr/local/bin
   mkdir -p ~/.k9s
-  rm -rf k9s*
+  rm -rf k9s_Linux_amd64.tar.gz
 
   # Install GIT
   sudo dnf install -y git
