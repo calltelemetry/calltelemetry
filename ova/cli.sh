@@ -3772,6 +3772,16 @@ prep_cluster_node() {
 
   # Install GIT
   sudo dnf install -y git
+
+  # Copy k3s kubeconfig so kubectl/k9s/helm work without sudo
+  if [ -f /etc/rancher/k3s/k3s.yaml ]; then
+    mkdir -p ~/.kube
+    sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
+    sudo chown "$(id -u):$(id -g)" ~/.kube/config
+    echo "k3s kubeconfig copied to ~/.kube/config"
+  else
+    echo "k3s not installed yet — run k3s install first, then re-run prep-cluster-node to copy kubeconfig"
+  fi
 }
 
 # Function to generate self-signed certificates if they do not exist
