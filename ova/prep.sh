@@ -183,6 +183,16 @@ fi
 sudo chmod +x "$INSTALL_DIR/backup.sh"
 sudo chown "$INSTALL_USER" "$INSTALL_DIR/backup.sh"
 
+# Install k9s Kubernetes TUI
+if ! command -v k9s &> /dev/null; then
+  echo "Installing k9s..."
+  K9S_VERSION=$(curl -s https://api.github.com/repos/derailed/k9s/releases/latest | grep "tag_name" | cut -d '"' -f 4)
+  wget -q "https://github.com/derailed/k9s/releases/download/${K9S_VERSION}/k9s_Linux_amd64.tar.gz" -O /tmp/k9s.tar.gz
+  tar -xzf /tmp/k9s.tar.gz -C /usr/local/bin k9s
+  rm -f /tmp/k9s.tar.gz
+  echo "k9s ${K9S_VERSION} installed."
+fi
+
 sudo usermod -aG docker "$INSTALL_USER"
 sudo systemctl restart docker
 
