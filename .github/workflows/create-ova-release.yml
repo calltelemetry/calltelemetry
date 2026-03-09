@@ -50,10 +50,10 @@ jobs:
             JTAPI_VERSION="$VERSION"
           fi
 
-          # ct-media has its own version
+          # ct-media defaults to unified version (override only if needed)
           CT_MEDIA_VERSION="${{ inputs.ct_media_version }}"
           if [ -z "$CT_MEDIA_VERSION" ]; then
-            CT_MEDIA_VERSION="0.2.5"
+            CT_MEDIA_VERSION="$VERSION"
           fi
 
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
