@@ -227,6 +227,26 @@ jobs:
           # Push the commit
           git push
 
+          # Build image version table
+          IMAGE_TABLE="| Image | Version |
+          |-------|---------|
+          | calltelemetry/web | ${{ steps.resolve.outputs.web_version }} |
+          | calltelemetry/vue | ${{ steps.resolve.outputs.vue_version }} |
+          | calltelemetry/traceroute | ${{ steps.resolve.outputs.traceroute_version }} |
+          | calltelemetry/jtapi-sidecar | ${{ steps.resolve.outputs.jtapi_version }} |
+          | calltelemetry/ct-media | ${{ steps.resolve.outputs.ct_media_version }} |"
+          IMAGE_TABLE=$(echo "$IMAGE_TABLE" | sed 's/^          //')
+
+          UPGRADE_CMD="### Upgrade
+          \`\`\`bash
+          sudo curl https://get.calltelemetry.com | sudo sh -s -- update $VERSION
+          \`\`\`
+
+          ---
+
+          **Appliance Upgrade Instructions:** https://docs.calltelemetry.com/troubleshoot/upgrade"
+          UPGRADE_CMD=$(echo "$UPGRADE_CMD" | sed 's/^          //')
+
           # Pre-release = has extra suffix after rcN (e.g. 0.8.6-rc48-jtapi.1)
           # Stable     = plain rcN (e.g. 0.8.6-rc48)
           PRERELEASE_FLAG=""
@@ -237,35 +257,47 @@ jobs:
             echo "Marking as stable release: $VERSION"
           fi
 
-          # Create GitHub release with both version files
-          gh release create "$VERSION" \
-            $PRERELEASE_FLAG \
-            --title "$VERSION" \
-            --notes "$(cat << NOTES_EOF
-          ## CallTelemetry $VERSION
+          # Check if a draft release already exists (created by unified-release Job 0)
+          if gh release view "$VERSION" > /dev/null 2>&1; then
+            echo "Existing release found — updating with OVA assets"
 
-          | Image | Version |
-          |-------|---------|
-          | calltelemetry/web | ${{ steps.resolve.outputs.web_version }} |
-          | calltelemetry/vue | ${{ steps.resolve.outputs.vue_version }} |
-          | calltelemetry/traceroute | ${{ steps.resolve.outputs.traceroute_version }} |
-          | calltelemetry/jtapi-sidecar | ${{ steps.resolve.outputs.jtapi_version }} |
-          | calltelemetry/ct-media | ${{ steps.resolve.outputs.ct_media_version }} |
+            # Get existing notes and strip the internal Build Status section before publishing
+            EXISTING_NOTES=$(gh release view "$VERSION" --json body --jq .body 2>/dev/null || echo "")
+            EXISTING_NOTES=$(echo "$EXISTING_NOTES" | sed '/^### Build Status$/,/^$/d')
 
-          ### Upgrade
-          \`\`\`bash
-          sudo ./cli.sh update $VERSION
-          \`\`\`
+            COMBINED_NOTES="$EXISTING_NOTES
 
-          ---
+          $IMAGE_TABLE
 
-          **Appliance Upgrade Instructions:** https://docs.calltelemetry.com/troubleshoot/upgrade
-          NOTES_EOF
-          )" \
-            "ova/versions/${VERSION}.env" \
-            "ova/versions/${VERSION}.yaml"
+          $UPGRADE_CMD"
 
-          echo "Created release $VERSION"
+            # Upload assets to existing release
+            gh release upload "$VERSION" \
+              "ova/versions/${VERSION}.env" "ova/versions/${VERSION}.yaml" --clobber
+
+            # Edit release: mark non-draft, update notes
+            gh release edit "$VERSION" --draft=false $PRERELEASE_FLAG \
+              --notes "$COMBINED_NOTES"
+
+            echo "Updated existing release $VERSION with OVA assets"
+          else
+            echo "No existing release — creating new one"
+
+            NOTES="## Call Telemetry $VERSION
+
+          $IMAGE_TABLE
+
+          $UPGRADE_CMD"
+
+            gh release create "$VERSION" \
+              $PRERELEASE_FLAG \
+              --title "$VERSION" \
+              --notes "$NOTES" \
+              "ova/versions/${VERSION}.env" \
+              "ova/versions/${VERSION}.yaml"
+
+            echo "Created release $VERSION"
+          fi
         env:
           GITHUB_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
 

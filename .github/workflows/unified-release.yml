@@ -31,9 +31,93 @@ on:
 
 jobs:
   # ─────────────────────────────────────────────────────────────────
+  # Job 0: Generate release notes and create draft release on calltelemetry
+  # ─────────────────────────────────────────────────────────────────
+  generate-release-notes:
+    runs-on: ubuntu-latest
+    outputs:
+      release_notes: ${{ steps.notes.outputs.body }}
+      prev_version: ${{ steps.prev.outputs.prev_version }}
+    steps:
+      - name: Detect previous release
+        id: prev
+        env:
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+        run: |
+          PREV=$(gh release list --repo calltelemetry/calltelemetry --limit 1 \
+            --json tagName --jq '.[0].tagName' 2>/dev/null || echo "")
+          echo "Previous release: $PREV"
+          echo "prev_version=$PREV" >> "$GITHUB_OUTPUT"
+
+      - name: Collect commits across repos
+        id: notes
+        env:
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+        run: |
+          VERSION="${{ inputs.version }}"
+          PREV="${{ steps.prev.outputs.prev_version }}"
+
+          # Build release notes header
+          NOTES="## Call Telemetry $VERSION"
+          NOTES="$NOTES"$'\n\n'
+
+          if [ -n "$PREV" ]; then
+            echo "Collecting commits since $PREV..."
+            for repo in cisco-cdr ct-quasar jtapi-sidecar ct-media jtapi-operator; do
+              COMMITS=$(gh api "repos/calltelemetry/$repo/compare/${PREV}...${VERSION}" \
+                --jq '.commits[] | "- " + (.commit.message | split("\n")[0])' 2>/dev/null || echo "")
+              if [ -n "$COMMITS" ]; then
+                NOTES="$NOTES### $repo"$'\n'"$COMMITS"$'\n\n'
+              fi
+            done
+          else
+            NOTES="${NOTES}*First release — no previous version to compare.*"$'\n\n'
+          fi
+
+          # Add build status checklist (updated live during polling)
+          NOTES="${NOTES}### Build Status"$'\n'
+          NOTES="${NOTES}- [ ] cisco-cdr Docker build"$'\n'
+          NOTES="${NOTES}- [ ] ct-quasar Docker build"$'\n'
+          NOTES="${NOTES}- [ ] jtapi-sidecar Docker build"$'\n'
+          NOTES="${NOTES}- [ ] ct-media Docker build"$'\n'
+          NOTES="${NOTES}- [ ] jtapi-operator Docker build"$'\n'
+          NOTES="${NOTES}- [ ] OVA package"$'\n'
+
+          # Write to output using delimiter
+          echo "body<<NOTES_DELIM" >> "$GITHUB_OUTPUT"
+          echo "$NOTES" >> "$GITHUB_OUTPUT"
+          echo "NOTES_DELIM" >> "$GITHUB_OUTPUT"
+
+      - name: Create draft release on calltelemetry
+        env:
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+        run: |
+          VERSION="${{ inputs.version }}"
+
+          # Delete existing draft if re-running
+          gh release delete "$VERSION" --repo calltelemetry/calltelemetry --yes 2>/dev/null || true
+
+          gh release create "$VERSION" \
+            --repo calltelemetry/calltelemetry \
+            --title "$VERSION" \
+            --draft \
+            --notes "${{ steps.notes.outputs.body }}"
+
+          echo "Created draft release: $VERSION"
+
+      - name: Summary
+        run: |
+          echo "### Draft Release Created: ${{ inputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Previous version: ${{ steps.prev.outputs.prev_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Watch the release page for live build status updates." >> $GITHUB_STEP_SUMMARY
+
+  # ─────────────────────────────────────────────────────────────────
   # Job 1: Create GitHub releases in all component repos
   # ─────────────────────────────────────────────────────────────────
   create-releases:
+    needs: generate-release-notes
     if: ${{ !inputs.skip_component_releases }}
     runs-on: ubuntu-latest
     steps:
@@ -114,6 +198,25 @@ jobs:
             --latest \
             --notes "$NOTES"
 
+      - name: Create jtapi-operator release
+        env:
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+        run: |
+          echo "Creating jtapi-operator release: ${{ inputs.version }}"
+          NOTES=$(cat <<'NOTES_EOF'
+          Unified release ${{ inputs.version }}
+
+          **Appliance Upgrade Instructions:** https://docs.calltelemetry.com/troubleshoot/upgrade
+          NOTES_EOF
+          )
+          NOTES=$(echo "$NOTES" | sed 's/^          //')
+          gh release create "${{ inputs.version }}" \
+            --repo calltelemetry/jtapi-operator \
+            --target "${{ inputs.target_branch }}" \
+            --title "${{ inputs.version }}" \
+            --latest \
+            --notes "$NOTES"
+
       - name: Summary
         run: |
           CT_MEDIA_TAG="${{ inputs.ct_media_version || inputs.version }}"
@@ -124,6 +227,7 @@ jobs:
           echo "| ct-quasar | ${{ inputs.version }} | ${{ inputs.target_branch }} |" >> $GITHUB_STEP_SUMMARY
           echo "| jtapi-sidecar | ${{ inputs.version }} | ${{ inputs.target_branch }} |" >> $GITHUB_STEP_SUMMARY
           echo "| ct-media | $CT_MEDIA_TAG | ${{ inputs.target_branch }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| jtapi-operator | ${{ inputs.version }} | ${{ inputs.target_branch }} |" >> $GITHUB_STEP_SUMMARY
 
   # ─────────────────────────────────────────────────────────────────
   # Job 2: Wait for Docker builds (triggered by release:published)
@@ -131,8 +235,8 @@ jobs:
   # in each repo. This job just polls until they complete.
   # ─────────────────────────────────────────────────────────────────
   build-images:
-    needs: create-releases
-    if: ${{ !inputs.skip_docker_builds && always() && (needs.create-releases.result == 'success' || needs.create-releases.result == 'skipped') }}
+    needs: [generate-release-notes, create-releases]
+    if: ${{ !inputs.skip_docker_builds && always() && (needs.create-releases.result == 'success' || needs.create-releases.result == 'skipped') && (needs.generate-release-notes.result == 'success' || needs.generate-release-notes.result == 'skipped') }}
     runs-on: ubuntu-latest
     steps:
       - name: Capture run IDs from release-triggered builds (with dispatch fallback)
@@ -200,6 +304,7 @@ jobs:
           capture_or_dispatch "calltelemetry/ct-quasar" "publish_docker.yaml" "ct_quasar" "$VERSION"
           capture_or_dispatch "calltelemetry/jtapi-sidecar" "docker-release.yml" "jtapi_sidecar" "$VERSION"
           capture_or_dispatch "calltelemetry/ct-media" "docker-release.yml" "ct_media" "$CT_MEDIA_TAG"
+          capture_or_dispatch "calltelemetry/jtapi-operator" "docker-release.yml" "jtapi_operator" "$VERSION"
 
           echo ""
           echo "All run IDs captured."
@@ -208,6 +313,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
         run: |
+          VERSION="${{ inputs.version }}"
           echo "Polling Docker builds for completion..."
           echo ""
 
@@ -217,6 +323,7 @@ jobs:
             "ct-quasar:calltelemetry/ct-quasar:${{ steps.runs.outputs.ct_quasar_run_id }}" \
             "jtapi-sidecar:calltelemetry/jtapi-sidecar:${{ steps.runs.outputs.jtapi_sidecar_run_id }}" \
             "ct-media:calltelemetry/ct-media:${{ steps.runs.outputs.ct_media_run_id }}" \
+            "jtapi-operator:calltelemetry/jtapi-operator:${{ steps.runs.outputs.jtapi_operator_run_id }}" \
           )
 
           MAX_WAIT=2400  # 40 minutes
@@ -250,10 +357,26 @@ jobs:
                 DONE_MAP[$LABEL]="done"
                 if [ "$RUN_CONCLUSION" = "success" ]; then
                   echo "  $LABEL: completed (success) [run $RUN_ID]"
+                  # Update draft release checklist with completion status
+                  CURRENT_BODY=$(gh release view "$VERSION" --repo calltelemetry/calltelemetry \
+                    --json body --jq .body 2>/dev/null || echo "")
+                  if [ -n "$CURRENT_BODY" ]; then
+                    UPDATED_BODY=$(echo "$CURRENT_BODY" | sed "s/- \[ \] $LABEL Docker build/- [x] $LABEL Docker build/")
+                    gh release edit "$VERSION" --repo calltelemetry/calltelemetry \
+                      --notes "$UPDATED_BODY" 2>/dev/null || true
+                  fi
                 else
                   echo "  $LABEL: FAILED ($RUN_CONCLUSION) [run $RUN_ID]"
                   echo "::error::$LABEL build failed with conclusion: $RUN_CONCLUSION — https://github.com/$REPO/actions/runs/$RUN_ID"
                   FAILED=true
+                  # Update draft release with failure status
+                  CURRENT_BODY=$(gh release view "$VERSION" --repo calltelemetry/calltelemetry \
+                    --json body --jq .body 2>/dev/null || echo "")
+                  if [ -n "$CURRENT_BODY" ]; then
+                    UPDATED_BODY=$(echo "$CURRENT_BODY" | sed "s/- \[ \] $LABEL Docker build/- ❌ $LABEL Docker build (FAILED)/")
+                    gh release edit "$VERSION" --repo calltelemetry/calltelemetry \
+                      --notes "$UPDATED_BODY" 2>/dev/null || true
+                  fi
                 fi
               else
                 echo "  $LABEL: $RUN_STATUS [run $RUN_ID]"
@@ -300,7 +423,8 @@ jobs:
           IMAGES=("calltelemetry/web:$VERSION" \
                   "calltelemetry/vue:$VERSION" \
                   "calltelemetry/jtapi-sidecar:$VERSION" \
-                  "calltelemetry/ct-media:$CT_MEDIA")
+                  "calltelemetry/ct-media:$CT_MEDIA" \
+                  "calltelemetry/jtapi-operator:$VERSION")
 
           ALL_FOUND=true
           for IMAGE in "${IMAGES[@]}"; do
@@ -359,5 +483,6 @@ jobs:
           echo "| calltelemetry/vue | ${{ inputs.version }} |" >> $GITHUB_STEP_SUMMARY
           echo "| calltelemetry/jtapi-sidecar | ${{ inputs.version }} |" >> $GITHUB_STEP_SUMMARY
           echo "| calltelemetry/ct-media | ${{ steps.resolve.outputs.ct_media }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| calltelemetry/jtapi-operator | ${{ inputs.version }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "OVA release triggered. Monitor \`create-ova-release\` and \`package-release\` workflows for completion." >> $GITHUB_STEP_SUMMARY
