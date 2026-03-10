@@ -61,11 +61,13 @@ jobs:
           NOTES="## Call Telemetry $VERSION"
           NOTES="$NOTES"$'\n\n'
 
+          TARGET_BRANCH="${{ inputs.target_branch }}"
+
           if [ -n "$PREV" ]; then
             echo "Collecting commits since $PREV..."
             for repo in cisco-cdr ct-quasar jtapi-sidecar ct-media jtapi-operator; do
-              COMMITS=$(gh api "repos/calltelemetry/$repo/compare/${PREV}...${VERSION}" \
-                --jq '.commits[] | "- " + (.commit.message | split("\n")[0])' 2>/dev/null || echo "")
+              COMMITS=$(gh api "repos/calltelemetry/$repo/compare/${PREV}...${TARGET_BRANCH}" \
+                --jq '.commits[] | "- " + (.commit.message | split("\n")[0])' 2>&1 | grep -v '^\s*{' | grep -v '^\s*"' || echo "")
               if [ -n "$COMMITS" ]; then
                 NOTES="$NOTES### $repo"$'\n'"$COMMITS"$'\n\n'
               fi
