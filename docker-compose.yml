@@ -296,6 +296,8 @@ services:
         condition: service_completed_successfully
       nats:
         condition: service_started
+      web:
+        condition: service_healthy
     networks:
       - ct
     healthcheck:

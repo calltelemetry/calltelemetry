@@ -53,8 +53,6 @@ services:
     # NOTE: Do NOT add volumes for /data here — the base compose already
     # bind-mounts ./org-data:/data:rw. Overlay volumes would conflict.
     depends_on:
-      jtapi-sidecar:
-        condition: service_started
       seaweedfs:
         condition: service_healthy
 
@@ -133,6 +131,8 @@ services:
         condition: service_completed_successfully
       nats:
         condition: service_started
+      web:
+        condition: service_healthy
     networks:
       - ct
     healthcheck:
@@ -152,6 +152,7 @@ services:
       - S3_ENDPOINT=seaweedfs:8333
       - S3_ACCESS_KEY_ID=${S3_ACCESS_KEY_ID:-minioadmin}
       - S3_SECRET_ACCESS_KEY=${S3_SECRET_ACCESS_KEY:-minioadmin}
+      - S3_BUCKET=ct-audio
     networks:
       - ct
     depends_on:
