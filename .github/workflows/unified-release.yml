@@ -475,6 +475,77 @@ jobs:
             -f jtapi_version="${{ inputs.version }}" \
             -f ct_media_version="${{ steps.resolve.outputs.ct_media }}"
 
+      - name: Wait for OVA release to complete
+        env:
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+        run: |
+          echo "Waiting for create-ova-release to complete..."
+          sleep 10
+
+          # Find the run we just triggered
+          MAX_ATTEMPTS=6
+          ATTEMPTS=0
+          RUN_ID=""
+          while [ $ATTEMPTS -lt $MAX_ATTEMPTS ] && [ -z "$RUN_ID" ]; do
+            RUN_ID=$(gh run list --repo calltelemetry/calltelemetry \
+              --workflow create-ova-release.yml --limit 1 \
+              --json databaseId,createdAt \
+              --jq '.[0].databaseId' 2>/dev/null)
+            if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
+              RUN_ID=""
+              ATTEMPTS=$((ATTEMPTS + 1))
+              sleep 5
+            fi
+          done
+
+          if [ -z "$RUN_ID" ]; then
+            echo "::error::Could not find create-ova-release run"
+            exit 1
+          fi
+
+          echo "Found run: $RUN_ID — polling for completion..."
+
+          # Poll until complete (max 5 minutes)
+          ELAPSED=0
+          MAX_WAIT=300
+          while [ $ELAPSED -lt $MAX_WAIT ]; do
+            STATUS=$(gh run view "$RUN_ID" --repo calltelemetry/calltelemetry \
+              --json status,conclusion \
+              --jq '"\(.status):\(.conclusion // "pending")"' 2>/dev/null)
+            RUN_STATUS="${STATUS%%:*}"
+            RUN_CONCLUSION="${STATUS##*:}"
+
+            if [ "$RUN_STATUS" = "completed" ]; then
+              if [ "$RUN_CONCLUSION" = "success" ]; then
+                echo "create-ova-release completed successfully"
+                break
+              else
+                echo "::error::create-ova-release failed: $RUN_CONCLUSION"
+                exit 1
+              fi
+            fi
+
+            echo "  Status: $RUN_STATUS (${ELAPSED}s / ${MAX_WAIT}s)"
+            sleep 15
+            ELAPSED=$((ELAPSED + 15))
+          done
+
+          if [ $ELAPSED -ge $MAX_WAIT ]; then
+            echo "::error::Timed out waiting for create-ova-release"
+            exit 1
+          fi
+
+      - name: Trigger package-release bundle
+        env:
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+        run: |
+          echo "Triggering package-release for ${{ inputs.version }}..."
+          gh workflow run package-release.yml \
+            --repo calltelemetry/calltelemetry \
+            -f version="${{ inputs.version }}"
+
+          echo "Package-release triggered. Bundle will be uploaded to GCS."
+
       - name: Summary
         run: |
           echo "### Unified Release: ${{ inputs.version }}" >> $GITHUB_STEP_SUMMARY
