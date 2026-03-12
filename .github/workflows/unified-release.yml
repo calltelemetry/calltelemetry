@@ -66,7 +66,7 @@ jobs:
 
           if [ -n "$PREV" ]; then
             echo "Collecting commits since $PREV..."
-            for repo in cisco-cdr ct-quasar jtapi-sidecar ct-media jtapi-operator; do
+            for repo in cisco-cdr ct-quasar jtapi-sidecar ct-media jtapi-operator tracer; do
               COMMITS=$(gh api "repos/calltelemetry/$repo/compare/${PREV}...${TARGET_BRANCH}" \
                 --jq '.commits[] | "- " + (.commit.message | split("\n")[0])' 2>&1 | grep -v '^\s*{' | grep -v '^\s*"' || echo "")
               if [ -n "$COMMITS" ]; then
@@ -84,6 +84,7 @@ jobs:
           NOTES="${NOTES}- [ ] jtapi-sidecar Docker build"$'\n'
           NOTES="${NOTES}- [ ] ct-media Docker build"$'\n'
           NOTES="${NOTES}- [ ] jtapi-operator Docker build"$'\n'
+          NOTES="${NOTES}- [ ] tracer Docker build"$'\n'
           NOTES="${NOTES}- [ ] OVA package"$'\n'
 
           # Write to output using delimiter
@@ -220,6 +221,25 @@ jobs:
             --latest \
             --notes "$NOTES"
 
+      - name: Create tracer release
+        env:
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+        run: |
+          echo "Creating tracer release: ${{ inputs.version }}"
+          NOTES=$(cat <<'NOTES_EOF'
+          Unified release ${{ inputs.version }}
+
+          **Appliance Upgrade Instructions:** https://docs.calltelemetry.com/troubleshoot/upgrade
+          NOTES_EOF
+          )
+          NOTES=$(echo "$NOTES" | sed 's/^          //')
+          gh release create "${{ inputs.version }}" \
+            --repo calltelemetry/tracer \
+            --target "${{ inputs.target_branch }}" \
+            --title "${{ inputs.version }}" \
+            --latest \
+            --notes "$NOTES"
+
       - name: Summary
         run: |
           CT_MEDIA_TAG="${{ inputs.ct_media_version || inputs.version }}"
@@ -231,6 +251,7 @@ jobs:
           echo "| jtapi-sidecar | ${{ inputs.version }} | ${{ inputs.target_branch }} |" >> $GITHUB_STEP_SUMMARY
           echo "| ct-media | $CT_MEDIA_TAG | ${{ inputs.target_branch }} |" >> $GITHUB_STEP_SUMMARY
           echo "| jtapi-operator | ${{ inputs.version }} | ${{ inputs.target_branch }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| tracer | ${{ inputs.version }} | ${{ inputs.target_branch }} |" >> $GITHUB_STEP_SUMMARY
 
   # ─────────────────────────────────────────────────────────────────
   # Job 2: Wait for Docker builds (triggered by release:published)
@@ -308,6 +329,7 @@ jobs:
           capture_or_dispatch "calltelemetry/jtapi-sidecar" "docker-release.yml" "jtapi_sidecar" "$VERSION"
           capture_or_dispatch "calltelemetry/ct-media" "docker-release.yml" "ct_media" "$CT_MEDIA_TAG"
           capture_or_dispatch "calltelemetry/jtapi-operator" "docker-release.yml" "jtapi_operator" "$VERSION"
+          capture_or_dispatch "calltelemetry/tracer" "publish_docker.yaml" "tracer" "$VERSION"
 
           echo ""
           echo "All run IDs captured."
@@ -327,6 +349,7 @@ jobs:
             "jtapi-sidecar:calltelemetry/jtapi-sidecar:${{ steps.runs.outputs.jtapi_sidecar_run_id }}" \
             "ct-media:calltelemetry/ct-media:${{ steps.runs.outputs.ct_media_run_id }}" \
             "jtapi-operator:calltelemetry/jtapi-operator:${{ steps.runs.outputs.jtapi_operator_run_id }}" \
+            "tracer:calltelemetry/tracer:${{ steps.runs.outputs.tracer_run_id }}" \
           )
 
           MAX_WAIT=2400  # 40 minutes
@@ -427,7 +450,8 @@ jobs:
                   "calltelemetry/vue:$VERSION" \
                   "calltelemetry/jtapi-sidecar:$VERSION" \
                   "calltelemetry/ct-media:$CT_MEDIA" \
-                  "calltelemetry/jtapi-operator:$VERSION")
+                  "calltelemetry/jtapi-operator:$VERSION" \
+                  "calltelemetry/traceroute:$VERSION")
 
           ALL_FOUND=true
           for IMAGE in "${IMAGES[@]}"; do
@@ -558,5 +582,6 @@ jobs:
           echo "| calltelemetry/jtapi-sidecar | ${{ inputs.version }} |" >> $GITHUB_STEP_SUMMARY
           echo "| calltelemetry/ct-media | ${{ steps.resolve.outputs.ct_media }} |" >> $GITHUB_STEP_SUMMARY
           echo "| calltelemetry/jtapi-operator | ${{ inputs.version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| calltelemetry/traceroute | ${{ inputs.version }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "OVA release triggered. Monitor \`create-ova-release\` and \`package-release\` workflows for completion." >> $GITHUB_STEP_SUMMARY

@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       traceroute_version:
-        description: "Traceroute version override (leave empty for default: 0.8.5-rc27)"
+        description: "Traceroute version override (leave empty to use main version)"
         required: false
         type: string
       jtapi_version:
@@ -38,10 +38,10 @@ jobs:
           WEB_VERSION="$VERSION"
           VUE_VERSION="$VERSION"
 
-          # Traceroute has its own release cadence
+          # Traceroute now follows unified versioning
           TRACEROUTE_VERSION="${{ inputs.traceroute_version }}"
           if [ -z "$TRACEROUTE_VERSION" ]; then
-            TRACEROUTE_VERSION="0.8.5-rc27"
+            TRACEROUTE_VERSION="$VERSION"
           fi
 
           # JTAPI defaults to main version (unified release stamps all repos)
