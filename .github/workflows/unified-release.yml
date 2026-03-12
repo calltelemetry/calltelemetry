@@ -1,4 +1,5 @@
 name: Unified Release
+run-name: "Unified Release ${{ inputs.version }}"
 
 # Single workflow dispatch that stamps ONE version across all repos,
 # triggers Docker builds via workflow_dispatch, polls for completion,
