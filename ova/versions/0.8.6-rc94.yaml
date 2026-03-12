@@ -18,7 +18,7 @@ services:
       - ct
 
   traceroute:
-    image: "calltelemetry/traceroute:0.8.5-rc27"
+    image: "calltelemetry/traceroute:0.8.6-rc94"
     user: root
     expose:
       - "4100"
