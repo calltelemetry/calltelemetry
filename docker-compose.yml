@@ -35,7 +35,7 @@ services:
       start_period: 30s
 
   traceroute:
-    image: "calltelemetry/traceroute:${TRACEROUTE_VERSION:-0.8.5-rc27}"
+    image: "calltelemetry/traceroute:${TRACEROUTE_VERSION:-latest}"
     user: root
     expose:
       - "4100"
