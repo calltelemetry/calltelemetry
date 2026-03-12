@@ -8,10 +8,18 @@ jobs:
   trigger-ova-build:
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger OVA build in ai-workspace
+      - name: Trigger OVA build (ESXi) in ai-workspace
         uses: peter-evans/repository-dispatch@v3
         with:
           token: ${{ secrets.CT_WORKSPACE_DISPATCH_TOKEN }}
           repository: calltelemetry/ai-workspace
           event-type: build-ova
-          client-payload: '{"version": "${{ github.event.release.tag_name }}"}'
+          client-payload: '{"version": "${{ github.event.release.tag_name }}", "image_format": "ova"}'
+
+      - name: Trigger QCOW2 build (Nutanix) in ai-workspace
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.CT_WORKSPACE_DISPATCH_TOKEN }}
+          repository: calltelemetry/ai-workspace
+          event-type: build-ova
+          client-payload: '{"version": "${{ github.event.release.tag_name }}", "image_format": "qcow2"}'

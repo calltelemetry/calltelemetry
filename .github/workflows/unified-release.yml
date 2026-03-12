@@ -343,25 +343,34 @@ jobs:
           echo ""
 
           # Build entries: "label:repo:run_id"
-          BUILDS=( \
+          # Critical builds block the release; non-critical builds are warnings only.
+          CRITICAL_BUILDS=( \
             "cisco-cdr:calltelemetry/cisco-cdr:${{ steps.runs.outputs.cisco_cdr_run_id }}" \
             "ct-quasar:calltelemetry/ct-quasar:${{ steps.runs.outputs.ct_quasar_run_id }}" \
             "jtapi-sidecar:calltelemetry/jtapi-sidecar:${{ steps.runs.outputs.jtapi_sidecar_run_id }}" \
             "ct-media:calltelemetry/ct-media:${{ steps.runs.outputs.ct_media_run_id }}" \
             "jtapi-operator:calltelemetry/jtapi-operator:${{ steps.runs.outputs.jtapi_operator_run_id }}" \
+          )
+          # Non-critical: image publishes fine but post-publish security scan may fail
+          OPTIONAL_BUILDS=( \
             "tracer:calltelemetry/tracer:${{ steps.runs.outputs.tracer_run_id }}" \
           )
+          ALL_BUILDS=("${CRITICAL_BUILDS[@]}" "${OPTIONAL_BUILDS[@]}")
 
           MAX_WAIT=2400  # 40 minutes
           POLL_INTERVAL=30
           ELAPSED=0
           ALL_DONE=false
-          FAILED=false
+          CRITICAL_FAILED=false
           declare -A DONE_MAP
+          declare -A OPTIONAL_SET
+          for entry in "${OPTIONAL_BUILDS[@]}"; do
+            OPTIONAL_SET["${entry%%:*}"]="1"
+          done
 
           while [ "$ALL_DONE" != "true" ] && [ $ELAPSED -lt $MAX_WAIT ]; do
             ALL_DONE=true
-            for entry in "${BUILDS[@]}"; do
+            for entry in "${ALL_BUILDS[@]}"; do
               LABEL="${entry%%:*}"
               REST="${entry#*:}"
               REPO="${REST%%:*}"
@@ -392,16 +401,30 @@ jobs:
                       --notes "$UPDATED_BODY" 2>/dev/null || true
                   fi
                 else
-                  echo "  $LABEL: FAILED ($RUN_CONCLUSION) [run $RUN_ID]"
-                  echo "::error::$LABEL build failed with conclusion: $RUN_CONCLUSION — https://github.com/$REPO/actions/runs/$RUN_ID"
-                  FAILED=true
-                  # Update draft release with failure status
-                  CURRENT_BODY=$(gh release view "$VERSION" --repo calltelemetry/calltelemetry \
-                    --json body --jq .body 2>/dev/null || echo "")
-                  if [ -n "$CURRENT_BODY" ]; then
-                    UPDATED_BODY=$(echo "$CURRENT_BODY" | sed "s/- \[ \] $LABEL Docker build/- ❌ $LABEL Docker build (FAILED)/")
-                    gh release edit "$VERSION" --repo calltelemetry/calltelemetry \
-                      --notes "$UPDATED_BODY" 2>/dev/null || true
+                  IS_OPTIONAL="${OPTIONAL_SET[$LABEL]:-}"
+                  if [ -n "$IS_OPTIONAL" ]; then
+                    echo "  $LABEL: FAILED ($RUN_CONCLUSION) [run $RUN_ID] — non-critical, continuing"
+                    echo "::warning::$LABEL build failed (non-critical): $RUN_CONCLUSION — https://github.com/$REPO/actions/runs/$RUN_ID"
+                    # Update draft release with warning status
+                    CURRENT_BODY=$(gh release view "$VERSION" --repo calltelemetry/calltelemetry \
+                      --json body --jq .body 2>/dev/null || echo "")
+                    if [ -n "$CURRENT_BODY" ]; then
+                      UPDATED_BODY=$(echo "$CURRENT_BODY" | sed "s/- \[ \] $LABEL Docker build/- ⚠️ $LABEL Docker build (security scan failed)/")
+                      gh release edit "$VERSION" --repo calltelemetry/calltelemetry \
+                        --notes "$UPDATED_BODY" 2>/dev/null || true
+                    fi
+                  else
+                    echo "  $LABEL: FAILED ($RUN_CONCLUSION) [run $RUN_ID]"
+                    echo "::error::$LABEL build failed with conclusion: $RUN_CONCLUSION — https://github.com/$REPO/actions/runs/$RUN_ID"
+                    CRITICAL_FAILED=true
+                    # Update draft release with failure status
+                    CURRENT_BODY=$(gh release view "$VERSION" --repo calltelemetry/calltelemetry \
+                      --json body --jq .body 2>/dev/null || echo "")
+                    if [ -n "$CURRENT_BODY" ]; then
+                      UPDATED_BODY=$(echo "$CURRENT_BODY" | sed "s/- \[ \] $LABEL Docker build/- ❌ $LABEL Docker build (FAILED)/")
+                      gh release edit "$VERSION" --repo calltelemetry/calltelemetry \
+                        --notes "$UPDATED_BODY" 2>/dev/null || true
+                    fi
                   fi
                 fi
               else
@@ -419,9 +442,9 @@ jobs:
 
           echo ""
 
-          # Hard fail on any build failure
-          if [ "$FAILED" = "true" ]; then
-            echo "::error::One or more Docker builds failed — aborting release"
+          # Hard fail only on critical build failures
+          if [ "$CRITICAL_FAILED" = "true" ]; then
+            echo "::error::One or more critical Docker builds failed — aborting release"
             exit 1
           fi
 
