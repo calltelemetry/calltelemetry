@@ -1133,6 +1133,7 @@ show_help() {
   echo "  diag raw_tcp <ipv4|ipv6> <url>  Test raw TCP socket only"
   echo "  diag capture <secs> [filter] [file]  Capture packets with tcpdump"
   echo "  diag database               Run comprehensive database diagnostics"
+  echo "  diag db-watch               Live database activity monitor (refreshes every 2s)"
   echo
   echo "Advanced Commands:"
   echo "  build-appliance     Download and execute the prep script"
@@ -5004,6 +5005,18 @@ end
 
         echo "=== Database Diagnostics Complete ==="
         ;;
+      db-watch|dbwatch)
+        echo "=== Live Database Activity Monitor ==="
+        echo "Refreshing every 2 seconds. Press Ctrl+C to stop."
+        echo ""
+        watch -n 2 -d -- docker exec calltelemetry-db-1 env PGPASSWORD=postgres psql -U calltelemetry -d calltelemetry_prod -xc \
+          "SELECT pid, state, wait_event_type, now() - query_start AS duration, left(query, 120) AS query
+           FROM pg_stat_activity
+           WHERE datname = 'calltelemetry_prod'
+             AND state != 'idle'
+             AND query NOT ILIKE '%pg_stat_activity%'
+           ORDER BY query_start;"
+        ;;
       network)
         echo "=== Network Diagnostics ==="
         echo ""
@@ -5238,6 +5251,7 @@ end
         echo "  raw_tcp <ipv4|ipv6> <url>  Test raw TCP socket only"
         echo "  capture <secs> [filter] [file]  Capture packets with tcpdump"
         echo "  database                   Run comprehensive database diagnostics"
+        echo "  db-watch                   Live database activity monitor (refreshes every 2s)"
         echo ""
         echo "Examples:"
         echo "  cli.sh diag network"
