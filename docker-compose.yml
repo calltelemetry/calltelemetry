@@ -128,6 +128,8 @@ services:
       # Persistent org-scoped media storage (JTAPI audio, recordings, etc)
       - ./org-data:/data:rw
       - /var/run/docker.sock:/var/run/docker.sock
+      # Host root filesystem (read-only) for accurate disk space alarms
+      - /:/hostfs:ro
     logging:
       driver: "json-file"
       options:
