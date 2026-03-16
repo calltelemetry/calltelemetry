@@ -2126,7 +2126,7 @@ compact_system() {
 # Flow: 1) Wait for containers 2) Wait for DB 3) Wait for migrations 4) Health check
 # Returns 0 on full success, 1 if any phase failed or timed out
 wait_for_services() {
-  local max_wait=600
+  local max_wait=3600
   local poll_interval=5
   local wait_time=0
   local release_bin=$(get_release_binary)
