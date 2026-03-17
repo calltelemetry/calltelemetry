@@ -2028,10 +2028,19 @@ update() {
     wait_for_services
     services_ok=$?
 
-    # Ensure Node.js is available for @calltelemetry/cli
-    if ! command -v node &>/dev/null; then
-      echo "Installing Node.js..."
-      sudo dnf install -y nodejs npm &>/dev/null && echo "✅ Node.js installed" || echo "⚠️  Node.js install failed (non-critical)"
+    # Ensure Node.js 22+ is available for @calltelemetry MCP servers
+    REQUIRED_NODE_MAJOR=22
+    CURRENT_NODE_MAJOR=$(node --version 2>/dev/null | sed 's/v\([0-9]*\).*/\1/' || echo "0")
+
+    if [ "$CURRENT_NODE_MAJOR" -lt "$REQUIRED_NODE_MAJOR" ] 2>/dev/null; then
+      echo "Installing Node.js $REQUIRED_NODE_MAJOR (current: v${CURRENT_NODE_MAJOR:-none})..."
+      # Remove old dnf-managed nodejs to avoid conflicts
+      sudo dnf remove -y nodejs npm 2>/dev/null
+      # Install from NodeSource for up-to-date LTS
+      curl -fsSL https://rpm.nodesource.com/setup_${REQUIRED_NODE_MAJOR}.x | sudo bash - &>/dev/null
+      sudo dnf install -y nodejs &>/dev/null && echo "✅ Node.js $(node --version) installed" || echo "⚠️  Node.js install failed (non-critical)"
+    else
+      echo "✅ Node.js v${CURRENT_NODE_MAJOR} already meets minimum (>=${REQUIRED_NODE_MAJOR})"
     fi
 
     if [ $services_ok -eq 0 ]; then
