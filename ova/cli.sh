@@ -4649,8 +4649,8 @@ case "$1" in
   diag)
     case "$2" in
       tesla)
-        local ip_mode="$3"
-        local url="$4"
+        ip_mode="$3"
+        url="$4"
 
         if [ -z "$ip_mode" ] || [ -z "$url" ]; then
           echo "Usage: cli.sh diag tesla <ipv4|ipv6> <url>"
@@ -4673,7 +4673,7 @@ case "$1" in
         fi
 
         # Parse URL to extract host and port
-        local host port
+        host port
         if [[ "$url" =~ http://\[([^\]]+)\]:([0-9]+) ]]; then
           # IPv6 format: http://[host]:port
           host="${BASH_REMATCH[1]}"
@@ -4698,7 +4698,7 @@ case "$1" in
         echo ""
 
         # Get current image tag
-        local image_tag=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep "calltelemetry/web" | head -1)
+        image_tag=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep "calltelemetry/web" | head -1)
         if [ -z "$image_tag" ]; then
           image_tag="calltelemetry/web:latest"
         fi
@@ -4707,7 +4707,7 @@ case "$1" in
         echo ""
 
         # Build Elixir code based on mode
-        local elixir_code="Application.ensure_all_started(:hackney)"
+        elixir_code="Application.ensure_all_started(:hackney)"
 
         if [ "$ip_mode" = "ipv4" ]; then
           elixir_code="$elixir_code
@@ -4730,7 +4730,7 @@ end
 "
         elif [ "$ip_mode" = "ipv6" ]; then
           # Convert IPv6 to Erlang tuple format
-          local ipv6_tuple=$(echo "$host" | python3 -c "
+          ipv6_tuple=$(echo "$host" | python3 -c "
 import sys
 import ipaddress
 addr = ipaddress.ip_address(sys.stdin.read().strip())
@@ -4768,8 +4768,8 @@ end
         docker run --rm --network host "$image_tag" /home/app/onprem/bin/onprem eval "$elixir_code"
         ;;
       raw_tcp)
-        local ip_mode="$3"
-        local url="$4"
+        ip_mode="$3"
+        url="$4"
 
         if [ -z "$ip_mode" ] || [ -z "$url" ]; then
           echo "Usage: cli.sh diag raw_tcp <ipv4|ipv6> <url>"
@@ -4792,7 +4792,7 @@ end
         fi
 
         # Parse URL to extract host and port
-        local host port
+        host port
         if [[ "$url" =~ http://\[([^\]]+)\]:([0-9]+) ]]; then
           host="${BASH_REMATCH[1]}"
           port="${BASH_REMATCH[2]}"
@@ -4815,7 +4815,7 @@ end
         echo ""
 
         # Get current image tag
-        local image_tag=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep "calltelemetry/web" | head -1)
+        image_tag=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep "calltelemetry/web" | head -1)
         if [ -z "$image_tag" ]; then
           image_tag="calltelemetry/web:latest"
         fi
@@ -4823,7 +4823,7 @@ end
         echo "Using image: $image_tag"
         echo ""
 
-        local elixir_code=""
+        elixir_code=""
 
         if [ "$ip_mode" = "ipv4" ]; then
           elixir_code="
@@ -4837,7 +4837,7 @@ case :gen_tcp.connect(~c\"$host\", $port, [:inet], 5000) do
 end
 "
         elif [ "$ip_mode" = "ipv6" ]; then
-          local ipv6_tuple=$(echo "$host" | python3 -c "
+          ipv6_tuple=$(echo "$host" | python3 -c "
 import sys
 import ipaddress
 addr = ipaddress.ip_address(sys.stdin.read().strip())
@@ -4867,9 +4867,9 @@ end
         docker run --rm --network host "$image_tag" /home/app/onprem/bin/onprem eval "$elixir_code"
         ;;
       capture)
-        local duration="$3"
-        local filter="$4"
-        local output_file="$5"
+        duration="$3"
+        filter="$4"
+        output_file="$5"
 
         if [ -z "$duration" ]; then
           echo "Usage: cli.sh diag capture <duration> [filter] [output.pcap]"
@@ -4920,7 +4920,7 @@ end
         echo ""
 
         # Build tcpdump command
-        local tcpdump_cmd="sudo tcpdump -w '$output_file'"
+        tcpdump_cmd="sudo tcpdump -w '$output_file'"
         if [ -n "$filter" ]; then
           tcpdump_cmd="$tcpdump_cmd $filter"
         fi
@@ -4938,8 +4938,8 @@ end
 
         echo ""
         if [ -f "$output_file" ]; then
-          local file_size=$(ls -lh "$output_file" | awk '{print $5}')
-          local packet_count=$(sudo tcpdump -r "$output_file" 2>/dev/null | wc -l)
+          file_size=$(ls -lh "$output_file" | awk '{print $5}')
+          packet_count=$(sudo tcpdump -r "$output_file" 2>/dev/null | wc -l)
           echo "Capture complete!"
           echo "  File:    $output_file"
           echo "  Size:    $file_size"
@@ -5203,7 +5203,7 @@ end
         echo "=== Service Diagnostics ==="
         echo ""
 
-        local SERVICE_FILE="/etc/systemd/system/docker-compose-app.service"
+        SERVICE_FILE="/etc/systemd/system/docker-compose-app.service"
 
         # Print systemd service file
         echo "--- Systemd Service File ($SERVICE_FILE) ---"
