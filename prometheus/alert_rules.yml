@@ -82,3 +82,43 @@ groups:
         annotations:
           summary: 'Oban queue {{ $labels.queue }} backlog: {{ $value }} available jobs'
           description: 'Job backlog building up — workers may be overwhelmed.'
+
+  - name: call_health
+    rules:
+      - alert: PhoneRegistrationDrop
+        expr: ct_phones_registration_percent < 95
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Phone registration dropped to {{ $value }}% on cluster {{ $labels.callmanager_id }}'
+          description: 'Less than 95% of phones are registered. Possible CUCM or network issue.'
+          runbook_url: 'https://docs.calltelemetry.com/runbooks/phone-registration-drop'
+
+      - alert: PhoneRegistrationCritical
+        expr: ct_phones_registration_percent < 80
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'CRITICAL: Only {{ $value }}% phones registered on cluster {{ $labels.callmanager_id }}'
+          description: 'Major registration loss. Users are likely unable to make calls.'
+
+      - alert: CDRIngestionStopped
+        expr: ct_cdr_ingestion_lag_seconds > 300
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'No CDR records received for org {{ $labels.org_id }} in {{ $value }}s'
+          description: 'CDR ingestion has stopped. Call records are not being captured. Audit trail at risk.'
+          runbook_url: 'https://docs.calltelemetry.com/runbooks/cdr-ingestion-stopped'
+
+      - alert: CDRIngestionCritical
+        expr: ct_cdr_ingestion_lag_seconds > 900
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'CDR ingestion down for 15+ minutes (org {{ $labels.org_id }})'
+          description: 'No call records for over 15 minutes. SFTP may be broken or CUCM stopped sending CDRs.'
