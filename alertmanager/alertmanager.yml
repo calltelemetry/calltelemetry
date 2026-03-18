@@ -1,0 +1,39 @@
+# AlertManager Configuration for CallTelemetry
+# Dual delivery: critical alerts email directly, all alerts webhook to API
+
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: 'calltelemetry-webhook'
+  group_by: ['alertname']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    # Critical alerts: email directly AND webhook
+    - match:
+        severity: critical
+      receiver: 'critical-direct'
+      continue: true
+
+    # All alerts: webhook to Elixir API
+    - receiver: 'calltelemetry-webhook'
+
+receivers:
+  # Webhook to Elixir API — handles Webex, SSE, DB logging
+  - name: 'calltelemetry-webhook'
+    webhook_configs:
+      - url: 'http://web:4000/api/internal/alertmanager-webhook'
+        send_resolved: true
+
+  # Direct email for critical alerts — works even if API is down
+  # SMTP settings synced from app org settings
+  - name: 'critical-direct'
+    webhook_configs:
+      - url: 'http://web:4000/api/internal/alertmanager-webhook'
+        send_resolved: true
+    # Email config added dynamically when SMTP is configured:
+    # email_configs:
+    #   - to: 'admin@example.com'
+    #     send_resolved: true

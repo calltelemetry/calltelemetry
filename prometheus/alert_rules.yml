@@ -1,0 +1,84 @@
+# Prometheus Alert Rules for CallTelemetry
+# These rules use metrics from the SystemHealth PromEx plugin (ct_* gauges)
+# `for:` provides built-in hysteresis — alert only fires if condition persists
+
+groups:
+  - name: system_health
+    rules:
+      - alert: HighDiskUsage
+        expr: ct_disk_usage_percent{mount="/"} > 90
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Disk usage {{ $value }}% exceeds 90% on mount {{ $labels.mount }}'
+          description: 'Root partition disk usage has been above 90% for 5 minutes.'
+          runbook_url: 'https://docs.calltelemetry.com/runbooks/high-disk-usage'
+
+      - alert: HighCPUUsage
+        expr: ct_cpu_usage_percent > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'CPU usage {{ $value }}% exceeds 80%'
+          description: 'CPU utilization has been above 80% for 5 minutes.'
+
+      - alert: HighMemoryUsage
+        expr: ct_memory_usage_percent > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Memory usage {{ $value }}% exceeds 85%'
+          description: 'System memory usage has been above 85% for 5 minutes.'
+
+  - name: application_health
+    rules:
+      - alert: AppDown
+        expr: up{job="calltelemetry"} == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: 'CallTelemetry API is DOWN'
+          description: 'The Elixir API has been unreachable for 30 seconds.'
+          runbook_url: 'https://docs.calltelemetry.com/runbooks/app-down'
+
+      - alert: NATSDisconnected
+        expr: ct_nats_connection_status == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: 'NATS connection lost'
+          description: 'The NATS message broker connection has been down for 30 seconds.'
+
+      - alert: HighProcessCount
+        expr: ct_beam_process_count > 50000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'BEAM process count {{ $value }} exceeds 50000'
+          description: 'High Erlang process count may indicate a resource leak.'
+
+  - name: oban_health
+    rules:
+      - alert: ObanRetryableJobs
+        expr: ct_oban_queue_depth{state="retryable"} > 50
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Oban queue {{ $labels.queue }} has {{ $value }} retryable jobs'
+          description: 'High retryable job count may indicate persistent failures.'
+
+      - alert: ObanAvailableBacklog
+        expr: ct_oban_queue_depth{state="available"} > 100
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Oban queue {{ $labels.queue }} backlog: {{ $value }} available jobs'
+          description: 'Job backlog building up — workers may be overwhelmed.'
