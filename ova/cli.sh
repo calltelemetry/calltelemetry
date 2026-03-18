@@ -154,6 +154,48 @@ env_set() {
   fi
 }
 
+# Apply a PostgreSQL memory sizing profile (small/medium/large)
+apply_postgres_profile() {
+  local profile="$1"
+  case "$profile" in
+    small)
+      env_set "PG_PROFILE" "small"
+      env_set "PG_SHM_SIZE" "1gb"
+      env_set "PG_SHARED_BUFFERS" "512MB"
+      env_set "PG_EFFECTIVE_CACHE_SIZE" "1536MB"
+      env_set "PG_WORK_MEM" "8MB"
+      env_set "PG_MAINTENANCE_WORK_MEM" "128MB"
+      ;;
+    medium)
+      env_set "PG_PROFILE" "medium"
+      env_set "PG_SHM_SIZE" "4gb"
+      env_set "PG_SHARED_BUFFERS" "2GB"
+      env_set "PG_EFFECTIVE_CACHE_SIZE" "6GB"
+      env_set "PG_WORK_MEM" "16MB"
+      env_set "PG_MAINTENANCE_WORK_MEM" "256MB"
+      ;;
+    large)
+      env_set "PG_PROFILE" "large"
+      env_set "PG_SHM_SIZE" "8gb"
+      env_set "PG_SHARED_BUFFERS" "4GB"
+      env_set "PG_EFFECTIVE_CACHE_SIZE" "12GB"
+      env_set "PG_WORK_MEM" "32MB"
+      env_set "PG_MAINTENANCE_WORK_MEM" "512MB"
+      ;;
+    *)
+      echo "Usage: cli.sh postgres profile <small|medium|large|show>"
+      return 1
+      ;;
+  esac
+  echo "PostgreSQL profile set to: $profile"
+  echo "  shared_buffers:        $(env_get PG_SHARED_BUFFERS)"
+  echo "  effective_cache_size:  $(env_get PG_EFFECTIVE_CACHE_SIZE)"
+  echo "  work_mem:              $(env_get PG_WORK_MEM)"
+  echo "  maintenance_work_mem:  $(env_get PG_MAINTENANCE_WORK_MEM)"
+  echo ""
+  echo "Restart required to apply: cli.sh restart"
+}
+
 # Remove a key from .env
 env_remove() {
   local key="$1"
@@ -3989,8 +4031,36 @@ case "$1" in
         echo "Supported versions: $POSTGRES_SUPPORTED_VERSIONS"
         echo ""
         echo "Usage:"
-        echo "  cli.sh postgres set <version>     Set version for next update"
-        echo "  cli.sh postgres upgrade <version> Upgrade to new major version"
+        echo "  cli.sh postgres set <version>              Set version for next update"
+        echo "  cli.sh postgres upgrade <version>          Upgrade to new major version"
+        echo "  cli.sh postgres profile <small|medium|large|show>  Set memory sizing profile"
+        ;;
+      profile)
+        local subaction="${3:-show}"
+        case "$subaction" in
+          show)
+            local current
+            current=$(env_get "PG_PROFILE")
+            echo "Current PostgreSQL profile: ${current:-small (default)}"
+            echo ""
+            echo "  small  — 512MB shared_buffers,  8MB work_mem   (8GB appliance,  <40GB DB)"
+            echo "  medium — 2GB shared_buffers,   16MB work_mem   (16GB server,  40-100GB DB)"
+            echo "  large  — 4GB shared_buffers,   32MB work_mem   (32GB+ server, 100GB+ DB)"
+            echo ""
+            echo "Current values:"
+            echo "  shared_buffers:        $(env_get PG_SHARED_BUFFERS || echo '512MB (default)')"
+            echo "  effective_cache_size:  $(env_get PG_EFFECTIVE_CACHE_SIZE || echo '1536MB (default)')"
+            echo "  work_mem:              $(env_get PG_WORK_MEM || echo '8MB (default)')"
+            echo "  maintenance_work_mem:  $(env_get PG_MAINTENANCE_WORK_MEM || echo '128MB (default)')"
+            ;;
+          small|medium|large)
+            apply_postgres_profile "$subaction"
+            ;;
+          *)
+            echo "Usage: cli.sh postgres profile <small|medium|large|show>"
+            exit 1
+            ;;
+        esac
         ;;
       set)
         if [ -z "$3" ]; then
@@ -4181,7 +4251,7 @@ case "$1" in
         ;;
       *)
         echo "Unknown postgres command: $2"
-        echo "Usage: cli.sh postgres [status|set <version>|upgrade <version>]"
+        echo "Usage: cli.sh postgres [status|set <version>|upgrade <version>|profile <small|medium|large|show>]"
         exit 1
         ;;
     esac
