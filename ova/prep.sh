@@ -197,6 +197,11 @@ else
   echo "Node.js v${CURRENT_NODE_MAJOR} already meets minimum (>=${REQUIRED_NODE_MAJOR})"
 fi
 
+# Install ct-cli (CallTelemetry CLI) globally
+echo "Installing @calltelemetry/cli..."
+sudo npm install -g @calltelemetry/cli
+echo "ct-cli $(ct --version 2>/dev/null || echo 'installed') ready."
+
 # Install k9s Kubernetes TUI
 if ! command -v k9s &> /dev/null; then
   echo "Installing k9s..."
