@@ -3836,19 +3836,40 @@ prep_cluster_node() {
   fi
 }
 
-# Function to generate self-signed certificates if they do not exist
+# Function to generate self-signed certificates if they do not exist, are expired, or are mismatched
 generate_self_signed_certificates() {
   cert_dir="./certs"
   cert_file="$cert_dir/appliance.crt"
   key_file="$cert_dir/appliance_key.pem"
 
+  local need_generate=false
+
   if [ ! -f "$cert_file" ] || [ ! -f "$key_file" ]; then
+    need_generate=true
+  elif command -v openssl >/dev/null 2>&1; then
+    # Regenerate if expired
+    if ! openssl x509 -in "$cert_file" -noout -checkend 0 >/dev/null 2>&1; then
+      echo "Certificate is expired. Regenerating..."
+      need_generate=true
+    else
+      # Regenerate if cert and key don't match
+      local cert_mod key_mod
+      cert_mod=$(openssl x509 -in "$cert_file" -noout -modulus 2>/dev/null | md5sum)
+      key_mod=$(openssl rsa -in "$key_file" -noout -modulus 2>/dev/null | md5sum)
+      if [ "$cert_mod" != "$key_mod" ]; then
+        echo "Certificate and key do not match. Regenerating..."
+        need_generate=true
+      fi
+    fi
+  fi
+
+  if [ "$need_generate" = true ]; then
     echo "Generating self-signed certificates..."
     mkdir -p "$cert_dir"
-    openssl req -x509 -nodes -days 3650 -newkey rsa:2048 -keyout "$key_file" -out "$cert_file" -subj "/CN=appliance.calltelemetry.internal"
-    echo "No certs found. Self-signed certificates generated."
+    openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout "$key_file" -out "$cert_file" -subj "/CN=appliance.calltelemetry.internal"
+    echo "Self-signed certificates generated."
   else
-    echo "Certificates already exist. Skipping generation."
+    echo "Certificates already exist and are valid. Skipping generation."
   fi
 }
 
