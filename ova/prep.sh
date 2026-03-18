@@ -266,6 +266,60 @@ if ! grep -q 'loglevel=3' /etc/default/grub 2>/dev/null; then
   sudo grub2-mkconfig -o /boot/grub2/grub.cfg 2>/dev/null || true
 fi
 
+# First-boot network wizard: runs on first interactive login if no IP is present.
+# Uses /etc/ct-network-configured as sentinel so it only fires once.
+# After DHCP or static IP is confirmed, shows the standard "sudo ./cli.sh" hint.
+sudo tee /etc/profile.d/ct-firstboot.sh > /dev/null <<'PROFILE_EOF'
+#!/bin/bash
+# ct-firstboot.sh — First-boot network setup for Call Telemetry Appliance
+[ -f /etc/ct-network-configured ] && return 0
+[ -t 0 ] || return 0
+CT_CLI="/home/calltelemetry/cli.sh"
+[ -f "$CT_CLI" ] || return 0
+
+IP=$(ip -4 addr show scope global 2>/dev/null | grep inet | head -1 | awk '{print $2}' | cut -d/ -f1)
+if [ -n "$IP" ]; then
+  sudo touch /etc/ct-network-configured 2>/dev/null || touch /etc/ct-network-configured
+  echo ""
+  echo "  Network : $IP (DHCP)"
+  echo "  Web UI  : https://$IP"
+  echo "  Run     : sudo ./cli.sh  for appliance management"
+  echo ""
+  return 0
+fi
+
+echo ""
+echo "================================================================"
+echo "  Call Telemetry Appliance — Network Setup Required"
+echo "  No IP address detected. Configure network to access the UI."
+echo "================================================================"
+echo ""
+
+sudo "$CT_CLI" network address
+echo ""
+read -rp "  Set DNS servers? [y/N] " set_dns </dev/tty
+if [[ "$set_dns" =~ ^[Yy]$ ]]; then
+  sudo "$CT_CLI" network dns-servers
+  echo ""
+fi
+read -rp "  Set a search domain? [y/N] " set_domain </dev/tty
+if [[ "$set_domain" =~ ^[Yy]$ ]]; then
+  sudo "$CT_CLI" network domain
+  echo ""
+fi
+
+sudo touch /etc/ct-network-configured 2>/dev/null || touch /etc/ct-network-configured
+
+IP=$(ip -4 addr show scope global 2>/dev/null | grep inet | head -1 | awk '{print $2}' | cut -d/ -f1)
+echo ""
+echo "================================================================"
+echo "  Network configured. Web UI: https://${IP:-(pending)}"
+echo "  Run: sudo ./cli.sh  for all appliance management commands."
+echo "================================================================"
+echo ""
+PROFILE_EOF
+sudo chmod +x /etc/profile.d/ct-firstboot.sh
+
 echo "Appliance prep complete."
 echo "IMPORTANT - After this next step you must access the appliance on port 2222 - NOT PORT 22."
 
