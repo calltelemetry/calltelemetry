@@ -364,8 +364,8 @@ if [ "$response" = "yes" ]; then
       echo "Unsupported OS. Please make sure your firewall allows access to port 2222 "
   fi
 
-  # Restart SSH service
-  sudo systemctl restart sshd
+  # Reload SSH service (preserves existing sessions for Packer/CI; new connections use port 2222)
+  sudo systemctl reload sshd || sudo systemctl restart sshd
 else
   echo "The SSH port change was not applied. Please rerun the script and choose 'yes' to complete the setup."
 fi
