@@ -185,21 +185,22 @@ sudo chown "$INSTALL_USER" "$INSTALL_DIR/backup.sh"
 
 # Install Node.js 22 LTS (required for @calltelemetry MCP servers)
 REQUIRED_NODE_MAJOR=22
-CURRENT_NODE_MAJOR=$(node --version 2>/dev/null | sed 's/v\([0-9]*\).*/\1/' || echo "0")
+CURRENT_NODE_MAJOR=$(node --version 2>/dev/null | sed 's/v\([0-9]*\).*/\1/')
+CURRENT_NODE_MAJOR="${CURRENT_NODE_MAJOR:-0}"
 
-if [ "$CURRENT_NODE_MAJOR" -lt "$REQUIRED_NODE_MAJOR" ] 2>/dev/null; then
+if [ "${CURRENT_NODE_MAJOR}" -lt "${REQUIRED_NODE_MAJOR}" ] 2>/dev/null; then
   echo "Installing Node.js ${REQUIRED_NODE_MAJOR} LTS..."
   sudo dnf remove -y nodejs npm 2>/dev/null || true
   curl -fsSL https://rpm.nodesource.com/setup_${REQUIRED_NODE_MAJOR}.x | sudo bash -
   sudo dnf install -y nodejs
-  echo "Node.js $(node --version) installed."
+  echo "Node.js $(/usr/bin/node --version) installed."
 else
   echo "Node.js v${CURRENT_NODE_MAJOR} already meets minimum (>=${REQUIRED_NODE_MAJOR})"
 fi
 
 # Install ct-cli (CallTelemetry CLI) globally
 echo "Installing @calltelemetry/cli..."
-sudo npm install -g @calltelemetry/cli
+sudo /usr/bin/npm install -g @calltelemetry/cli
 echo "ct-cli $(ct --version 2>/dev/null || echo 'installed') ready."
 
 # Install k9s Kubernetes TUI
