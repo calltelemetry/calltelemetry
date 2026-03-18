@@ -122,3 +122,45 @@ groups:
         annotations:
           summary: 'CDR ingestion down for 15+ minutes (org {{ $labels.org_id }})'
           description: 'No call records for over 15 minutes. SFTP may be broken or CUCM stopped sending CDRs.'
+
+  - name: license_health
+    rules:
+      - alert: LicenseExpiringSoon
+        expr: ct_license_days_until_expiry < 30
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: 'License for org {{ $labels.org_id }} expires in {{ $value }} days'
+          description: 'License expiration is approaching. Renew before it expires to avoid downgrade to Community Edition.'
+
+      - alert: LicenseExpiryCritical
+        expr: ct_license_days_until_expiry < 7
+        for: 1h
+        labels:
+          severity: critical
+        annotations:
+          summary: 'CRITICAL: License for org {{ $labels.org_id }} expires in {{ $value }} days'
+          description: 'License is about to expire. Immediate renewal required to prevent service downgrade.'
+          runbook_url: 'https://docs.calltelemetry.com/runbooks/license-expiration'
+
+  - name: certificate_health
+    rules:
+      - alert: CertificateExpiringSoon
+        expr: ct_cert_days_until_expiry < 30
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Certificate {{ $labels.cert_name }} expires in {{ $value }} days'
+          description: 'TLS certificate expiration is approaching. Renew to avoid service disruption.'
+
+      - alert: CertificateExpiryCritical
+        expr: ct_cert_days_until_expiry < 7
+        for: 1h
+        labels:
+          severity: critical
+        annotations:
+          summary: 'CRITICAL: Certificate {{ $labels.cert_name }} expires in {{ $value }} days'
+          description: 'TLS certificate is about to expire. Immediate renewal required.'
+          runbook_url: 'https://docs.calltelemetry.com/runbooks/certificate-expiration'
