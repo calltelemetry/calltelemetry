@@ -1105,6 +1105,139 @@ os_updates_cmd() {
   esac
 }
 
+# ─── Network configuration ──────────────────────────────────────────────────
+NETWORK_CONN_NAME="ct-network"
+
+network_get_iface() {
+  nmcli -t -f DEVICE,TYPE device 2>/dev/null | grep ':ethernet' | head -1 | cut -d: -f1
+}
+
+network_get_conn() {
+  local iface
+  iface=$(network_get_iface)
+  nmcli -t -f NAME,DEVICE connection show --active 2>/dev/null | grep ":${iface}$" | cut -d: -f1 | head -1
+}
+
+network_cmd() {
+  local subcommand="${1:-status}"
+  shift || true
+
+  case "$subcommand" in
+    ""|status)
+      echo "=== Network Configuration ==="
+      local iface
+      iface=$(network_get_iface)
+      echo "Interface : ${iface:-(none detected)}"
+      echo "IP        : $(ip -4 addr show "$iface" 2>/dev/null | grep inet | awk '{print $2}' || echo '(none)')"
+      echo "Gateway   : $(ip route 2>/dev/null | grep default | head -1 | awk '{print $3}' || echo '(none)')"
+      local conn
+      conn=$(network_get_conn)
+      if [ -n "$conn" ]; then
+        echo "DNS       : $(nmcli -g ipv4.dns connection show "$conn" 2>/dev/null | tr ',' ' ')"
+        echo "Domain    : $(nmcli -g ipv4.dns-search connection show "$conn" 2>/dev/null)"
+      fi
+      echo ""
+      echo "Commands:"
+      echo "  network address <ip/prefix> <gateway>  Set static IP and gateway"
+      echo "  network dns-servers <dns1> [dns2]       Set DNS servers"
+      echo "  network domain <domain>                 Set DNS search domain"
+      echo "  network dhcp                            Switch to DHCP"
+      ;;
+
+    address)
+      local addr="${1:-}"
+      local gateway="${2:-}"
+      if [ -z "$addr" ]; then
+        read -rp "IP Address with prefix (e.g. 192.168.10.50/24): " addr </dev/tty
+      fi
+      if [ -z "$gateway" ]; then
+        read -rp "Gateway (e.g. 192.168.10.1): " gateway </dev/tty
+      fi
+      if [ -z "$addr" ] || [ -z "$gateway" ]; then
+        echo "Error: IP address and gateway are required."
+        echo "Usage: cli.sh network address <ip/prefix> <gateway>"
+        exit 1
+      fi
+      local iface
+      iface=$(network_get_iface)
+      if [ -z "$iface" ]; then
+        echo "Error: No ethernet interface detected."
+        exit 1
+      fi
+      nmcli connection delete "$NETWORK_CONN_NAME" 2>/dev/null || true
+      nmcli connection add type ethernet con-name "$NETWORK_CONN_NAME" ifname "$iface" \
+        ipv4.method manual \
+        ipv4.addresses "$addr" \
+        ipv4.gateway "$gateway" \
+        connection.autoconnect yes \
+        connection.autoconnect-priority 100
+      nmcli connection up "$NETWORK_CONN_NAME"
+      echo "Static IP $addr configured (gateway: $gateway). Will auto-connect on boot."
+      echo "Next: cli.sh network dns-servers 8.8.8.8 4.4.4.4"
+      ;;
+
+    dns-servers)
+      local dns_args=("$@")
+      if [ "${#dns_args[@]}" -eq 0 ]; then
+        read -rp "DNS servers (e.g. 8.8.8.8 4.4.4.4): " -a dns_args </dev/tty
+      fi
+      if [ "${#dns_args[@]}" -eq 0 ]; then
+        echo "Error: At least one DNS server is required."
+        echo "Usage: cli.sh network dns-servers <dns1> [dns2]"
+        exit 1
+      fi
+      local dns_list
+      dns_list=$(IFS=,; echo "${dns_args[*]}")
+      local conn
+      conn=$(network_get_conn)
+      if [ -z "$conn" ]; then conn="$NETWORK_CONN_NAME"; fi
+      nmcli connection modify "$conn" ipv4.dns "$dns_list"
+      nmcli connection up "$conn" 2>/dev/null || true
+      echo "DNS servers set: ${dns_args[*]}"
+      ;;
+
+    domain)
+      local domain="${1:-}"
+      if [ -z "$domain" ]; then
+        read -rp "Search domain (e.g. example.local): " domain </dev/tty
+      fi
+      if [ -z "$domain" ]; then
+        echo "Error: Domain is required."
+        echo "Usage: cli.sh network domain <domain>"
+        exit 1
+      fi
+      local conn
+      conn=$(network_get_conn)
+      if [ -z "$conn" ]; then conn="$NETWORK_CONN_NAME"; fi
+      nmcli connection modify "$conn" ipv4.dns-search "$domain"
+      nmcli connection up "$conn" 2>/dev/null || true
+      echo "Search domain set: $domain"
+      ;;
+
+    dhcp)
+      local iface
+      iface=$(network_get_iface)
+      if [ -z "$iface" ]; then
+        echo "Error: No ethernet interface detected."
+        exit 1
+      fi
+      nmcli connection delete "$NETWORK_CONN_NAME" 2>/dev/null || true
+      nmcli connection add type ethernet con-name "$NETWORK_CONN_NAME" ifname "$iface" \
+        ipv4.method auto \
+        connection.autoconnect yes \
+        connection.autoconnect-priority 100
+      nmcli connection up "$NETWORK_CONN_NAME"
+      echo "DHCP configured. IP: $(ip -4 addr show "$iface" 2>/dev/null | grep inet | awk '{print $2}' || echo '(acquiring...)')"
+      ;;
+
+    *)
+      echo "Unknown network command: $subcommand"
+      echo "Run 'cli.sh network' for usage."
+      exit 1
+      ;;
+  esac
+}
+
 # Function to display help
 show_help() {
   echo "Usage: cli.sh <command> [options]"
@@ -1138,6 +1271,11 @@ show_help() {
   echo "Configuration Commands:"
   echo "  logging [level]     Show or set logging level (debug/info/warning/error)"
   echo "  ipv6 [enable|disable] Show or toggle IPv6 support"
+  echo "  network             Show current network configuration"
+  echo "  network address <ip/prefix> <gw>  Set static IP and gateway"
+  echo "  network dns-servers <dns1> [dns2] Set DNS servers"
+  echo "  network domain <domain>           Set DNS search domain"
+  echo "  network dhcp                      Switch to DHCP (automatic IP)"
   echo "  postgres            Show current PostgreSQL version"
   echo "  postgres set <ver>  Set PostgreSQL version (14, 15, 16, 17, 18)"
   echo "  postgres upgrade <ver> Upgrade PostgreSQL to new major version (backup required)"
@@ -4075,6 +4213,10 @@ case "$1" in
     ;;
   ipv6)
     ipv6_toggle "$2"
+    ;;
+  network)
+    shift
+    network_cmd "$@"
     ;;
   certs)
     certs_cmd "$2"
