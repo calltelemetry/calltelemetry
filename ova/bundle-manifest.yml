@@ -20,6 +20,10 @@ configs:
 prometheus:
   - versions/prometheus/prometheus.yml
 
+# AlertManager configuration
+alertmanager:
+  - alertmanager/alertmanager.yml
+
 # Grafana dashboards and provisioning
 grafana:
   dashboards:
