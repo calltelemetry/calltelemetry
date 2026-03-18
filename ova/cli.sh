@@ -627,6 +627,55 @@ jtapi_cmd() {
   esac
 }
 
+ensure_bind_mount_files() {
+  # Ensure files that Docker bind-mounts exist as FILES (not directories).
+  # Docker auto-creates missing bind-mount paths as directories, which
+  # causes "not a directory" OCI runtime errors on container start.
+
+  # AlertManager config
+  mkdir -p alertmanager
+  if [ -d "alertmanager/alertmanager.yml" ]; then
+    rm -rf "alertmanager/alertmanager.yml"
+  fi
+  if [ ! -f "alertmanager/alertmanager.yml" ]; then
+    cat > alertmanager/alertmanager.yml << 'AMEOF'
+global:
+  resolve_timeout: 5m
+route:
+  receiver: 'default'
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+receivers:
+  - name: 'default'
+AMEOF
+    echo "Created default alertmanager/alertmanager.yml"
+  fi
+
+  # Prometheus config
+  mkdir -p prometheus
+  if [ ! -f "prometheus/prometheus.yml" ]; then
+    cat > prometheus/prometheus.yml << 'PROMEOF'
+global:
+  scrape_interval: 30s
+  evaluation_interval: 30s
+scrape_configs:
+  - job_name: 'calltelemetry'
+    static_configs:
+      - targets: ['web:4080']
+PROMEOF
+    echo "Created default prometheus/prometheus.yml"
+  fi
+
+  # Prometheus alert rules
+  if [ ! -f "prometheus/alert_rules.yml" ]; then
+    cat > prometheus/alert_rules.yml << 'RULESEOF'
+groups: []
+RULESEOF
+    echo "Created default prometheus/alert_rules.yml"
+  fi
+}
+
 ensure_grafana_permissions() {
   local dirs=("$@")
 
@@ -832,6 +881,9 @@ fix_systemd_service_if_needed() {
 restart_service() {
   local context="${1:-}" # optional caller context for log messages
   local service="docker-compose-app.service"
+
+  # Ensure bind-mount files exist before Docker starts (prevents directory auto-creation)
+  ensure_bind_mount_files
 
   echo "Restarting Docker Compose service..."
 
@@ -1583,6 +1635,19 @@ download_bundle() {
       echo "  ✅ prometheus/prometheus.yml"
     else
       echo "  ⚠️  prometheus/prometheus.yml (failed to move — check permissions)"
+    fi
+  fi
+
+  # alertmanager/alertmanager.yml
+  if [ -f "$extract_dir/alertmanager/alertmanager.yml" ]; then
+    mkdir -p alertmanager
+    # Remove if Docker auto-created it as a directory (common bind-mount gotcha)
+    [ -d "alertmanager/alertmanager.yml" ] && rm -rf "alertmanager/alertmanager.yml"
+    rm -f alertmanager/alertmanager.yml 2>/dev/null
+    if mv -f "$extract_dir/alertmanager/alertmanager.yml" alertmanager/; then
+      echo "  ✅ alertmanager/alertmanager.yml"
+    else
+      echo "  ⚠️  alertmanager/alertmanager.yml (failed to move — check permissions)"
     fi
   fi
 
