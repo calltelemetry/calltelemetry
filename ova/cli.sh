@@ -3845,7 +3845,7 @@ generate_self_signed_certificates() {
   if [ ! -f "$cert_file" ] || [ ! -f "$key_file" ]; then
     echo "Generating self-signed certificates..."
     mkdir -p "$cert_dir"
-    openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout "$key_file" -out "$cert_file" -subj "/CN=appliance.calltelemetry.internal"
+    openssl req -x509 -nodes -days 3650 -newkey rsa:2048 -keyout "$key_file" -out "$cert_file" -subj "/CN=appliance.calltelemetry.internal"
     echo "No certs found. Self-signed certificates generated."
   else
     echo "Certificates already exist. Skipping generation."
