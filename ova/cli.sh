@@ -1270,28 +1270,65 @@ extract_images() {
   done
 }
 
+# Check if a single Docker image is available (local or remote)
+# Returns 0 if available, 1 if not
+check_single_image() {
+  local image="$1"
+
+  # 1. Already pulled locally — no network needed
+  if docker image inspect "$image" >/dev/null 2>&1; then
+    echo "✓ Available (local)"
+    return 0
+  fi
+
+  # 2. Try registry via docker manifest inspect (needs experimental on older Docker)
+  if DOCKER_CLI_EXPERIMENTAL=enabled docker manifest inspect "$image" >/dev/null 2>&1; then
+    echo "✓ Available (registry)"
+    return 0
+  fi
+
+  # 3. Lightweight HEAD check against Docker Hub v2 API (no auth needed for public images)
+  local repo="${image%%:*}"        # e.g. calltelemetry/postgres
+  local tag="${image##*:}"         # e.g. 14
+  [ "$tag" = "$image" ] && tag="latest"
+  local hub_url="https://hub.docker.com/v2/repositories/${repo}/tags/${tag}"
+  if command -v curl >/dev/null 2>&1; then
+    if curl -fsSL --max-time 5 -o /dev/null -w '' "$hub_url" 2>/dev/null; then
+      echo "✓ Available (hub API)"
+      return 0
+    fi
+  elif command -v wget >/dev/null 2>&1; then
+    if wget -q --timeout=5 --spider "$hub_url" 2>/dev/null; then
+      echo "✓ Available (hub API)"
+      return 0
+    fi
+  fi
+
+  echo "✗ Not available"
+  return 1
+}
+
 # Function to check if Docker images are available
 check_image_availability() {
   local compose_file="$1"
   local images=$(extract_images "$compose_file")
   local all_available=true
   local unavailable_images=""
-  
+
   echo "Checking image availability..."
-  
+
   for image in $images; do
     echo -n "  Checking $image... "
-    if docker manifest inspect "$image" >/dev/null 2>&1; then
-      echo "✓ Available"
+    if check_single_image "$image"; then
+      : # message already printed by check_single_image
     else
-      echo "✗ Not available"
       all_available=false
       unavailable_images="$unavailable_images$image\n"
     fi
   done
-  
+
   if [ "$all_available" = true ]; then
-    echo "✅ All images are available online"
+    echo "✅ All images are available"
     return 0
   else
     echo "❌ Some images are not available:"
