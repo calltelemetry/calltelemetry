@@ -258,6 +258,14 @@ sudo sysctl -p /etc/sysctl.d/99-quiet-console.conf 2>/dev/null || true
 # Disable kernel bridge module logging to console
 echo "options bridge bridge_nf_call_iptables=0" | sudo tee /etc/modprobe.d/bridge.conf > /dev/null 2>/dev/null || true
 
+# Suppress deprecated driver warnings (nft_compat, ip_set) on boot console
+# Docker uses legacy iptables kernel API internally, triggering these warnings.
+# The sysctl printk setting loads too late; kernel cmdline takes effect at boot.
+if ! grep -q 'loglevel=3' /etc/default/grub 2>/dev/null; then
+  sudo sed -i 's/^GRUB_CMDLINE_LINUX="/&loglevel=3 /' /etc/default/grub
+  sudo grub2-mkconfig -o /boot/grub2/grub.cfg 2>/dev/null || true
+fi
+
 echo "Appliance prep complete."
 echo "IMPORTANT - After this next step you must access the appliance on port 2222 - NOT PORT 22."
 
