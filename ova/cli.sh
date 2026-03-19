@@ -1531,30 +1531,24 @@ check_single_image() {
     return 0
   fi
 
-  # 2. Try registry via docker manifest inspect — retry up to 3x to handle
-  #    Docker daemon cold-start and transient registry timeouts on fresh VMs
-  local attempt
-  for attempt in 1 2 3; do
-    if DOCKER_CLI_EXPERIMENTAL=enabled docker manifest inspect "$image" >/dev/null 2>&1; then
-      echo "✓ Available (registry)"
-      return 0
-    fi
-    [ "$attempt" -lt 3 ] && sleep 5
-  done
+  # 2. Try registry via docker manifest inspect (needs experimental on older Docker)
+  if DOCKER_CLI_EXPERIMENTAL=enabled docker manifest inspect "$image" >/dev/null 2>&1; then
+    echo "✓ Available (registry)"
+    return 0
+  fi
 
-  # 3. Lightweight HEAD check against Docker Hub v2 API with generous timeout
-  #    Fresh VMs on new IPs can be slow to get a response from Docker Hub
+  # 3. Lightweight HEAD check against Docker Hub v2 API (no auth needed for public images)
   local repo="${image%%:*}"        # e.g. calltelemetry/postgres
   local tag="${image##*:}"         # e.g. 14
   [ "$tag" = "$image" ] && tag="latest"
   local hub_url="https://hub.docker.com/v2/repositories/${repo}/tags/${tag}"
   if command -v curl >/dev/null 2>&1; then
-    if curl -fsSL --max-time 30 --retry 3 --retry-delay 5 -o /dev/null -w '' "$hub_url" 2>/dev/null; then
+    if curl -fsSL --max-time 5 -o /dev/null -w '' "$hub_url" 2>/dev/null; then
       echo "✓ Available (hub API)"
       return 0
     fi
   elif command -v wget >/dev/null 2>&1; then
-    if wget -q --timeout=30 --tries=3 --spider "$hub_url" 2>/dev/null; then
+    if wget -q --timeout=5 --spider "$hub_url" 2>/dev/null; then
       echo "✓ Available (hub API)"
       return 0
     fi
