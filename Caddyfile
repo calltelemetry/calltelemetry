@@ -14,9 +14,13 @@
 :443 {
     reverse_proxy /api* web:4000
 
-    # Grafana - pass requests with /grafana prefix intact
+    # Grafana SSO — Caddy validates CT JWT, passes user email to Grafana auth proxy
     @grafana path /grafana /grafana/*
     handle @grafana {
+        forward_auth web:4000 {
+            uri /api/internal/jwt-check
+            copy_headers X-Webauth-User
+        }
         reverse_proxy grafana:3000 {
             header_up X-Forwarded-Prefix /grafana
             header_up X-Forwarded-Host {http.request.host}
