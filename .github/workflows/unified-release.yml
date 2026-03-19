@@ -137,6 +137,7 @@ jobs:
           NOTES_EOF
           )
           NOTES=$(echo "$NOTES" | sed 's/^          //')
+          gh release delete "${{ inputs.version }}" --repo calltelemetry/cisco-cdr --yes 2>/dev/null || true
           gh release create "${{ inputs.version }}" \
             --repo calltelemetry/cisco-cdr \
             --target "${{ inputs.target_branch }}" \
@@ -156,6 +157,7 @@ jobs:
           NOTES_EOF
           )
           NOTES=$(echo "$NOTES" | sed 's/^          //')
+          gh release delete "${{ inputs.version }}" --repo calltelemetry/ct-quasar --yes 2>/dev/null || true
           gh release create "${{ inputs.version }}" \
             --repo calltelemetry/ct-quasar \
             --target "${{ inputs.target_branch }}" \
@@ -175,6 +177,7 @@ jobs:
           NOTES_EOF
           )
           NOTES=$(echo "$NOTES" | sed 's/^          //')
+          gh release delete "${{ inputs.version }}" --repo calltelemetry/jtapi-sidecar --yes 2>/dev/null || true
           gh release create "${{ inputs.version }}" \
             --repo calltelemetry/jtapi-sidecar \
             --target "${{ inputs.target_branch }}" \
@@ -195,6 +198,7 @@ jobs:
           NOTES_EOF
           )
           NOTES=$(echo "$NOTES" | sed 's/^          //')
+          gh release delete "$CT_MEDIA_TAG" --repo calltelemetry/ct-media --yes 2>/dev/null || true
           gh release create "$CT_MEDIA_TAG" \
             --repo calltelemetry/ct-media \
             --target "${{ inputs.target_branch }}" \
@@ -214,6 +218,7 @@ jobs:
           NOTES_EOF
           )
           NOTES=$(echo "$NOTES" | sed 's/^          //')
+          gh release delete "${{ inputs.version }}" --repo calltelemetry/jtapi-operator --yes 2>/dev/null || true
           gh release create "${{ inputs.version }}" \
             --repo calltelemetry/jtapi-operator \
             --target "${{ inputs.target_branch }}" \
@@ -233,6 +238,7 @@ jobs:
           NOTES_EOF
           )
           NOTES=$(echo "$NOTES" | sed 's/^          //')
+          gh release delete "${{ inputs.version }}" --repo calltelemetry/tracer --yes 2>/dev/null || true
           gh release create "${{ inputs.version }}" \
             --repo calltelemetry/tracer \
             --target "${{ inputs.target_branch }}" \
