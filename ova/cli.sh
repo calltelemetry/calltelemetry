@@ -69,6 +69,32 @@ fi
 # Prep script from GCS
 PREP_SCRIPT_URL="${GCS_BASE_URL}/prep.sh"
 
+# --- Self-healing bind-mount fix ---
+# Docker auto-creates missing bind-mount paths as DIRECTORIES.
+# If alertmanager.yml was created as a directory, fix it NOW before
+# any Docker command runs. This runs on every cli.sh invocation.
+if [ -d "${INSTALL_DIR}/alertmanager/alertmanager.yml" ]; then
+  rm -rf "${INSTALL_DIR}/alertmanager/alertmanager.yml"
+fi
+mkdir -p "${INSTALL_DIR}/alertmanager"
+if [ ! -f "${INSTALL_DIR}/alertmanager/alertmanager.yml" ]; then
+  cat > "${INSTALL_DIR}/alertmanager/alertmanager.yml" << 'AMEOF'
+global:
+  resolve_timeout: 5m
+route:
+  receiver: 'default'
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+receivers:
+  - name: 'default'
+AMEOF
+fi
+mkdir -p "${INSTALL_DIR}/prometheus"
+if [ ! -f "${INSTALL_DIR}/prometheus/alert_rules.yml" ]; then
+  echo 'groups: []' > "${INSTALL_DIR}/prometheus/alert_rules.yml"
+fi
+
 # PostgreSQL version configuration
 POSTGRES_OVERRIDE_FILE="docker-compose.override.yml"
 POSTGRES_DEFAULT_VERSION="17"
