@@ -412,11 +412,13 @@ services:
     command: >
       server -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json
       -master.volumeSizeLimitMB=100
+      -metricsPort=9325
     restart: unless-stopped
     expose:
       - "8333"   # S3 API
       - "8888"   # Filer
       - "9333"   # Master
+      - "9325"   # Prometheus metrics
     volumes:
       - seaweedfs-data:/data
       - type: bind
