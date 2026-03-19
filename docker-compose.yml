@@ -156,6 +156,8 @@ services:
       # Persistent org-scoped media storage (JTAPI audio, recordings, etc)
       - ./org-data:/data:rw
       - /var/run/docker.sock:/var/run/docker.sock
+      # Shared alert rules file — API writes thresholds, Prometheus reads them
+      - ./prometheus/alert_rules.yml:/etc/prometheus/alert_rules.yml:rw
     logging:
       driver: "json-file"
       options:
@@ -194,9 +196,10 @@ services:
       - --web.console.templates=/usr/share/prometheus/consoles
       - --web.external-url=/prometheus
       - --web.route-prefix=/prometheus
+      - --web.enable-lifecycle
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - ./prometheus/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
+      - ./prometheus/alert_rules.yml:/etc/prometheus/alert_rules.yml:rw
       - prometheus-data:/prometheus
     networks:
       - ct
