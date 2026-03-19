@@ -2367,6 +2367,8 @@ update() {
     fi
 
     # Update the ct CLI to the latest published version
+    # Remove any old bash wrapper that may shadow the npm binary
+    [ -f /usr/local/bin/ct ] && sudo rm -f /usr/local/bin/ct
     echo "Updating @calltelemetry/cli..."
     sudo npm install -g @calltelemetry/cli &>/dev/null && echo "✅ ct CLI updated to $(ct --version)" || echo "⚠️  ct CLI update failed (non-critical)"
 
