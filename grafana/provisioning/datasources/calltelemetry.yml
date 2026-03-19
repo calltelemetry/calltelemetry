@@ -10,3 +10,13 @@ datasources:
     editable: false
     jsonData:
       httpMethod: GET
+
+  - name: CallTelemetry AlertManager
+    uid: calltelemetry-alertmanager
+    type: alertmanager
+    access: proxy
+    url: http://alertmanager:9093
+    editable: false
+    jsonData:
+      implementation: prometheus
+      handleGrafanaManagedAlerts: false
