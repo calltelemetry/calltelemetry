@@ -2361,6 +2361,17 @@ update() {
       echo "✅ Console loglevel fix applied"
     fi
 
+    # Migrate legacy ifcfg network configs to NetworkManager keyfile format
+    # RHEL 9 / AlmaLinux 9 deprecated network-scripts ifcfg files; NM logs deprecation
+    # warnings for any connection still using the ifcfg backend.
+    if command -v nmcli &>/dev/null; then
+      ifcfg_count=$(nmcli -t -f FILENAME connection show 2>/dev/null | grep -c 'ifcfg' || true)
+      if [ "${ifcfg_count:-0}" -gt 0 ]; then
+        echo "Migrating $ifcfg_count legacy ifcfg network config(s) to keyfile format..."
+        sudo nmcli connection migrate &>/dev/null && echo "✅ Network configs migrated to keyfile" || echo "⚠️  nmcli migrate failed (non-critical)"
+      fi
+    fi
+
     if [ $services_ok -eq 0 ]; then
       echo "✅ Update complete! All services are running and ready."
     else
