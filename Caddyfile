@@ -27,9 +27,38 @@
         }
     }
 
-    # Prometheus - pass requests with /prometheus prefix intact
-    handle /prometheus* {
+    # Prometheus — SSO via CT JWT
+    @prometheus path /prometheus /prometheus/*
+    handle @prometheus {
+        forward_auth web:4000 {
+            uri /api/internal/jwt-check
+            copy_headers X-Webauth-User
+        }
         reverse_proxy prometheus:9090 {
+            header_up X-Forwarded-Host {http.request.host}
+        }
+    }
+
+    # AlertManager — SSO via CT JWT
+    @alertmanager path /alertmanager /alertmanager/*
+    handle @alertmanager {
+        forward_auth web:4000 {
+            uri /api/internal/jwt-check
+            copy_headers X-Webauth-User
+        }
+        reverse_proxy alertmanager:9093 {
+            header_up X-Forwarded-Host {http.request.host}
+        }
+    }
+
+    # Tempo — trace visualization (queried via Grafana datasource)
+    @tempo path /tempo /tempo/*
+    handle @tempo {
+        forward_auth web:4000 {
+            uri /api/internal/jwt-check
+            copy_headers X-Webauth-User
+        }
+        reverse_proxy tempo:3200 {
             header_up X-Forwarded-Host {http.request.host}
         }
     }

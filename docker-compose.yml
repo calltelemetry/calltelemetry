@@ -253,6 +253,27 @@ services:
       - ct
 
   # ─────────────────────────────────────────────────────────────────
+  # Grafana Tempo — distributed tracing backend
+  # Receives OTLP traces from OTEL Collector, queryable via Grafana
+  # Enable via: ct otel enable  (shares profile with otel-collector)
+  # ─────────────────────────────────────────────────────────────────
+
+  tempo:
+    profiles: ["otel"]
+    image: grafana/tempo:2.6.1
+    restart: unless-stopped
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    volumes:
+      - ./tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    expose:
+      - "3200"   # Tempo HTTP API (Grafana queries this)
+      - "4317"   # OTLP gRPC receiver
+      - "4318"   # OTLP HTTP receiver
+    networks:
+      - ct
+
+  # ─────────────────────────────────────────────────────────────────
   # JTAPI Phone Control Stack (activate with COMPOSE_PROFILES=jtapi)
   # ─────────────────────────────────────────────────────────────────
 
@@ -413,6 +434,8 @@ volumes:
   alertmanager-data:
     driver: local
   grafana-data:
+    driver: local
+  tempo-data:
     driver: local
   nats-data:
     driver: local
