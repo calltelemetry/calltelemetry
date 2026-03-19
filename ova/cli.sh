@@ -922,6 +922,9 @@ fix_systemd_service_if_needed() {
   if [ "$needs_reload" = true ]; then
     sudo systemctl daemon-reload
   fi
+
+  # Fix NetworkManager connection autoconnect issues (no-DHCP boot problem)
+  nm_heal_connections
 }
 
 # Restart the docker-compose systemd service with error handling.
@@ -1243,6 +1246,7 @@ network_cmd() {
       echo "  network dns-servers <dns1> [dns2]       Set DNS servers"
       echo "  network domain <domain>                 Set DNS search domain"
       echo "  network dhcp                            Switch to DHCP"
+      echo "  network fix                             Fix NM autoconnect issues (boot problem)"
       ;;
 
     address)
@@ -1331,6 +1335,11 @@ network_cmd() {
         connection.autoconnect-priority 100
       nmcli connection up "$NETWORK_CONN_NAME"
       echo "DHCP configured. IP: $(ip -4 addr show "$iface" 2>/dev/null | grep inet | awk '{print $2}' || echo '(acquiring...)')"
+      ;;
+
+    fix)
+      nm_heal_connections
+      echo "✅ NM connection profiles checked."
       ;;
 
     *)
