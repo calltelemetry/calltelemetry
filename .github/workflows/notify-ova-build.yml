@@ -3,23 +3,49 @@ name: Notify OVA Build
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to build OVA for (e.g. 0.8.6-rc127) — must already exist on Docker Hub"
+        required: true
+        type: string
+      formats:
+        description: "Which formats to build"
+        required: false
+        type: choice
+        default: "both"
+        options:
+          - both
+          - ova-only
+          - qcow2-only
 
 jobs:
   trigger-ova-build:
     runs-on: ubuntu-latest
     steps:
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${{ github.event.release.tag_name }}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Trigger OVA build (ESXi) in ai-workspace
+        if: inputs.formats != 'qcow2-only'
         uses: peter-evans/repository-dispatch@v3
         with:
           token: ${{ secrets.CT_WORKSPACE_DISPATCH_TOKEN }}
           repository: calltelemetry/ai-workspace
           event-type: build-ova
-          client-payload: '{"version": "${{ github.event.release.tag_name }}", "image_format": "ova"}'
+          client-payload: '{"version": "${{ steps.ver.outputs.version }}", "image_format": "ova"}'
 
       - name: Trigger QCOW2 build (Nutanix) in ai-workspace
+        if: inputs.formats != 'ova-only'
         uses: peter-evans/repository-dispatch@v3
         with:
           token: ${{ secrets.CT_WORKSPACE_DISPATCH_TOKEN }}
           repository: calltelemetry/ai-workspace
           event-type: build-ova
-          client-payload: '{"version": "${{ github.event.release.tag_name }}", "image_format": "qcow2"}'
+          client-payload: '{"version": "${{ steps.ver.outputs.version }}", "image_format": "qcow2"}'
