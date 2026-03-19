@@ -92,6 +92,24 @@ groups:
           description: 'Job backlog building up — workers may be overwhelmed.'
           generator_url: '/grafana/d/ct-oban-job-health/oban-job-health?viewPanel=5&from=now-1h&to=now'
 
+      - alert: PurgeHealthQueueRetryable
+        expr: ct_oban_queue_depth{queue="db_purge_health", state="retryable"} > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Purge health queue has {{ $value }} retryable jobs'
+          description: 'The db_purge_health Oban queue has failing jobs. Purge health audits may not be running.'
+
+      - alert: PurgeDispatchQueueRetryable
+        expr: ct_oban_queue_depth{queue="db_purge_dispatch", state="retryable"} > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Purge dispatch queue has {{ $value }} retryable jobs'
+          description: 'The db_purge_dispatch Oban queue has failing jobs. Scheduled purges may not be running.'
+
   - name: call_health
     rules:
       - alert: PhoneRegistrationDrop
@@ -219,6 +237,15 @@ groups:
         annotations:
           summary: '{{ $value }} table(s) not purged in 48h for org {{ $labels.org_id }}'
           description: 'Tables have not been purged in over 48 hours. Data retention policies are not being enforced. Check purge dispatcher and Oban queue health.'
+
+      - alert: PurgeAuditCriticalIssues
+        expr: ct_purge_audit_critical_issues > 0
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: '{{ $value }} critical issue(s) found in purge audit'
+          description: 'The most recent purge audit found critical issues that need attention. Check the purge configuration and audit logs.'
 
       - alert: PurgeTablesStaleHalf
         expr: ct_purge_tables_stale > (ct_purge_tables_monitored / 2)
