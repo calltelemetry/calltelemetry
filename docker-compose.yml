@@ -223,7 +223,8 @@ services:
       - GF_AUTH_PROXY_HEADER_NAME=X-Webauth-User
       - GF_AUTH_PROXY_HEADER_PROPERTY=email
       - GF_AUTH_PROXY_AUTO_SIGN_UP=true
-      - GF_AUTH_PROXY_WHITELIST=caddy,web,127.0.0.1
+      # Empty whitelist = trust all sources (Grafana only reachable via Caddy on internal network)
+      - GF_AUTH_PROXY_WHITELIST=
       - GF_AUTH_DISABLE_LOGIN_FORM=false
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
