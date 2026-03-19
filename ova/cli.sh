@@ -2366,6 +2366,10 @@ update() {
       echo "✅ Node.js v${CURRENT_NODE_MAJOR} already meets minimum (>=${REQUIRED_NODE_MAJOR})"
     fi
 
+    # Update the ct CLI to the latest published version
+    echo "Updating @calltelemetry/cli..."
+    sudo npm install -g @calltelemetry/cli &>/dev/null && echo "✅ ct CLI updated to $(ct --version)" || echo "⚠️  ct CLI update failed (non-critical)"
+
     # Apply console loglevel fix for existing VMs
     # nft_compat / ip_set are loaded by Docker/firewalld and emit KERN_WARNING (level 4).
     # loglevel=3 on the kernel cmdline is reset by systemd; sysctl.d persists it.
