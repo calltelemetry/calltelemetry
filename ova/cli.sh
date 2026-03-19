@@ -2351,6 +2351,16 @@ update() {
       echo "✅ Node.js v${CURRENT_NODE_MAJOR} already meets minimum (>=${REQUIRED_NODE_MAJOR})"
     fi
 
+    # Apply console loglevel fix for existing VMs
+    # nft_compat / ip_set are loaded by Docker/firewalld and emit KERN_WARNING (level 4).
+    # loglevel=3 on the kernel cmdline is reset by systemd; sysctl.d persists it.
+    if [ ! -f /etc/sysctl.d/99-console-loglevel.conf ]; then
+      echo "Applying console loglevel fix (suppresses nft_compat/ip_set warnings)..."
+      echo "kernel.printk = 3 4 1 3" | sudo tee /etc/sysctl.d/99-console-loglevel.conf > /dev/null
+      sudo sysctl -p /etc/sysctl.d/99-console-loglevel.conf > /dev/null
+      echo "✅ Console loglevel fix applied"
+    fi
+
     if [ $services_ok -eq 0 ]; then
       echo "✅ Update complete! All services are running and ready."
     else
