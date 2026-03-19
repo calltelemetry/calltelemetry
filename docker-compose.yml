@@ -89,6 +89,19 @@ services:
       retries: 5
       start_period: 30s
 
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.15.0
+    environment:
+      DATA_SOURCE_NAME: "postgresql://calltelemetry:${DB_PASSWORD:-calltelemetry}@db:5432/calltelemetry?sslmode=disable"
+    ports:
+      - "9187:9187"
+    depends_on:
+      - db
+    restart: unless-stopped
+    networks:
+      - ct
+
   web:
     image: "calltelemetry/web:${WEB_VERSION:-0.8.6-rc109}"
     restart: "always"

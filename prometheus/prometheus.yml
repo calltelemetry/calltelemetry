@@ -25,3 +25,9 @@ scrape_configs:
     scrape_interval: 30s
     static_configs:
       - targets: ['web:4080']
+
+  # PostgreSQL metrics via postgres-exporter
+  - job_name: postgresql
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+    scrape_interval: 15s
