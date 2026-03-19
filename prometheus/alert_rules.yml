@@ -210,3 +210,21 @@ groups:
         annotations:
           summary: 'Tables above max size threshold'
           description: 'Tables have exceeded their maximum size. Emergency purging may be needed.'
+
+      - alert: PurgeTablesStale
+        expr: ct_purge_tables_stale > 0
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: '{{ $value }} table(s) not purged in 48h for org {{ $labels.org_id }}'
+          description: 'Tables have not been purged in over 48 hours. Data retention policies are not being enforced. Check purge dispatcher and Oban queue health.'
+
+      - alert: PurgeTablesStaleHalf
+        expr: ct_purge_tables_stale > (ct_purge_tables_monitored / 2)
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Over half of monitored tables are stale ({{ $value }}) for org {{ $labels.org_id }}'
+          description: 'More than 50% of tables have not been purged in 48 hours. Purge system may be completely broken.'
