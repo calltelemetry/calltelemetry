@@ -1532,7 +1532,8 @@ check_single_image() {
   fi
 
   # 2. Try registry via docker manifest inspect (needs experimental on older Docker)
-  if DOCKER_CLI_EXPERIMENTAL=enabled docker manifest inspect "$image" >/dev/null 2>&1; then
+  # timeout 10 prevents hanging indefinitely on slow/rate-limited networks
+  if timeout 10 bash -c "DOCKER_CLI_EXPERIMENTAL=enabled docker manifest inspect '$image'" >/dev/null 2>&1; then
     echo "✓ Available (registry)"
     return 0
   fi
