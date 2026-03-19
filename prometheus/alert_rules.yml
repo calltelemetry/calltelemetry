@@ -179,5 +179,34 @@ groups:
         annotations:
           summary: 'CRITICAL: Certificate {{ $labels.cert_name }} expires in {{ $value }} days'
           description: 'TLS certificate is about to expire. Immediate renewal required.'
-
           generator_url: '/grafana/d/ct-system-health/system-health?viewPanel=15&from=now-7d&to=now'
+
+  - name: purge_health
+    rules:
+      - alert: PurgeDispatcherStale
+        expr: ct_purge_last_dispatch_seconds_ago > 7200
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Purge dispatcher has not run in over 2 hours'
+          description: 'The hourly purge dispatcher has not completed successfully. Tables may grow unchecked.'
+          generator_url: '/grafana/d/ct-oban-job-health/oban-job-health?from=now-6h&to=now'
+
+      - alert: PurgeJobFailures
+        expr: ct_purge_failed_jobs_count > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Failed purge jobs detected in last 24h'
+          description: 'Database purge jobs are failing. Data retention policies may not be enforced.'
+
+      - alert: PurgeTablesAboveMax
+        expr: ct_purge_tables_above_max > 0
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Tables above max size threshold'
+          description: 'Tables have exceeded their maximum size. Emergency purging may be needed.'
