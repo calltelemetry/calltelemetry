@@ -96,19 +96,27 @@ if [ ! -f "${INSTALL_DIR}/prometheus/alert_rules.yml" ]; then
 fi
 
 # --- Self-healing NetworkManager fix ---
-# OVA images sometimes ship with permissions=user:root:; in the NM
-# connection profile, which prevents auto-connect on boot. Fix it
-# on every cli.sh invocation so networking survives reboots.
-if command -v nmcli &>/dev/null; then
-  _NM_CONN=$(nmcli -t -f NAME,TYPE,DEVICE connection show --active 2>/dev/null | grep ethernet | head -1 | cut -d: -f1)
-  if [ -n "$_NM_CONN" ]; then
-    _NM_FILE="/etc/NetworkManager/system-connections/${_NM_CONN}.nmconnection"
-    if [ -f "$_NM_FILE" ] && grep -q 'permissions=user:root:;' "$_NM_FILE" 2>/dev/null; then
-      sed -i 's/permissions=user:root:;//' "$_NM_FILE" 2>/dev/null
-      nmcli connection reload 2>/dev/null
+# OVA images sometimes ship with permissions=user:root:; or autoconnect=false
+# in the NM connection profile, which prevents auto-connect on boot and breaks
+# DNS resolution. Fix on every cli.sh invocation so networking survives reboots.
+nm_heal_connections() {
+  command -v nmcli &>/dev/null || return 0
+  local changed=0
+  # Walk all ethernet connection files, not just the active one
+  for _NM_FILE in /etc/NetworkManager/system-connections/*.nmconnection; do
+    [ -f "$_NM_FILE" ] || continue
+    if grep -q 'permissions=user:root:;' "$_NM_FILE" 2>/dev/null; then
+      sudo sed -i 's/permissions=user:root:;//' "$_NM_FILE" 2>/dev/null
+      changed=1
     fi
-  fi
-fi
+    if grep -q 'autoconnect=false' "$_NM_FILE" 2>/dev/null; then
+      sudo sed -i 's/autoconnect=false/autoconnect=true/' "$_NM_FILE" 2>/dev/null
+      changed=1
+    fi
+  done
+  [ "$changed" = "1" ] && nmcli connection reload 2>/dev/null || true
+}
+nm_heal_connections
 
 # PostgreSQL version configuration
 POSTGRES_OVERRIDE_FILE="docker-compose.override.yml"
@@ -1257,6 +1265,7 @@ network_cmd() {
         echo "Error: No ethernet interface detected."
         exit 1
       fi
+      nm_heal_connections
       nmcli connection delete "$NETWORK_CONN_NAME" 2>/dev/null || true
       nmcli connection add type ethernet con-name "$NETWORK_CONN_NAME" ifname "$iface" \
         ipv4.method manual \
@@ -1314,6 +1323,7 @@ network_cmd() {
         echo "Error: No ethernet interface detected."
         exit 1
       fi
+      nm_heal_connections
       nmcli connection delete "$NETWORK_CONN_NAME" 2>/dev/null || true
       nmcli connection add type ethernet con-name "$NETWORK_CONN_NAME" ifname "$iface" \
         ipv4.method auto \
@@ -4315,6 +4325,7 @@ case "$1" in
     ;;
   update)
     shift
+    nm_heal_connections
     generate_self_signed_certificates
     update "$@"
     ;;
