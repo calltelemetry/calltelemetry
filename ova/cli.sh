@@ -95,6 +95,21 @@ if [ ! -f "${INSTALL_DIR}/prometheus/alert_rules.yml" ]; then
   echo 'groups: []' > "${INSTALL_DIR}/prometheus/alert_rules.yml"
 fi
 
+# --- Self-healing NetworkManager fix ---
+# OVA images sometimes ship with permissions=user:root:; in the NM
+# connection profile, which prevents auto-connect on boot. Fix it
+# on every cli.sh invocation so networking survives reboots.
+if command -v nmcli &>/dev/null; then
+  _NM_CONN=$(nmcli -t -f NAME,TYPE,DEVICE connection show --active 2>/dev/null | grep ethernet | head -1 | cut -d: -f1)
+  if [ -n "$_NM_CONN" ]; then
+    _NM_FILE="/etc/NetworkManager/system-connections/${_NM_CONN}.nmconnection"
+    if [ -f "$_NM_FILE" ] && grep -q 'permissions=user:root:;' "$_NM_FILE" 2>/dev/null; then
+      sed -i 's/permissions=user:root:;//' "$_NM_FILE" 2>/dev/null
+      nmcli connection reload 2>/dev/null
+    fi
+  fi
+fi
+
 # PostgreSQL version configuration
 POSTGRES_OVERRIDE_FILE="docker-compose.override.yml"
 POSTGRES_DEFAULT_VERSION="17"
