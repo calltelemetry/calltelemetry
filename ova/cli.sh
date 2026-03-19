@@ -2357,11 +2357,11 @@ update() {
 
     if [ "$CURRENT_NODE_MAJOR" -lt "$REQUIRED_NODE_MAJOR" ] 2>/dev/null; then
       echo "Installing Node.js $REQUIRED_NODE_MAJOR (current: v${CURRENT_NODE_MAJOR:-none})..."
-      # Remove old dnf-managed nodejs to avoid conflicts
-      sudo dnf remove -y nodejs npm 2>/dev/null
-      # Install from NodeSource for up-to-date LTS
-      curl -fsSL https://rpm.nodesource.com/setup_${REQUIRED_NODE_MAJOR}.x | sudo bash - &>/dev/null
-      sudo dnf install -y nodejs &>/dev/null && echo "✅ Node.js $(node --version) installed" || echo "⚠️  Node.js install failed (non-critical)"
+      # Force-remove rpm-managed nodejs packages that may block dnf --allowerasing
+      sudo rpm -e --nodeps npm nodejs-full-i18n 2>/dev/null || true
+      sudo rpm -e --nodeps nodejs 2>/dev/null || true
+      # Install Node 22 via dnf, allowing it to replace any conflicting packages
+      sudo dnf install -y nodejs --allowerasing &>/dev/null && echo "✅ Node.js $(node --version) installed" || echo "⚠️  Node.js install failed (non-critical)"
     else
       echo "✅ Node.js v${CURRENT_NODE_MAJOR} already meets minimum (>=${REQUIRED_NODE_MAJOR})"
     fi
