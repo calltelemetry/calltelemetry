@@ -12,6 +12,12 @@ scrape_configs:
     static_configs:
       - targets: ["caddy:2019"]
 
+  # PostgreSQL metrics via postgres-exporter
+  - job_name: postgresql
+    static_configs:
+      - targets: ["postgres-exporter:9187"]
+    scrape_interval: 15s
+
   # Uncomment these jobs when the web service exposes a /metrics endpoint:
   # - job_name: cdrcisco-web
   #   metrics_path: /metrics
