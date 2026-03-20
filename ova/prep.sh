@@ -30,18 +30,25 @@ fi
 # Install Docker-Compose
 sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin --nobest
 
-# Configure Docker to use native nftables backend (Docker 29+).
-# This prevents loading the deprecated nft_compat and ip_set compat modules
-# which Docker's default iptables-nft backend triggers at startup, eliminating
-# the "Deprecated Driver" KERN_WARNING messages that appear on the console.
-# AlmaLinux 9 firewalld already uses nftables natively — this aligns Docker.
-# Note: incompatible with Docker Swarm overlay networks (not used here).
+# Configure Docker daemon — version-gated options
+# firewall-backend: nftables requires Docker 29+; --nobest may install Docker 25/26.
+# Writing an unrecognised key causes Docker to fail on start, so we check first.
 sudo mkdir -p /etc/docker
-sudo tee /etc/docker/daemon.json > /dev/null <<'EOF'
+DOCKER_MAJOR=$(docker version --format '{{.Server.Version}}' 2>/dev/null | cut -d. -f1 || echo "0")
+if [ "${DOCKER_MAJOR}" -ge 29 ] 2>/dev/null; then
+  # Docker 29+: use native nftables backend — eliminates the deprecated
+  # nft_compat/ip_set KERN_WARNING messages that appear on the console at ~65s.
+  # AlmaLinux 9 firewalld already uses nftables; this aligns Docker with it.
+  # Note: incompatible with Docker Swarm overlay networks (not used here).
+  sudo tee /etc/docker/daemon.json > /dev/null <<'EOF'
 {
   "firewall-backend": "nftables"
 }
 EOF
+  echo "Docker ${DOCKER_MAJOR}: configured nftables backend"
+else
+  echo "Docker ${DOCKER_MAJOR}: skipping nftables backend (requires 29+), relying on loglevel=3 suppression"
+fi
 
 # Enable and Start Docker
 sudo systemctl enable --now docker
