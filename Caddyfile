@@ -34,6 +34,7 @@
             uri /api/internal/jwt-check
             copy_headers X-Webauth-User
         }
+        uri strip_prefix /prometheus
         reverse_proxy prometheus:9090 {
             header_up X-Forwarded-Host {http.request.host}
         }
