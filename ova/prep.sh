@@ -28,27 +28,31 @@ if [[ -f /etc/redhat-release ]]; then
 fi
 
 # Install Docker-Compose
-sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin --nobest
+# --allowerasing lets DNF replace AlmaLinux 9's built-in containerd (from the
+# podman ecosystem) with Docker's containerd.io, ensuring we get Docker 29+.
+# Install Docker CE (latest stable — 29.0+ required for nftables firewall backend).
+sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin --allowerasing
 
-# Configure Docker daemon — version-gated options
-# firewall-backend: nftables requires Docker 29+; --nobest may install Docker 25/26.
-# Writing an unrecognised key causes Docker to fail on start, so we check first.
+# Enable IP forwarding before Docker starts.
+# Docker's nftables firewall backend does NOT enable this automatically (unlike
+# the default iptables backend). Without it Docker logs an error and may fall
+# back to iptables, loading the deprecated nft_compat/ip_set kernel modules.
+sudo tee /etc/sysctl.d/99-docker-ipforward.conf > /dev/null <<'EOF'
+net.ipv4.ip_forward = 1
+net.ipv6.conf.all.forwarding = 1
+EOF
+sudo sysctl -p /etc/sysctl.d/99-docker-ipforward.conf
+
+# Configure Docker to use the native nftables firewall backend (Docker 29.0+).
+# This eliminates the deprecated nft_compat and ip_set kernel module warnings.
+# AlmaLinux 9 firewalld already uses nftables natively — this keeps them aligned.
+# Note: incompatible with Docker Swarm overlay networks (not used here).
 sudo mkdir -p /etc/docker
-DOCKER_MAJOR=$(docker version --format '{{.Server.Version}}' 2>/dev/null | cut -d. -f1 || echo "0")
-if [ "${DOCKER_MAJOR}" -ge 29 ] 2>/dev/null; then
-  # Docker 29+: use native nftables backend — eliminates the deprecated
-  # nft_compat/ip_set KERN_WARNING messages that appear on the console at ~65s.
-  # AlmaLinux 9 firewalld already uses nftables; this aligns Docker with it.
-  # Note: incompatible with Docker Swarm overlay networks (not used here).
-  sudo tee /etc/docker/daemon.json > /dev/null <<'EOF'
+sudo tee /etc/docker/daemon.json > /dev/null <<'EOF'
 {
   "firewall-backend": "nftables"
 }
 EOF
-  echo "Docker ${DOCKER_MAJOR}: configured nftables backend"
-else
-  echo "Docker ${DOCKER_MAJOR}: skipping nftables backend (requires 29+), relying on loglevel=3 suppression"
-fi
 
 # Enable and Start Docker
 sudo systemctl enable --now docker
@@ -279,26 +283,10 @@ sudo sysctl -p /etc/sysctl.d/99-quiet-console.conf 2>/dev/null || true
 # Disable kernel bridge module logging to console
 echo "options bridge bridge_nf_call_iptables=0" | sudo tee /etc/modprobe.d/bridge.conf > /dev/null 2>/dev/null || true
 
-# Suppress deprecated driver warnings (nft_compat, ip_set) on boot console
-# Docker loads iptables-nft compat modules at ~65s; these emit KERN_WARNING(4)
-# deprecation notices. We use TWO layers:
-#
-# Layer 1: GRUB cmdline loglevel=3 — write to BOTH BIOS and UEFI paths so the
-# setting survives regardless of whether the OVA is deployed with BIOS or UEFI
-# firmware. (Packer builds with BIOS; ESXi may deploy with UEFI.)
-if ! grep -q 'loglevel=3' /etc/default/grub 2>/dev/null; then
-  sudo sed -i 's/^GRUB_CMDLINE_LINUX="/&loglevel=3 quiet /' /etc/default/grub
-fi
-# Always regenerate both paths — whichever doesn't exist will fail silently.
-sudo grub2-mkconfig -o /boot/grub2/grub.cfg 2>/dev/null || true
-sudo mkdir -p /boot/efi/EFI/almalinux 2>/dev/null || true
-sudo grub2-mkconfig -o /boot/efi/EFI/almalinux/grub.cfg 2>/dev/null || true
-sudo grub2-mkconfig -o /boot/efi/EFI/centos/grub.cfg 2>/dev/null || true
-
-# Note: nft_compat/ip_set deprecation warnings are eliminated at the source
-# by configuring Docker to use the native nftables backend (daemon.json above).
-# The sysctl kernel.printk=3 4 1 3 in 99-quiet-console.conf remains as a
-# belt-and-suspenders for any other noisy kernel messages.
+# nft_compat/ip_set deprecation warnings are eliminated at the source by
+# configuring Docker to use the native nftables backend (daemon.json above)
+# with IP forwarding pre-enabled (99-docker-ipforward.conf above).
+# kernel.printk in 99-quiet-console.conf suppresses any remaining bridge/STP noise.
 
 # First-boot network wizard: runs on first interactive login if no IP is present.
 # Uses /etc/ct-network-configured as sentinel so it only fires once.
