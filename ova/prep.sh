@@ -260,11 +260,19 @@ sudo sysctl -p /etc/sysctl.d/99-quiet-console.conf 2>/dev/null || true
 echo "options bridge bridge_nf_call_iptables=0" | sudo tee /etc/modprobe.d/bridge.conf > /dev/null 2>/dev/null || true
 
 # Suppress deprecated driver warnings (nft_compat, ip_set) on boot console
-# Docker uses legacy iptables kernel API internally, triggering these warnings.
-# The sysctl printk setting loads too late; kernel cmdline takes effect at boot.
+# Docker loads iptables-nft compat modules at ~65s; these emit KERN_WARNING(4)
+# deprecation notices. loglevel=3 filters them before they reach the console.
+# quiet suppresses any pre-loglevel driver messages from early module init.
+# NOTE: On UEFI systems grub.cfg lives under /boot/efi, not /boot/grub2.
+# We detect UEFI vs BIOS and write to the correct path so the change takes effect.
 if ! grep -q 'loglevel=3' /etc/default/grub 2>/dev/null; then
-  sudo sed -i 's/^GRUB_CMDLINE_LINUX="/&loglevel=3 /' /etc/default/grub
-  sudo grub2-mkconfig -o /boot/grub2/grub.cfg 2>/dev/null || true
+  sudo sed -i 's/^GRUB_CMDLINE_LINUX="/&loglevel=3 quiet /' /etc/default/grub
+  if [ -d /sys/firmware/efi ]; then
+    sudo grub2-mkconfig -o /boot/efi/EFI/almalinux/grub.cfg 2>/dev/null || \
+    sudo grub2-mkconfig -o /boot/efi/EFI/centos/grub.cfg 2>/dev/null || true
+  else
+    sudo grub2-mkconfig -o /boot/grub2/grub.cfg 2>/dev/null || true
+  fi
 fi
 
 # First-boot network wizard: runs on first interactive login if no IP is present.
