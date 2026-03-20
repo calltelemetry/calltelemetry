@@ -37,12 +37,18 @@ echo ""
 echo "[1/4] Configuring Docker nftables firewall backend..."
 
 mkdir -p /etc/docker
-cat > /etc/docker/daemon.json <<'EOF'
+if [[ -f /etc/docker/daemon.json ]] && command -v jq &>/dev/null; then
+  jq '. + {"firewall-backend": "nftables"}' /etc/docker/daemon.json > /tmp/daemon.json.tmp \
+    && mv /tmp/daemon.json.tmp /etc/docker/daemon.json
+  echo "      Merged into existing: /etc/docker/daemon.json"
+else
+  cat > /etc/docker/daemon.json <<'EOF'
 {
   "firewall-backend": "nftables"
 }
 EOF
-echo "      Written: /etc/docker/daemon.json"
+  echo "      Written: /etc/docker/daemon.json"
+fi
 
 # ── Fix 2: Enable IP forwarding (required by nftables backend) ────────────
 # The nftables backend does NOT enable IP forwarding automatically (unlike the
