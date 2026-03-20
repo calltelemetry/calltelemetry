@@ -261,19 +261,40 @@ echo "options bridge bridge_nf_call_iptables=0" | sudo tee /etc/modprobe.d/bridg
 
 # Suppress deprecated driver warnings (nft_compat, ip_set) on boot console
 # Docker loads iptables-nft compat modules at ~65s; these emit KERN_WARNING(4)
-# deprecation notices. loglevel=3 filters them before they reach the console.
-# quiet suppresses any pre-loglevel driver messages from early module init.
-# NOTE: On UEFI systems grub.cfg lives under /boot/efi, not /boot/grub2.
-# We detect UEFI vs BIOS and write to the correct path so the change takes effect.
+# deprecation notices. We use TWO layers:
+#
+# Layer 1: GRUB cmdline loglevel=3 — write to BOTH BIOS and UEFI paths so the
+# setting survives regardless of whether the OVA is deployed with BIOS or UEFI
+# firmware. (Packer builds with BIOS; ESXi may deploy with UEFI.)
 if ! grep -q 'loglevel=3' /etc/default/grub 2>/dev/null; then
   sudo sed -i 's/^GRUB_CMDLINE_LINUX="/&loglevel=3 quiet /' /etc/default/grub
-  if [ -d /sys/firmware/efi ]; then
-    sudo grub2-mkconfig -o /boot/efi/EFI/almalinux/grub.cfg 2>/dev/null || \
-    sudo grub2-mkconfig -o /boot/efi/EFI/centos/grub.cfg 2>/dev/null || true
-  else
-    sudo grub2-mkconfig -o /boot/grub2/grub.cfg 2>/dev/null || true
-  fi
 fi
+# Always regenerate both paths — whichever doesn't exist will fail silently.
+sudo grub2-mkconfig -o /boot/grub2/grub.cfg 2>/dev/null || true
+sudo mkdir -p /boot/efi/EFI/almalinux 2>/dev/null || true
+sudo grub2-mkconfig -o /boot/efi/EFI/almalinux/grub.cfg 2>/dev/null || true
+sudo grub2-mkconfig -o /boot/efi/EFI/centos/grub.cfg 2>/dev/null || true
+
+# Layer 2: Early systemd service — sets kernel.printk before Docker starts.
+# This is the reliable fallback: works regardless of GRUB firmware type.
+# The service runs at sysinit.target (before network and Docker) so the
+# KERN_WARNING(4) messages from nft_compat/ip_set never reach the console.
+sudo tee /etc/systemd/system/ct-console-quiet.service > /dev/null <<'SVCEOF'
+[Unit]
+Description=Suppress kernel deprecated driver warnings on console
+DefaultDependencies=no
+After=local-fs.target
+Before=sysinit.target network-pre.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'echo "3 4 1 3" > /proc/sys/kernel/printk'
+RemainAfterExit=yes
+
+[Install]
+WantedBy=sysinit.target
+SVCEOF
+sudo systemctl enable ct-console-quiet.service
 
 # First-boot network wizard: runs on first interactive login if no IP is present.
 # Uses /etc/ct-network-configured as sentinel so it only fires once.
