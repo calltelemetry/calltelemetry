@@ -39,7 +39,7 @@ jobs:
           token: ${{ secrets.CT_WORKSPACE_DISPATCH_TOKEN }}
           repository: calltelemetry/ai-workspace
           event-type: build-ova
-          client-payload: '{"version": "${{ steps.ver.outputs.version }}", "image_format": "ova"}'
+          client-payload: '{"version": "${{ steps.ver.outputs.version }}", "image_format": "ova", "skip_image_wait": true}'
 
       - name: Trigger QCOW2 build (Nutanix) in ai-workspace
         if: inputs.formats != 'ova-only'
@@ -48,4 +48,4 @@ jobs:
           token: ${{ secrets.CT_WORKSPACE_DISPATCH_TOKEN }}
           repository: calltelemetry/ai-workspace
           event-type: build-ova
-          client-payload: '{"version": "${{ steps.ver.outputs.version }}", "image_format": "qcow2"}'
+          client-payload: '{"version": "${{ steps.ver.outputs.version }}", "image_format": "qcow2", "skip_image_wait": true}'
