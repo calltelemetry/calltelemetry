@@ -256,7 +256,7 @@ services:
   # ─────────────────────────────────────────────────────────────────
 
   otel-collector:
-    profiles: ["otel"]
+    # Core service — observability pipeline for traces and metrics
     image: otel/opentelemetry-collector-contrib:0.96.0
     restart: unless-stopped
     command: ["--config=/etc/otelcol/config.yaml"]
@@ -276,7 +276,7 @@ services:
   # ─────────────────────────────────────────────────────────────────
 
   tempo:
-    profiles: ["otel"]
+    # Core service — distributed tracing backend, queryable via Grafana
     image: grafana/tempo:2.6.1
     restart: unless-stopped
     command: ["-config.file=/etc/tempo/tempo.yaml"]
