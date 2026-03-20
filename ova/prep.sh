@@ -54,6 +54,27 @@ sudo tee /etc/docker/daemon.json > /dev/null <<'EOF'
 }
 EOF
 
+# Prevent NetworkManager from managing Docker bridge interfaces.
+# NM's default behaviour: auto-generate /run/ profiles with autoconnect=yes for
+# any kernel bridge it sees (docker0, br-*). On every boot this races Docker for
+# bridge ownership, causing ZONE_CONFLICT errors and intermittent startup failures.
+sudo tee /etc/NetworkManager/conf.d/docker-unmanaged.conf > /dev/null <<'EOF'
+[keyfile]
+unmanaged-devices=interface-name:docker*;interface-name:br-*
+EOF
+sudo systemctl reload NetworkManager 2>/dev/null || true
+
+# Ensure Docker starts after firewalld is fully ready.
+# Prevents the boot-time race where firewalld hasn't finished initialising zones
+# before Docker tries to register docker0 in the docker zone.
+sudo mkdir -p /etc/systemd/system/docker.service.d
+sudo tee /etc/systemd/system/docker.service.d/override.conf > /dev/null <<'EOF'
+[Unit]
+After=network-online.target firewalld.service
+Wants=network-online.target
+EOF
+sudo systemctl daemon-reload
+
 # Enable and Start Docker
 sudo systemctl enable --now docker
 
