@@ -483,7 +483,12 @@ jobs:
   # ─────────────────────────────────────────────────────────────────
   create-ova-release:
     needs: [build-images]
-    if: ${{ always() && (needs.build-images.result == 'success' || needs.build-images.result == 'skipped') }}
+    if: |
+      ${{
+        always()
+        && (needs.build-images.result == 'success' || needs.build-images.result == 'skipped')
+        && !(inputs.skip_component_releases == true && inputs.skip_docker_builds == true)
+      }}
     runs-on: ubuntu-latest
     steps:
       - name: Resolve ct-media version
