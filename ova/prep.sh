@@ -272,53 +272,12 @@ fi
 # After DHCP or static IP is confirmed, shows the standard "sudo ./cli.sh" hint.
 sudo tee /etc/profile.d/ct-firstboot.sh > /dev/null <<'PROFILE_EOF'
 #!/bin/bash
-# ct-firstboot.sh — First-boot network setup for Call Telemetry Appliance
-[ -f /etc/ct-network-configured ] && return 0
+# ct-firstboot.sh — First-boot entry point for Call Telemetry Appliance
+# Launches `ct shell` which handles network onboarding and the management REPL.
 [ -t 0 ] || return 0
-CT_CLI="/home/calltelemetry/cli.sh"
-[ -f "$CT_CLI" ] || return 0
+command -v ct >/dev/null 2>&1 || return 0
 
-IP=$(ip -4 addr show scope global 2>/dev/null | grep inet | head -1 | awk '{print $2}' | cut -d/ -f1)
-if [ -n "$IP" ]; then
-  sudo touch /etc/ct-network-configured 2>/dev/null || touch /etc/ct-network-configured
-  echo ""
-  echo "  Network : $IP (DHCP)"
-  echo "  Web UI  : https://$IP"
-  echo "  Run     : sudo ./cli.sh  for appliance management"
-  echo ""
-  return 0
-fi
-
-echo ""
-echo "================================================================"
-echo "  Call Telemetry Appliance — Network Setup Required"
-echo "  No IP address detected. Configure network to access the UI."
-echo ""
-echo "  Opening NetworkManager TUI — set IP, gateway, and DNS here."
-echo "  Select your connection → Edit → IPv4 Configuration → Manual"
-echo "================================================================"
-echo ""
-sleep 2
-
-sudo nmtui edit
-
-# Only mark configured if an IP is actually present after nmtui
-IP=$(ip -4 addr show scope global 2>/dev/null | grep inet | head -1 | awk '{print $2}' | cut -d/ -f1)
-if [ -n "$IP" ]; then
-  sudo touch /etc/ct-network-configured 2>/dev/null || touch /etc/ct-network-configured
-  echo ""
-  echo "================================================================"
-  echo "  Network configured. Web UI: https://$IP"
-  echo "  Run: sudo ./cli.sh  for all appliance management commands."
-  echo "================================================================"
-  echo ""
-else
-  echo ""
-  echo "  No IP detected after setup. Log in again to retry, or run:"
-  echo "    sudo nmtui"
-  echo "    sudo ./cli.sh network address <ip/prefix> <gateway>"
-  echo ""
-fi
+exec ct shell
 PROFILE_EOF
 sudo chmod +x /etc/profile.d/ct-firstboot.sh
 
