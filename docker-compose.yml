@@ -409,7 +409,7 @@ services:
         condition: service_healthy
 
   seaweedfs:
-    profiles: ["jtapi"]
+    # Core service — used by config audit snapshots, as-built reports, and JTAPI audio
     image: chrislusf/seaweedfs:4.13
     pull_policy: if_not_present
     command: >
