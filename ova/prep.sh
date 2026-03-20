@@ -30,6 +30,19 @@ fi
 # Install Docker-Compose
 sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin --nobest
 
+# Configure Docker to use native nftables backend (Docker 29+).
+# This prevents loading the deprecated nft_compat and ip_set compat modules
+# which Docker's default iptables-nft backend triggers at startup, eliminating
+# the "Deprecated Driver" KERN_WARNING messages that appear on the console.
+# AlmaLinux 9 firewalld already uses nftables natively — this aligns Docker.
+# Note: incompatible with Docker Swarm overlay networks (not used here).
+sudo mkdir -p /etc/docker
+sudo tee /etc/docker/daemon.json > /dev/null <<'EOF'
+{
+  "firewall-backend": "nftables"
+}
+EOF
+
 # Enable and Start Docker
 sudo systemctl enable --now docker
 
@@ -275,26 +288,10 @@ sudo mkdir -p /boot/efi/EFI/almalinux 2>/dev/null || true
 sudo grub2-mkconfig -o /boot/efi/EFI/almalinux/grub.cfg 2>/dev/null || true
 sudo grub2-mkconfig -o /boot/efi/EFI/centos/grub.cfg 2>/dev/null || true
 
-# Layer 2: Early systemd service — sets kernel.printk before Docker starts.
-# This is the reliable fallback: works regardless of GRUB firmware type.
-# The service runs at sysinit.target (before network and Docker) so the
-# KERN_WARNING(4) messages from nft_compat/ip_set never reach the console.
-sudo tee /etc/systemd/system/ct-console-quiet.service > /dev/null <<'SVCEOF'
-[Unit]
-Description=Suppress kernel deprecated driver warnings on console
-DefaultDependencies=no
-After=local-fs.target
-Before=sysinit.target network-pre.target
-
-[Service]
-Type=oneshot
-ExecStart=/bin/sh -c 'echo "3 4 1 3" > /proc/sys/kernel/printk'
-RemainAfterExit=yes
-
-[Install]
-WantedBy=sysinit.target
-SVCEOF
-sudo systemctl enable ct-console-quiet.service
+# Note: nft_compat/ip_set deprecation warnings are eliminated at the source
+# by configuring Docker to use the native nftables backend (daemon.json above).
+# The sysctl kernel.printk=3 4 1 3 in 99-quiet-console.conf remains as a
+# belt-and-suspenders for any other noisy kernel messages.
 
 # First-boot network wizard: runs on first interactive login if no IP is present.
 # Uses /etc/ct-network-configured as sentinel so it only fires once.
