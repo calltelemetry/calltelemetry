@@ -293,31 +293,32 @@ echo ""
 echo "================================================================"
 echo "  Call Telemetry Appliance — Network Setup Required"
 echo "  No IP address detected. Configure network to access the UI."
+echo ""
+echo "  Opening NetworkManager TUI — set IP, gateway, and DNS here."
+echo "  Select your connection → Edit → IPv4 Configuration → Manual"
 echo "================================================================"
 echo ""
+sleep 2
 
-sudo "$CT_CLI" network address
-echo ""
-read -rp "  Set DNS servers? [y/N] " set_dns </dev/tty
-if [[ "$set_dns" =~ ^[Yy]$ ]]; then
-  sudo "$CT_CLI" network dns-servers
-  echo ""
-fi
-read -rp "  Set a search domain? [y/N] " set_domain </dev/tty
-if [[ "$set_domain" =~ ^[Yy]$ ]]; then
-  sudo "$CT_CLI" network domain
-  echo ""
-fi
+sudo nmtui edit
 
-sudo touch /etc/ct-network-configured 2>/dev/null || touch /etc/ct-network-configured
-
+# Only mark configured if an IP is actually present after nmtui
 IP=$(ip -4 addr show scope global 2>/dev/null | grep inet | head -1 | awk '{print $2}' | cut -d/ -f1)
-echo ""
-echo "================================================================"
-echo "  Network configured. Web UI: https://${IP:-(pending)}"
-echo "  Run: sudo ./cli.sh  for all appliance management commands."
-echo "================================================================"
-echo ""
+if [ -n "$IP" ]; then
+  sudo touch /etc/ct-network-configured 2>/dev/null || touch /etc/ct-network-configured
+  echo ""
+  echo "================================================================"
+  echo "  Network configured. Web UI: https://$IP"
+  echo "  Run: sudo ./cli.sh  for all appliance management commands."
+  echo "================================================================"
+  echo ""
+else
+  echo ""
+  echo "  No IP detected after setup. Log in again to retry, or run:"
+  echo "    sudo nmtui"
+  echo "    sudo ./cli.sh network address <ip/prefix> <gateway>"
+  echo ""
+fi
 PROFILE_EOF
 sudo chmod +x /etc/profile.d/ct-firstboot.sh
 
