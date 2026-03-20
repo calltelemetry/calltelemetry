@@ -210,7 +210,8 @@ services:
     command:
       - --config.file=/etc/alertmanager/alertmanager.yml
       - --storage.path=/alertmanager
-      - --web.external-url=/alertmanager
+      - --web.route-prefix=/alertmanager
+      - --web.external-url=${ALERTMANAGER_EXTERNAL_URL:-http://localhost/alertmanager}
     volumes:
       - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
       - alertmanager-data:/alertmanager
@@ -363,6 +364,8 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
       # Disable Spring Boot tracing autoconfiguration when OTel is off
       - MANAGEMENT_TRACING_ENABLED=${OTEL_ENABLED:-false}
+      # Spring Boot 3.5+ bean override (prevents conventionErrorViewResolver conflict)
+      - SPRING_MAIN_ALLOW_BEAN_DEFINITION_OVERRIDING=true
     volumes:
       - jtapi-jars:/app/jars
     depends_on:
