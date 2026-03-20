@@ -104,7 +104,7 @@ sudo tee /etc/systemd/system/setup-network-environment.service > /dev/null <<EOF
 [Unit]
 Description=Setup Network Environment
 Documentation=https://github.com/kelseyhightower/setup-network-environment
-Requires=network-online.target
+Wants=network-online.target
 After=network-online.target
 
 [Service]
