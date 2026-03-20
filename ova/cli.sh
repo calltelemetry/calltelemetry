@@ -1,6 +1,7 @@
 #!/bin/bash
 
-# ASCII Art Logo
+# ASCII Art Logo — only printed for interactive help, not subcommand calls
+if [ $# -eq 0 ] || [ "${1:-}" = "help" ]; then
 cat << "EOF"
 
    ______      ____   ______     __                    __
@@ -12,6 +13,7 @@ cat << "EOF"
 
 https://calltelemetry.com
 EOF
+fi
 
 # Detect installation user and directory
 if [ -n "${SUDO_USER:-}" ]; then
