@@ -62,6 +62,16 @@ sudo tee /etc/NetworkManager/conf.d/docker-unmanaged.conf > /dev/null <<'EOF'
 [keyfile]
 unmanaged-devices=interface-name:docker*;interface-name:br-*
 EOF
+
+# dnf install of docker-ce may auto-start Docker before this config was written,
+# causing NM to create persistent profiles for docker0/br-* bridges.
+# Delete those stale profiles now so they are not baked into the OVA image.
+# Without this, on first boot NM races Docker for bridge ownership → nft_compat loads.
+for profile in $(nmcli -t -f NAME,DEVICE connection show 2>/dev/null \
+    | awk -F: '$2 ~ /^docker|^br-/ {print $1}'); do
+  sudo nmcli connection delete "$profile" 2>/dev/null && echo "Deleted NM bridge profile: $profile" || true
+done
+
 sudo systemctl reload NetworkManager 2>/dev/null || true
 
 # Ensure Docker starts after firewalld is fully ready.
@@ -303,17 +313,6 @@ sudo sysctl -p /etc/sysctl.d/99-quiet-console.conf 2>/dev/null || true
 
 # Disable kernel bridge module logging to console
 echo "options bridge bridge_nf_call_iptables=0" | sudo tee /etc/modprobe.d/bridge.conf > /dev/null 2>/dev/null || true
-
-# Prevent nft_compat and ip_set kernel modules from loading.
-# Docker 29+ with nftables firewall backend and firewalld with nftables backend
-# do not require these modules. When they load (e.g., via iptables-nft compatibility
-# calls), the kernel emits "Deprecated Driver" warnings that flood the console during
-# first boot. Using the modprobe install directive replaces the load with /bin/true
-# (a no-op that exits 0) so nothing breaks — the modules simply never initialize.
-sudo tee /etc/modprobe.d/nft-no-compat.conf > /dev/null <<'EOF'
-install nft_compat /bin/true
-install ip_set /bin/true
-EOF
 
 # First-boot network wizard: runs on first interactive login if no IP is present.
 # Uses /etc/ct-network-configured as sentinel so it only fires once.
