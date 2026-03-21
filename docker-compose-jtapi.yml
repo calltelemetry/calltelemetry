@@ -25,8 +25,7 @@
 #      (credentials flow through NATS KV — CtiConfigWatcher auto-connects)
 #
 # SeaweedFS credentials:
-#   Default: minioadmin/minioadmin. For production, set S3_ACCESS_KEY_ID and
-#   S3_SECRET_ACCESS_KEY in your environment or .env file BEFORE first start.
+#   Set S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY in your .env file BEFORE first start.
 #   Changing credentials after data exists requires reconfiguration.
 
 services:
@@ -45,8 +44,8 @@ services:
       # SeaweedFS S3 for audio storage (greetings, recordings)
       - S3_ENABLED=true
       - S3_ENDPOINT=http://seaweedfs:8333
-      - S3_ACCESS_KEY_ID=${S3_ACCESS_KEY_ID:-minioadmin}
-      - S3_SECRET_ACCESS_KEY=${S3_SECRET_ACCESS_KEY:-minioadmin}
+      - S3_ACCESS_KEY_ID=${S3_ACCESS_KEY_ID:-changeme}
+      - S3_SECRET_ACCESS_KEY=${S3_SECRET_ACCESS_KEY:-changeme}
       - S3_REGION=us-east-1
       # ct-media gRPC for audio transcoding (G.711 encoding for JTAPI greetings)
       - CT_MEDIA_ENDPOINT=ct-media:50053
@@ -115,8 +114,8 @@ services:
       # SeaweedFS for audio storage
       - S3_ENABLED=true
       - S3_ENDPOINT=http://seaweedfs:8333
-      - S3_ACCESS_KEY_ID=${S3_ACCESS_KEY_ID:-minioadmin}
-      - S3_SECRET_ACCESS_KEY=${S3_SECRET_ACCESS_KEY:-minioadmin}
+      - S3_ACCESS_KEY_ID=${S3_ACCESS_KEY_ID:-changeme}
+      - S3_SECRET_ACCESS_KEY=${S3_SECRET_ACCESS_KEY:-changeme}
       # JAR auto-restart when downloaded from NATS ObjectStore
       - WATCH_JARS=true
       # Disable OpenTelemetry by default (no collector in Docker Compose)
@@ -150,8 +149,8 @@ services:
     environment:
       - GRPC_PORT=50053
       - S3_ENDPOINT=seaweedfs:8333
-      - S3_ACCESS_KEY_ID=${S3_ACCESS_KEY_ID:-minioadmin}
-      - S3_SECRET_ACCESS_KEY=${S3_SECRET_ACCESS_KEY:-minioadmin}
+      - S3_ACCESS_KEY_ID=${S3_ACCESS_KEY_ID:-changeme}
+      - S3_SECRET_ACCESS_KEY=${S3_SECRET_ACCESS_KEY:-changeme}
     networks:
       - ct
     depends_on:

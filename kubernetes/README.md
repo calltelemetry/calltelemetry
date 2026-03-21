@@ -48,7 +48,7 @@ sudo curl https://get.calltelemetry.com | sudo sh -s -- prep-cluster-node
 
    ```bash
    # From Primary Node.
-   export K3S_TOKEN="calltelemetry"
+   export K3S_TOKEN="<your-secure-token>"
    curl -sfL https://get.k3s.io | K3S_KUBECONFIG_MODE=0644 sh -s server --cluster-init --disable traefik --disable servicelb
    ```
 
@@ -72,8 +72,8 @@ sudo curl https://get.calltelemetry.com | sudo sh -s -- prep-cluster-node
 
    ```bash
    # From the secondary node to be installed.
-   export primary_ip="192.168.123.156"
-   export K3S_TOKEN="calltelemetry"
+   export primary_ip="<primary_ip>"
+   export K3S_TOKEN="<your-secure-token>"
    sudo curl -sfL https://get.k3s.io | K3S_URL="https://$primary_ip:6443" K3S_KUBECONFIG_MODE=0644 sh -s server --disable traefik --disable servicelb
    mkdir -p ~/.kube
    sudo cat /etc/rancher/k3s/k3s.yaml > ~/.kube/config
@@ -165,12 +165,12 @@ The **CrunchyData PostgreSQL Operator** automates PostgreSQL database cluster de
    cat <<EOF > ./ct_prod.yaml
    hostname: calltelemetry.local
    environment: prod
-   primary_ip: 192.168.123.203
-   secondary_ip: 192.168.123.204
-   cluster_ip_start: 192.168.123.205
-   cluster_ip_end: 192.168.123.205
-   admin_ip: 192.168.123.206
-   management_ip: 192.168.123.207
+   primary_ip: <primary_ip>
+   secondary_ip: <secondary_ip>
+   cluster_ip_start: <cluster_ip_start>
+   cluster_ip_end: <cluster_ip_end>
+   admin_ip: <admin_ip>
+   management_ip: <management_ip>
    EOF
    ```
 

@@ -3,7 +3,7 @@
     {
       "name": "admin",
       "credentials": [
-        { "accessKey": "minioadmin", "secretKey": "minioadmin" }
+        { "accessKey": "changeme", "secretKey": "changeme" }
       ],
       "actions": ["Admin", "Read", "Write", "List", "Tagging"]
     }

@@ -71,7 +71,7 @@ echo ""
 read -rp "  Choose [1]: " CRED_CHOICE < /dev/tty
 CRED_CHOICE="${CRED_CHOICE:-1}"
 
-PG_PASSWORD="calltelemetry_appliance"
+PG_PASSWORD="$(openssl rand -base64 16 2>/dev/null | tr -d '/+=' | head -c 16)"
 NATS_TOKEN=""
 
 if [ "${CRED_CHOICE}" = "2" ]; then
