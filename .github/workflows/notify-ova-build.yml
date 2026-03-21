@@ -37,7 +37,7 @@ jobs:
         uses: peter-evans/repository-dispatch@v3
         with:
           token: ${{ secrets.CT_WORKSPACE_DISPATCH_TOKEN }}
-          repository: calltelemetry/ai-workspace
+          repository: calltelemetry/ct-appliance
           event-type: build-ova
           client-payload: '{"version": "${{ steps.ver.outputs.version }}", "image_format": "ova", "skip_image_wait": true}'
 
@@ -46,6 +46,6 @@ jobs:
         uses: peter-evans/repository-dispatch@v3
         with:
           token: ${{ secrets.CT_WORKSPACE_DISPATCH_TOKEN }}
-          repository: calltelemetry/ai-workspace
+          repository: calltelemetry/ct-appliance
           event-type: build-ova
           client-payload: '{"version": "${{ steps.ver.outputs.version }}", "image_format": "qcow2", "skip_image_wait": true}'
