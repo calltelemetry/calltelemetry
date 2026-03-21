@@ -968,39 +968,10 @@ restart_service() {
 
   echo "Restarting Docker Compose service..."
 
-  # Start the service in background and stream progress
-  systemctl restart "$service" &
-  local restart_pid=$!
-
-  # Show filtered boot progress — only web container migration/startup lines.
-  # Raw docker compose logs dumps full Elixir stacktraces, JWT tokens, and
-  # NATS init spam which is noise, not progress.
-  sleep 2
-  local log_pid=""
-  if command -v docker &>/dev/null; then
-    docker compose logs -f --tail 0 web 2>/dev/null | \
-      grep --line-buffered -iE "migrat|seed|start|ready|listen|booted|BootTask|Phase|error.*migrat|== Running" | \
-      sed 's/^web-[0-9]* *| */  /' &
-    log_pid=$!
-  fi
-
-  # Wait for systemctl restart to complete (up to 120s per TimeoutStartSec)
-  local waited=0
-  while kill -0 "$restart_pid" 2>/dev/null; do
-    sleep 5
-    waited=$((waited + 5))
-    if [ "$waited" -ge 120 ]; then
-      echo ""
-      echo "⚠️  Still waiting for services to start (${waited}s)..."
-    fi
-  done
-
-  # Stop log tailing
-  [ -n "$log_pid" ] && kill "$log_pid" 2>/dev/null || true
-  wait "$log_pid" 2>/dev/null || true
-
-  # Check exit status
-  wait "$restart_pid"
+  # Restart synchronously — no log tailing during boot.
+  # Progress is shown by wait_for_services() which reports stepped
+  # container startup, DB readiness, migration status, and health checks.
+  systemctl restart "$service"
   local restart_exit=$?
 
   if [ "$restart_exit" -eq 0 ]; then
