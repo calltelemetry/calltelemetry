@@ -939,6 +939,18 @@ restart_service() {
   # Ensure bind-mount files exist before Docker starts (prevents directory auto-creation)
   ensure_bind_mount_files
 
+  # Purge ghost containers before restart.
+  # Image tag changes between versions can leave stale container IDs in Docker's
+  # internal state. These ghosts cause "No such container" errors on compose up,
+  # resulting in a production outage. Force-remove ALL project containers first.
+  echo "Cleaning up containers before restart..."
+  local ghost_ids
+  ghost_ids=$(docker ps -a --filter "label=com.docker.compose.project=calltelemetry" --format '{{.ID}}' 2>/dev/null)
+  if [ -n "$ghost_ids" ]; then
+    echo "  Removing $(echo "$ghost_ids" | wc -l | tr -d ' ') project containers..."
+    echo "$ghost_ids" | xargs -r docker rm -f 2>/dev/null || true
+  fi
+
   echo "Restarting Docker Compose service..."
 
   if systemctl restart "$service" 2>/dev/null; then
