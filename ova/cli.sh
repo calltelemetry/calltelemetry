@@ -1006,8 +1006,7 @@ restart_service() {
   fi
 
   # First attempt failed — capture diagnostics
-  local exit_code=$?
-  echo "⚠️  Service restart failed (exit code: $exit_code). Gathering diagnostics..."
+  echo "⚠️  Service restart failed (exit code: $restart_exit). Gathering diagnostics..."
   echo ""
 
   # Show recent journal entries for context
