@@ -175,13 +175,14 @@ services:
       start_period: 30s
 
   nats:
-    image: "nats:2.11"
+    image: "nats:2.11-alpine"
     command: "-c /etc/nats/nats.conf"
     volumes:
       - ./nats.conf:/etc/nats/nats.conf
       - nats-data:/jetstream/store
     expose:
       - "4222"
+      - "8222"
     networks:
       - ct
     healthcheck:
