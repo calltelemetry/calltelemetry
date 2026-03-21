@@ -22,7 +22,7 @@ services:
       start_period: 30s
 
   vue-web:
-    image: "calltelemetry/vue:${VUE_VERSION:-0.8.6-rc109}"
+    image: "calltelemetry/vue:${VUE_VERSION}"
     restart: "always"
     expose:
       - "80"
@@ -36,7 +36,7 @@ services:
       start_period: 30s
 
   traceroute:
-    image: "calltelemetry/traceroute:${TRACEROUTE_VERSION:-latest}"
+    image: "calltelemetry/traceroute:${TRACEROUTE_VERSION}"
     user: root
     expose:
       - "4100"
@@ -103,7 +103,7 @@ services:
       - ct
 
   web:
-    image: "calltelemetry/web:${WEB_VERSION:-0.8.6-rc109}"
+    image: "calltelemetry/web:${WEB_VERSION}"
     restart: "always"
     user: root
     expose:
@@ -340,7 +340,7 @@ services:
 
   jtapi-sidecar:
     profiles: ["jtapi"]
-    image: "calltelemetry/jtapi-sidecar:${JTAPI_VERSION:-1.14.5}"
+    image: "calltelemetry/jtapi-sidecar:${JTAPI_VERSION}"
     restart: unless-stopped
     mem_limit: 1g
     expose:
@@ -393,7 +393,7 @@ services:
 
   ct-media:
     profiles: ["jtapi"]
-    image: "calltelemetry/ct-media:${CT_MEDIA_VERSION:-0.2.5}"
+    image: "calltelemetry/ct-media:${CT_MEDIA_VERSION}"
     restart: unless-stopped
     expose:
       - "50053"
