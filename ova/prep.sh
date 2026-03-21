@@ -297,12 +297,6 @@ sudo tee /etc/issue.net > /dev/null <<EOF
 ${BANNER_CONTENT}
 EOF
 
-# Post-login MOTD
-sudo tee /etc/motd > /dev/null <<EOF
-${BANNER_CONTENT}
-Run 'cli.sh' for appliance management.
-EOF
-
 # Suppress kernel bridge/STP "entering blocking state" messages on console
 # These flood the console when Docker creates bridge networks
 sudo tee /etc/sysctl.d/99-quiet-console.conf > /dev/null <<EOF
@@ -314,13 +308,19 @@ sudo sysctl -p /etc/sysctl.d/99-quiet-console.conf 2>/dev/null || true
 # Disable kernel bridge module logging to console
 echo "options bridge bridge_nf_call_iptables=0" | sudo tee /etc/modprobe.d/bridge.conf > /dev/null 2>/dev/null || true
 
-# First-boot network wizard: runs on first interactive login if no IP is present.
-# Uses /etc/ct-network-configured as sentinel so it only fires once.
-# After DHCP or static IP is confirmed, shows the standard "sudo ./cli.sh" hint.
+# Regenerate SSH host keys — OVA clones share keys, which enables MITM attacks
+sudo rm -f /etc/ssh/ssh_host_*_key*
+sudo ssh-keygen -A
+
+# First-boot: `ct shell` runs onboarding (network + preferences) then launches the TUI.
+# Uses /etc/ct-network-configured as sentinel so network wizard only fires once.
+# After onboarding, the full-screen TUI dashboard is the default interface.
+# Use `ct shell --cli` for the text-mode IOS-style shell.
 sudo tee /etc/profile.d/ct-firstboot.sh > /dev/null <<'PROFILE_EOF'
 #!/bin/bash
 # ct-firstboot.sh — First-boot entry point for Call Telemetry Appliance
-# Launches `ct shell` which handles network onboarding and the management REPL.
+# Launches `ct shell` → onboarding wizard (if needed) → TUI dashboard.
+# Type `ct shell --cli` for text-mode shell, or `shell` from within the TUI.
 [ -t 0 ] || return 0
 command -v ct >/dev/null 2>&1 || return 0
 

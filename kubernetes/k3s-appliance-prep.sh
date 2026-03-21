@@ -5,6 +5,9 @@
 # First-boot wizard (k3s-firstboot.sh) re-applies with real network values.
 set -euo pipefail
 
+# Ensure /usr/local/bin is in PATH (K3s installs kubectl/helm/helmfile there)
+export PATH="/usr/local/bin:${PATH}"
+
 INSTALL_USER="${SUDO_USER:-$(whoami)}"
 INSTALL_DIR="$(eval echo ~${INSTALL_USER})"
 K8S_DIR="/opt/calltelemetry/k8s"
@@ -21,38 +24,48 @@ sudo hostname ct-appliance
 sudo dnf install -y wget net-tools git policycoreutils-python-utils
 
 # ─── SSH port 2222 (free port 22 for SFTP) ────────────────────────────────
+# Set CT_SKIP_SSH_PORT=1 to skip (e.g., OrbStack smoke test)
 
-sudo sed -i "s/#Port 22/Port 2222/" /etc/ssh/sshd_config
-sudo semanage port -a -t ssh_port_t -p tcp 2222 || true
-sudo firewall-cmd --zone=public --add-port=2222/tcp --permanent
+if [ "${CT_SKIP_SSH_PORT:-0}" != "1" ]; then
+  sudo sed -i "s/#Port 22/Port 2222/" /etc/ssh/sshd_config
+  sudo semanage port -a -t ssh_port_t -p tcp 2222 || true
+  if [ "${CT_SKIP_FIREWALL:-0}" != "1" ]; then
+    sudo firewall-cmd --zone=public --add-port=2222/tcp --permanent
+  fi
+fi
 
 # ─── Firewall rules for K3s + MetalLB + app services ──────────────────────
+# Set CT_SKIP_FIREWALL=1 to skip (e.g., OrbStack smoke test where firewalld is absent)
 
-# K3s API server
-sudo firewall-cmd --permanent --add-port=6443/tcp
-# etcd
-sudo firewall-cmd --permanent --add-port=2379-2380/tcp
-# Kubelet
-sudo firewall-cmd --permanent --add-port=10250/tcp
-# kube-scheduler / kube-controller-manager
-sudo firewall-cmd --permanent --add-port=10251-10252/tcp
-# Flannel VXLAN
-sudo firewall-cmd --permanent --add-port=8285/udp
-sudo firewall-cmd --permanent --add-port=8472/udp
-# MetalLB memberlist
-sudo firewall-cmd --permanent --add-port=7946/tcp
-sudo firewall-cmd --permanent --add-port=7946/udp
-# NodePort range
-sudo firewall-cmd --permanent --add-port=30000-32767/tcp
-# App services: HTTP, HTTPS, SFTP, Syslog
-sudo firewall-cmd --permanent --add-port=80/tcp
-sudo firewall-cmd --permanent --add-port=443/tcp
-sudo firewall-cmd --permanent --add-port=22/tcp
-sudo firewall-cmd --permanent --add-port=514/tcp
-sudo firewall-cmd --permanent --add-port=514/udp
-# Masquerade for K3s networking
-sudo firewall-cmd --add-masquerade --permanent
-sudo firewall-cmd --reload
+if [ "${CT_SKIP_FIREWALL:-0}" != "1" ]; then
+  # K3s API server
+  sudo firewall-cmd --permanent --add-port=6443/tcp
+  # etcd
+  sudo firewall-cmd --permanent --add-port=2379-2380/tcp
+  # Kubelet
+  sudo firewall-cmd --permanent --add-port=10250/tcp
+  # kube-scheduler / kube-controller-manager
+  sudo firewall-cmd --permanent --add-port=10251-10252/tcp
+  # Flannel VXLAN
+  sudo firewall-cmd --permanent --add-port=8285/udp
+  sudo firewall-cmd --permanent --add-port=8472/udp
+  # MetalLB memberlist
+  sudo firewall-cmd --permanent --add-port=7946/tcp
+  sudo firewall-cmd --permanent --add-port=7946/udp
+  # NodePort range
+  sudo firewall-cmd --permanent --add-port=30000-32767/tcp
+  # App services: HTTP, HTTPS, SFTP, Syslog
+  sudo firewall-cmd --permanent --add-port=80/tcp
+  sudo firewall-cmd --permanent --add-port=443/tcp
+  sudo firewall-cmd --permanent --add-port=22/tcp
+  sudo firewall-cmd --permanent --add-port=514/tcp
+  sudo firewall-cmd --permanent --add-port=514/udp
+  # Masquerade for K3s networking
+  sudo firewall-cmd --add-masquerade --permanent
+  sudo firewall-cmd --reload
+else
+  echo "Skipping firewall configuration (CT_SKIP_FIREWALL=1)"
+fi
 
 # ─── Network environment discovery ────────────────────────────────────────
 
@@ -150,7 +163,7 @@ curl -sfL https://get.k3s.io | INSTALL_K3S_CHANNEL=stable \
 # Wait for K3s to be ready
 echo "Waiting for K3s node to be Ready..."
 for i in $(seq 1 60); do
-  if kubectl get nodes 2>/dev/null | grep -q " Ready"; then
+  if /usr/local/bin/kubectl get nodes 2>/dev/null | grep -q " Ready"; then
     echo "K3s node is Ready."
     break
   fi
@@ -282,8 +295,12 @@ fi
 
 # ─── SSH reload (switch to port 2222, preserves Packer session) ──────────────
 
-echo "Reloading SSH on port 2222..."
-sudo systemctl reload sshd || sudo systemctl restart sshd
+if [ "${CT_SKIP_SSH_PORT:-0}" != "1" ]; then
+  echo "Reloading SSH on port 2222..."
+  sudo systemctl reload sshd || sudo systemctl restart sshd
+else
+  echo "Skipping SSH port change (CT_SKIP_SSH_PORT=1)"
+fi
 
 # ─── Suppress noisy console messages ──────────────────────────────────────────
 
