@@ -968,8 +968,40 @@ restart_service() {
 
   echo "Restarting Docker Compose service..."
 
-  if systemctl restart "$service" 2>/dev/null; then
-    echo "Docker Compose service restarted."
+  # Start the service in background and stream progress
+  systemctl restart "$service" &
+  local restart_pid=$!
+
+  # Tail compose logs in background so user sees migration/boot progress
+  sleep 2
+  local log_pid=""
+  if command -v docker &>/dev/null; then
+    docker compose logs -f --tail 0 2>/dev/null &
+    log_pid=$!
+  fi
+
+  # Wait for systemctl restart to complete (up to 120s per TimeoutStartSec)
+  local waited=0
+  while kill -0 "$restart_pid" 2>/dev/null; do
+    sleep 5
+    waited=$((waited + 5))
+    if [ "$waited" -ge 120 ]; then
+      echo ""
+      echo "⚠️  Still waiting for services to start (${waited}s)..."
+    fi
+  done
+
+  # Stop log tailing
+  [ -n "$log_pid" ] && kill "$log_pid" 2>/dev/null || true
+  wait "$log_pid" 2>/dev/null || true
+
+  # Check exit status
+  wait "$restart_pid"
+  local restart_exit=$?
+
+  if [ "$restart_exit" -eq 0 ]; then
+    echo ""
+    echo "✅ Docker Compose service restarted successfully."
     return 0
   fi
 
