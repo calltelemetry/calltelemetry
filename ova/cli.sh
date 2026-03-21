@@ -972,11 +972,15 @@ restart_service() {
   systemctl restart "$service" &
   local restart_pid=$!
 
-  # Tail compose logs in background so user sees migration/boot progress
+  # Show filtered boot progress — only web container migration/startup lines.
+  # Raw docker compose logs dumps full Elixir stacktraces, JWT tokens, and
+  # NATS init spam which is noise, not progress.
   sleep 2
   local log_pid=""
   if command -v docker &>/dev/null; then
-    docker compose logs -f --tail 0 2>/dev/null &
+    docker compose logs -f --tail 0 web 2>/dev/null | \
+      grep --line-buffered -iE "migrat|seed|start|ready|listen|booted|BootTask|Phase|error.*migrat|== Running" | \
+      sed 's/^web-[0-9]* *| */  /' &
     log_pid=$!
   fi
 
