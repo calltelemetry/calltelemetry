@@ -2321,19 +2321,49 @@ update() {
     echo "Logging in to Docker Hub as ${DOCKERHUB_USERNAME}..."
     echo "${DOCKERHUB_TOKEN}" | sudo docker login -u "${DOCKERHUB_USERNAME}" --password-stdin
   fi
-  echo "Pulling Docker images..."
-  if ! $DOCKER_COMPOSE_CMD -f "$TEMP_FILE" pull; then
-    echo "❌ Failed to pull Docker images"
-    rm -f "$TEMP_FILE"
-    return 1
-  fi
-  # Also pull JTAPI images if enabled (profiles are read from .env automatically)
+  # Smart pull — only download images that aren't already present locally.
+  # Saves bandwidth and time on re-runs or minor version bumps where most
+  # images haven't changed.
+  echo "Checking which images need updating..."
+  local pull_needed=false
+  local skipped=0
+  local pulled=0
+
+  # Core services
+  while IFS= read -r img; do
+    if docker image inspect "$img" >/dev/null 2>&1; then
+      echo "  ✓ $img (already present)"
+      skipped=$((skipped + 1))
+    else
+      echo "  ↓ $img (pulling...)"
+      if docker pull "$img" >/dev/null 2>&1; then
+        pulled=$((pulled + 1))
+      else
+        echo "  ❌ Failed to pull $img"
+        rm -f "$TEMP_FILE"
+        return 1
+      fi
+    fi
+  done < <(extract_images "$TEMP_FILE")
+
+  # JTAPI profile images (if enabled)
   if is_jtapi_enabled; then
-    echo "Pulling JTAPI profile images..."
-    $DOCKER_COMPOSE_CMD -f "$TEMP_FILE" --profile jtapi pull jtapi-sidecar ct-media seaweedfs 2>/dev/null || \
-      echo "⚠️  Some JTAPI images may not be available yet"
+    for svc in jtapi-sidecar ct-media seaweedfs; do
+      local img=$($DOCKER_COMPOSE_CMD -f "$TEMP_FILE" --profile jtapi config 2>/dev/null | grep -A1 "^  ${svc}:" | grep "image:" | awk '{print $2}' | tr -d '"')
+      if [ -n "$img" ]; then
+        if docker image inspect "$img" >/dev/null 2>&1; then
+          echo "  ✓ $img (already present)"
+          skipped=$((skipped + 1))
+        else
+          echo "  ↓ $img (pulling...)"
+          docker pull "$img" >/dev/null 2>&1 || echo "  ⚠️  $img not available yet"
+          pulled=$((pulled + 1))
+        fi
+      fi
+    done
   fi
-  echo "✅ All images pulled successfully"
+
+  echo "✅ Images ready ($pulled pulled, $skipped already present)"
 
   # Extract and display the image versions
   echo ""
@@ -2760,30 +2790,46 @@ wait_for_services() {
 # Function to purge unused Docker resources
 purge_docker() {
   echo "Starting Docker cleanup..."
-  
+
   echo -n "Removing stopped containers... "
   containers_removed=$(docker container prune -f 2>/dev/null | grep "Total reclaimed space" | awk '{print $4 $5}' || echo "0B")
   echo "done (${containers_removed})"
-  
+
   echo -n "Removing unused networks... "
   networks_removed=$(docker network prune -f 2>/dev/null | wc -l)
   echo "done (${networks_removed} networks)"
-  
+
   echo -n "Removing unused volumes... "
   volumes_output=$(docker volume prune -f 2>/dev/null)
   volumes_space=$(echo "$volumes_output" | grep "Total reclaimed space" | awk '{print $4 $5}' || echo "0B")
   echo "done (${volumes_space})"
-  
-  echo -n "Removing unused images (keeping recent ones)... "
-  images_output=$(docker image prune -a -f --filter "until=24h" 2>/dev/null)
-  images_space=$(echo "$images_output" | grep "Total reclaimed space" | awk '{print $4 $5}' || echo "0B")
-  echo "done (${images_space})"
-  
+
+  # Remove old images but PROTECT images referenced by docker-compose.yml.
+  # docker image prune -a removes ALL unused images including the ones we
+  # just pulled. Instead, selectively remove old calltelemetry images that
+  # don't match the current compose file.
+  echo -n "Removing old calltelemetry images... "
+  local active_images=""
+  if [ -f "$ORIGINAL_FILE" ]; then
+    active_images=$(extract_images "$ORIGINAL_FILE" 2>/dev/null | tr '\n' '|' | sed 's/|$//')
+  fi
+
+  local old_removed=0
+  if [ -n "$active_images" ]; then
+    # Remove calltelemetry images NOT in the active compose file
+    docker images --format '{{.Repository}}:{{.Tag}}' | grep "calltelemetry/" | while read -r img; do
+      if ! echo "$img" | grep -qE "$active_images"; then
+        docker rmi "$img" 2>/dev/null && old_removed=$((old_removed + 1))
+      fi
+    done
+  fi
+  echo "done (${old_removed} old images removed)"
+
   echo -n "Removing dangling images... "
   dangling_output=$(docker image prune -f 2>/dev/null)
   dangling_space=$(echo "$dangling_output" | grep "Total reclaimed space" | awk '{print $4 $5}' || echo "0B")
   echo "done (${dangling_space})"
-  
+
   echo "Docker cleanup complete."
 }
 
