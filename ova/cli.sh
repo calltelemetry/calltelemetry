@@ -941,14 +941,29 @@ restart_service() {
 
   # Purge ghost containers before restart.
   # Image tag changes between versions can leave stale container IDs in Docker's
-  # internal state. These ghosts cause "No such container" errors on compose up,
-  # resulting in a production outage. Force-remove ALL project containers first.
+  # internal state AND orphaned directories in /var/lib/docker/containers/.
+  # These ghosts cause "No such container" errors on compose up — production outage.
   echo "Cleaning up containers before restart..."
+
+  # Step 1: Remove running/stopped project containers via Docker API
   local ghost_ids
   ghost_ids=$(docker ps -a --filter "label=com.docker.compose.project=calltelemetry" --format '{{.ID}}' 2>/dev/null)
   if [ -n "$ghost_ids" ]; then
     echo "  Removing $(echo "$ghost_ids" | wc -l | tr -d ' ') project containers..."
     echo "$ghost_ids" | xargs -r docker rm -f 2>/dev/null || true
+  fi
+
+  # Step 2: Nuke orphaned container directories that survive docker rm.
+  # Docker sometimes leaves /var/lib/docker/containers/<id>/ directories
+  # after the container is removed. Compose still references these IDs
+  # and fails with "No such container" on up.
+  local compose_containers
+  compose_containers=$(docker compose config --services 2>/dev/null | wc -l)
+  local docker_containers
+  docker_containers=$(ls /var/lib/docker/containers/ 2>/dev/null | wc -l)
+  if [ "$docker_containers" -gt "$((compose_containers + 5))" ]; then
+    echo "  Detected $docker_containers container dirs (expected ~$compose_containers) — pruning Docker state..."
+    docker container prune -f 2>/dev/null || true
   fi
 
   echo "Restarting Docker Compose service..."
