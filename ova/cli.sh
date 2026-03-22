@@ -2804,10 +2804,8 @@ purge_docker() {
   volumes_space=$(echo "$volumes_output" | grep "Total reclaimed space" | awk '{print $4 $5}' || echo "0B")
   echo "done (${volumes_space})"
 
-  # Remove old images but PROTECT images referenced by docker-compose.yml.
-  # docker image prune -a removes ALL unused images including the ones we
-  # just pulled. Instead, selectively remove old calltelemetry images that
-  # don't match the current compose file.
+  # Remove old calltelemetry images not in the active docker-compose.yml.
+  # Suppress per-layer deletion output — just show count and space saved.
   echo -n "Removing old calltelemetry images... "
   local active_images=""
   if [ -f "$ORIGINAL_FILE" ]; then
@@ -2816,19 +2814,17 @@ purge_docker() {
 
   local old_removed=0
   if [ -n "$active_images" ]; then
-    # Remove calltelemetry images NOT in the active compose file
     docker images --format '{{.Repository}}:{{.Tag}}' | grep "calltelemetry/" | while read -r img; do
       if ! echo "$img" | grep -qE "$active_images"; then
-        docker rmi "$img" 2>/dev/null && old_removed=$((old_removed + 1))
+        docker rmi "$img" >/dev/null 2>&1 && old_removed=$((old_removed + 1))
       fi
     done
   fi
   echo "done (${old_removed} old images removed)"
 
   echo -n "Removing dangling images... "
-  dangling_output=$(docker image prune -f 2>/dev/null)
-  dangling_space=$(echo "$dangling_output" | grep "Total reclaimed space" | awk '{print $4 $5}' || echo "0B")
-  echo "done (${dangling_space})"
+  docker image prune -f >/dev/null 2>&1
+  echo "done"
 
   echo "Docker cleanup complete."
 }
