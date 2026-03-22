@@ -312,19 +312,24 @@ echo "options bridge bridge_nf_call_iptables=0" | sudo tee /etc/modprobe.d/bridg
 sudo rm -f /etc/ssh/ssh_host_*_key*
 sudo ssh-keygen -A
 
-# First-boot: `ct shell` runs onboarding (network + preferences) then launches the TUI.
-# Uses /etc/ct-network-configured as sentinel so network wizard only fires once.
-# After onboarding, the full-screen TUI dashboard is the default interface.
-# Use `ct shell --cli` for the text-mode IOS-style shell.
+# First-boot hint: show the user how to launch the TUI, don't auto-launch.
+# `ct shell` runs onboarding (network + preferences) then launches the TUI.
+# `ct` alone opens the new TUI management interface.
 sudo tee /etc/profile.d/ct-firstboot.sh > /dev/null <<'PROFILE_EOF'
 #!/bin/bash
-# ct-firstboot.sh — First-boot entry point for Call Telemetry Appliance
-# Launches `ct shell` → onboarding wizard (if needed) → TUI dashboard.
-# Type `ct shell --cli` for text-mode shell, or `shell` from within the TUI.
+# ct-firstboot.sh — Login hint for Call Telemetry Appliance
 [ -t 0 ] || return 0
 command -v ct >/dev/null 2>&1 || return 0
 
-exec ct shell
+echo ""
+echo "  ╔═══════════════════════════════════════════════════════════╗"
+echo "  ║  Try the new onboarding experience:                      ║"
+echo "  ║                                                          ║"
+echo "  ║    ct shell   — guided setup + TUI management interface  ║"
+echo "  ║    ct         — TUI management dashboard                 ║"
+echo "  ║                                                          ║"
+echo "  ╚═══════════════════════════════════════════════════════════╝"
+echo ""
 PROFILE_EOF
 sudo chmod +x /etc/profile.d/ct-firstboot.sh
 
