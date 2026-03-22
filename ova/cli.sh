@@ -1547,11 +1547,23 @@ extract_images() {
       var_expr=$(echo "$resolved" | grep -oE '\$\{[A-Z_]+:-[^}]*\}' | head -1)
       var_name=$(echo "$var_expr" | sed 's/\${//;s/:-.*//')
       var_default=$(echo "$var_expr" | sed 's/.*:-//;s/}//')
-      # Look up in .env first, fall back to default
       var_value=$(echo "$env_vars" | grep "^${var_name}=" | head -1 | cut -d= -f2-)
       [ -z "$var_value" ] && var_value="$var_default"
       resolved=$(echo "$resolved" | sed "s|\${${var_name}:-[^}]*}|${var_value}|")
     done
+
+    # Resolve ${VAR} patterns (no default — must come from .env)
+    while echo "$resolved" | grep -qE '\$\{[A-Z_]+\}'; do
+      var_expr=$(echo "$resolved" | grep -oE '\$\{[A-Z_]+\}' | head -1)
+      var_name=$(echo "$var_expr" | sed 's/\${\|}//g')
+      var_value=$(echo "$env_vars" | grep "^${var_name}=" | head -1 | cut -d= -f2-)
+      if [ -n "$var_value" ]; then
+        resolved=$(echo "$resolved" | sed "s|\${${var_name}}|${var_value}|")
+      else
+        break  # No value found, stop resolving
+      fi
+    done
+
     echo "$resolved"
   done
 }
