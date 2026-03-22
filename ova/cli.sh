@@ -372,6 +372,21 @@ is_jtapi_enabled() {
   echo "$profiles" | grep -q "jtapi"
 }
 
+# Ensure IPv4 forwarding is enabled — Docker requires this for bridge networking.
+# A kernel update or security hardening can reset this to 0, killing Docker on next boot.
+ensure_ip_forward() {
+  local current
+  current=$(sysctl -n net.ipv4.ip_forward 2>/dev/null || echo "0")
+  if [ "$current" != "1" ]; then
+    echo "[cli.sh] Enabling IPv4 forwarding (was disabled — Docker requires this)"
+    sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1 || true
+  fi
+  # Always ensure persistent config exists
+  if ! grep -q "net.ipv4.ip_forward = 1" /etc/sysctl.d/99-docker-ipforward.conf 2>/dev/null; then
+    echo "net.ipv4.ip_forward = 1" > /etc/sysctl.d/99-docker-ipforward.conf 2>/dev/null || true
+  fi
+}
+
 # Build the compose file flags — overlay no longer needed (profiles handle JTAPI)
 get_compose_files() {
   echo "-f docker-compose.yml"
@@ -4566,6 +4581,7 @@ case "$1" in
     ;;
   update)
     shift
+    ensure_ip_forward
     nm_heal_connections
     generate_self_signed_certificates
     update "$@"
@@ -5937,6 +5953,7 @@ end
 
   # Advanced commands
   build-appliance)
+    ensure_ip_forward
     build_appliance
     ;;
   prep-cluster-node)
