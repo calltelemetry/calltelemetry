@@ -126,6 +126,24 @@ jobs:
             fi
           done
 
+      - name: Copy OpenTelemetry Collector config
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          BUNDLE_DIR="${BUNDLE_NAME}-${VERSION}"
+          MANIFEST="ova/bundle-manifest.yml"
+
+          echo "--- OpenTelemetry Collector ---"
+          mkdir -p "$BUNDLE_DIR/otel-collector"
+          for file in $(yq '.otel[]' "$MANIFEST" 2>/dev/null); do
+            if [ -f "ova/$file" ]; then
+              cp "ova/$file" "$BUNDLE_DIR/otel-collector/"
+              echo "✅ $(basename $file)"
+            elif [ -f "$file" ]; then
+              cp "$file" "$BUNDLE_DIR/otel-collector/"
+              echo "✅ $(basename $file) (from root)"
+            fi
+          done
+
       - name: Copy JTAPI overlay (backwards compat)
         run: |
           VERSION="${{ steps.version.outputs.version }}"

@@ -35,6 +35,10 @@ grafana:
     - versions/grafana/provisioning/datasources/calltelemetry.yml
     - versions/grafana/provisioning/dashboards/calltelemetry.yaml
 
+# OpenTelemetry Collector configuration
+otel:
+  - otel-collector/otel-collector-config.yaml
+
 # Environment template (new deployments copy this to .env)
 env:
   - .env.example
