@@ -92,6 +92,50 @@ receivers:
   - name: 'default'
 AMEOF
 fi
+if [ -d "${INSTALL_DIR}/tempo/tempo.yaml" ]; then
+  rm -rf "${INSTALL_DIR}/tempo/tempo.yaml"
+fi
+mkdir -p "${INSTALL_DIR}/tempo"
+if [ ! -f "${INSTALL_DIR}/tempo/tempo.yaml" ]; then
+  cat > "${INSTALL_DIR}/tempo/tempo.yaml" << 'TEMPOEOF'
+server:
+  http_listen_port: 3200
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
+
+ingester:
+  max_block_duration: 5m
+
+compactor:
+  compaction:
+    block_retention: 72h    # Keep traces for 3 days
+
+storage:
+  trace:
+    backend: local
+    local:
+      path: /var/tempo/blocks
+    wal:
+      path: /var/tempo/wal
+
+metrics_generator:
+  registry:
+    external_labels:
+      source: tempo
+  storage:
+    path: /var/tempo/generator/wal
+    remote_write:
+      - url: http://prometheus:9090/api/v1/write
+        send_exemplars: true
+TEMPOEOF
+fi
 mkdir -p "${INSTALL_DIR}/prometheus"
 if [ ! -f "${INSTALL_DIR}/prometheus/alert_rules.yml" ]; then
   echo 'groups: []' > "${INSTALL_DIR}/prometheus/alert_rules.yml"
@@ -119,6 +163,51 @@ nm_heal_connections() {
   [ "$changed" = "1" ] && nmcli connection reload 2>/dev/null || true
 }
 nm_heal_connections
+
+# --- Self-healing NM Docker bridge fix ---
+# NetworkManager auto-creates connection profiles for Docker bridge interfaces
+# (docker0, br-*, veth*) and races Docker for ownership at boot. On firewalld-
+# enabled OVAs this triggers ZONE_CONFLICT and breaks container networking.
+# Fix: write the conf.d unmanaged-devices rule so NM never claims these interfaces.
+# Also ensure daemon.json uses the nftables firewall backend to avoid iptables/nft
+# conflicts on RHEL 9 / AlmaLinux 9 OVAs.
+nm_heal_docker_bridges() {
+  command -v nmcli &>/dev/null || return 0
+  local NM_DOCKER_CONF="/etc/NetworkManager/conf.d/docker-unmanaged.conf"
+  local changed=0
+
+  if [ ! -f "$NM_DOCKER_CONF" ]; then
+    sudo tee "$NM_DOCKER_CONF" > /dev/null << 'NMDEOF'
+[keyfile]
+unmanaged-devices=interface-name:docker*;interface-name:br-*;interface-name:veth*
+NMDEOF
+    changed=1
+  fi
+
+  if [ "$changed" = "1" ]; then
+    sudo nmcli general reload 2>/dev/null || true
+  fi
+
+  # Ensure Docker uses nftables backend to avoid iptables/nftables conflicts
+  # with firewalld on RHEL 9 / AlmaLinux 9 OVAs.
+  local DAEMON_JSON="/etc/docker/daemon.json"
+  if [ -f "$DAEMON_JSON" ] && command -v python3 &>/dev/null; then
+    if ! python3 -c "import json,sys; d=json.load(open('$DAEMON_JSON')); sys.exit(0 if d.get('firewall-backend')=='nftables' else 1)" 2>/dev/null; then
+      python3 - "$DAEMON_JSON" << 'PYEOF'
+import json, sys
+path = sys.argv[1]
+with open(path) as f:
+    d = json.load(f)
+d["firewall-backend"] = "nftables"
+with open(path, "w") as f:
+    json.dump(d, f, indent=2)
+    f.write("\n")
+PYEOF
+      sudo systemctl reload-or-restart docker 2>/dev/null || true
+    fi
+  fi
+}
+nm_heal_docker_bridges
 
 # PostgreSQL version configuration
 POSTGRES_OVERRIDE_FILE="docker-compose.override.yml"
@@ -701,6 +790,53 @@ receivers:
   - name: 'default'
 AMEOF
     echo "Created default alertmanager/alertmanager.yml"
+  fi
+
+  # Tempo config
+  mkdir -p tempo
+  if [ -d "tempo/tempo.yaml" ]; then
+    rm -rf "tempo/tempo.yaml"
+  fi
+  if [ ! -f "tempo/tempo.yaml" ]; then
+    cat > tempo/tempo.yaml << 'TEMPOEOF'
+server:
+  http_listen_port: 3200
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
+
+ingester:
+  max_block_duration: 5m
+
+compactor:
+  compaction:
+    block_retention: 72h    # Keep traces for 3 days
+
+storage:
+  trace:
+    backend: local
+    local:
+      path: /var/tempo/blocks
+    wal:
+      path: /var/tempo/wal
+
+metrics_generator:
+  registry:
+    external_labels:
+      source: tempo
+  storage:
+    path: /var/tempo/generator/wal
+    remote_write:
+      - url: http://prometheus:9090/api/v1/write
+        send_exemplars: true
+TEMPOEOF
+    echo "Created default tempo/tempo.yaml"
   fi
 
   # Prometheus config
