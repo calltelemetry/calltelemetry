@@ -949,8 +949,9 @@ restart_service() {
   local ghost_ids
   ghost_ids=$(docker ps -a --filter "label=com.docker.compose.project=calltelemetry" --format '{{.ID}}' 2>/dev/null)
   if [ -n "$ghost_ids" ]; then
-    echo "  Removing $(echo "$ghost_ids" | wc -l | tr -d ' ') project containers..."
-    echo "$ghost_ids" | xargs -r docker rm -f 2>/dev/null || true
+    local count=$(echo "$ghost_ids" | wc -l | tr -d ' ')
+    echo "$ghost_ids" | xargs -r docker rm -f >/dev/null 2>&1 || true
+    echo "  Removed $count containers"
   fi
 
   # Step 2: Nuke orphaned container directories that survive docker rm.
