@@ -1,0 +1,160 @@
+name: Collect Docker Build Completions
+
+# Receives repository_dispatch from each repo's Docker build workflow.
+# Tracks completions in a GitHub environment variable.
+# When all 6 repos report success, triggers OVA release.
+#
+# Zero polling — purely event-driven.
+
+on:
+  repository_dispatch:
+    types: [docker-build-complete]
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Parse dispatch payload
+        id: payload
+        run: |
+          echo "repo=${{ github.event.client_payload.repo }}" >> "$GITHUB_OUTPUT"
+          echo "version=${{ github.event.client_payload.version }}" >> "$GITHUB_OUTPUT"
+          echo "status=${{ github.event.client_payload.status }}" >> "$GITHUB_OUTPUT"
+          echo "image=${{ github.event.client_payload.image }}" >> "$GITHUB_OUTPUT"
+          echo ""
+          echo "Received: ${{ github.event.client_payload.repo }} → ${{ github.event.client_payload.status }} (version: ${{ github.event.client_payload.version }})"
+
+      - name: Update draft release checklist
+        if: steps.payload.outputs.status == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+        run: |
+          VERSION="${{ steps.payload.outputs.version }}"
+          REPO="${{ steps.payload.outputs.repo }}"
+
+          CURRENT_BODY=$(gh release view "$VERSION" --repo calltelemetry/calltelemetry \
+            --json body --jq .body 2>/dev/null || echo "")
+
+          if [ -n "$CURRENT_BODY" ]; then
+            UPDATED_BODY=$(echo "$CURRENT_BODY" | sed "s/- \[ \] $REPO Docker build/- [x] $REPO Docker build/")
+            gh release edit "$VERSION" --repo calltelemetry/calltelemetry \
+              --notes "$UPDATED_BODY" 2>/dev/null || true
+            echo "Updated draft release checklist: $REPO ✓"
+          fi
+
+      - name: Mark failure on draft release
+        if: steps.payload.outputs.status != 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+        run: |
+          VERSION="${{ steps.payload.outputs.version }}"
+          REPO="${{ steps.payload.outputs.repo }}"
+
+          CURRENT_BODY=$(gh release view "$VERSION" --repo calltelemetry/calltelemetry \
+            --json body --jq .body 2>/dev/null || echo "")
+
+          if [ -n "$CURRENT_BODY" ]; then
+            UPDATED_BODY=$(echo "$CURRENT_BODY" | sed "s/- \[ \] $REPO Docker build/- ❌ $REPO Docker build (FAILED)/")
+            gh release edit "$VERSION" --repo calltelemetry/calltelemetry \
+              --notes "$UPDATED_BODY" 2>/dev/null || true
+          fi
+          echo "::error::Docker build FAILED for $REPO"
+
+      - name: Check if all builds complete
+        if: steps.payload.outputs.status == 'success'
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+        run: |
+          VERSION="${{ steps.payload.outputs.version }}"
+
+          # Read the draft release body and count checked boxes
+          BODY=$(gh release view "$VERSION" --repo calltelemetry/calltelemetry \
+            --json body --jq .body 2>/dev/null || echo "")
+
+          TOTAL=$(echo "$BODY" | grep -c "Docker build" || echo "0")
+          DONE=$(echo "$BODY" | grep -c "\[x\] .* Docker build" || echo "0")
+          FAILED=$(echo "$BODY" | grep -c "❌.*Docker build" || echo "0")
+
+          echo "Build status: $DONE/$TOTAL complete, $FAILED failed"
+          echo "total=$TOTAL" >> "$GITHUB_OUTPUT"
+          echo "done=$DONE" >> "$GITHUB_OUTPUT"
+          echo "failed=$FAILED" >> "$GITHUB_OUTPUT"
+
+          if [ "$FAILED" -gt 0 ]; then
+            echo "all_done=false" >> "$GITHUB_OUTPUT"
+            echo "::error::$FAILED builds failed — OVA will not be triggered"
+          elif [ "$DONE" -ge 6 ]; then
+            echo "all_done=true" >> "$GITHUB_OUTPUT"
+            echo "All 6 Docker builds complete!"
+          else
+            echo "all_done=false" >> "$GITHUB_OUTPUT"
+            echo "Waiting for $((6 - DONE)) more builds..."
+          fi
+
+      - name: Verify images on Docker Hub
+        if: steps.check.outputs.all_done == 'true'
+        run: |
+          VERSION="${{ steps.payload.outputs.version }}"
+          echo "Verifying Docker Hub images..."
+
+          IMAGES=("calltelemetry/web:$VERSION" \
+                  "calltelemetry/vue:$VERSION" \
+                  "calltelemetry/jtapi-sidecar:$VERSION" \
+                  "calltelemetry/ct-media:$VERSION" \
+                  "calltelemetry/jtapi-operator:$VERSION" \
+                  "calltelemetry/traceroute:$VERSION")
+
+          ALL_FOUND=true
+          for IMAGE in "${IMAGES[@]}"; do
+            if docker manifest inspect "$IMAGE" > /dev/null 2>&1; then
+              echo "  $IMAGE: found"
+            else
+              echo "  $IMAGE: NOT FOUND"
+              ALL_FOUND=false
+            fi
+          done
+
+          if [ "$ALL_FOUND" != "true" ]; then
+            echo "::warning::Some images not yet visible on Docker Hub — OVA will proceed anyway (images may still be propagating)"
+          fi
+
+      - name: Trigger OVA release
+        if: steps.check.outputs.all_done == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+        run: |
+          VERSION="${{ steps.payload.outputs.version }}"
+          echo "All 6 Docker builds complete — triggering OVA release: $VERSION"
+
+          gh workflow run create-ova-release.yml \
+            --repo calltelemetry/calltelemetry \
+            -f version="$VERSION" \
+            -f jtapi_version="$VERSION" \
+            -f ct_media_version="$VERSION"
+
+          echo "OVA release triggered."
+
+      - name: Trigger package-release bundle
+        if: steps.check.outputs.all_done == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+        run: |
+          VERSION="${{ steps.payload.outputs.version }}"
+          echo "Triggering package-release for $VERSION..."
+
+          gh workflow run package-release.yml \
+            --repo calltelemetry/calltelemetry \
+            -f version="$VERSION"
+
+      - name: Summary
+        run: |
+          echo "### Docker Build Collection" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Repo | ${{ steps.payload.outputs.repo }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Version | ${{ steps.payload.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Status | ${{ steps.payload.outputs.status }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| All Done | ${{ steps.check.outputs.all_done || 'N/A' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Progress | ${{ steps.check.outputs.done || '?' }}/${{ steps.check.outputs.total || '?' }} |" >> $GITHUB_STEP_SUMMARY
