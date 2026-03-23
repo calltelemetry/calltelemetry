@@ -424,9 +424,13 @@ services:
     # Core service — used by config audit snapshots, as-built reports, and JTAPI audio
     image: chrislusf/seaweedfs:4.13
     pull_policy: if_not_present
+    init: true
+    entrypoint: /usr/bin/weed
     command: >
-      server -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json
+      -logtostderr=true server -dir=/data
+      -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json
       -master.volumeSizeLimitMB=100
+      -master.defaultReplication=000
       -metricsPort=9325
     restart: unless-stopped
     expose:

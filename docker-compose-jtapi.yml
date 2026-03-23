@@ -160,7 +160,14 @@ services:
   seaweedfs:
     image: chrislusf/seaweedfs:4.13
     pull_policy: if_not_present
-    command: "server -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json -master.volumeSizeLimitMB=100"
+    init: true
+    entrypoint: /usr/bin/weed
+    command: >
+      -logtostderr=true server -dir=/data
+      -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json
+      -master.volumeSizeLimitMB=100
+      -master.defaultReplication=000
+      -metricsPort=9325
     restart: unless-stopped
     expose:
       - "8333"   # S3 API
