@@ -5123,6 +5123,14 @@ case "$1" in
         echo "  - grafana configs"
       fi
 
+      # Install otel-collector config if present
+      if [ -f "$inner_dir/otel-collector/otel-collector-config.yaml" ]; then
+        mkdir -p otel-collector
+        [ -d "./otel-collector/otel-collector-config.yaml" ] && rm -rf "./otel-collector/otel-collector-config.yaml"
+        cp "$inner_dir/otel-collector/otel-collector-config.yaml" ./otel-collector/otel-collector-config.yaml
+        echo "  - otel-collector-config.yaml"
+      fi
+
       # Cleanup extraction directory
       rm -rf "$extract_dir"
 
