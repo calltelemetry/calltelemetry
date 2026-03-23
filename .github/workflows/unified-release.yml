@@ -197,3 +197,24 @@ jobs:
           echo "| tracer | $VERSION | master |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Monitor:** Watch the [draft release](https://github.com/calltelemetry/calltelemetry/releases/tag/$VERSION) for live build status checklist updates." >> $GITHUB_STEP_SUMMARY
+
+      - name: Dispatch Package Release Bundle
+        if: ${{ needs.create-releases.result == 'success' }}
+        env:
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+        run: |
+          gh workflow run "Package Release Bundle" \
+            --repo calltelemetry/calltelemetry \
+            -f version=${{ inputs.version }}
+          echo "✅ Package Release Bundle dispatched"
+
+      - name: Dispatch Notify OVA Build
+        if: ${{ needs.create-releases.result == 'success' }}
+        env:
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+        run: |
+          gh workflow run "Notify OVA Build" \
+            --repo calltelemetry/calltelemetry \
+            -f version=${{ inputs.version }} \
+            -f formats=both
+          echo "✅ OVA + QCOW2 builds dispatched"
