@@ -98,11 +98,17 @@ jobs:
           # Delete existing draft if re-running
           gh release delete "$VERSION" --repo calltelemetry/calltelemetry --yes 2>/dev/null || true
 
+          # Write release notes to a temp file to avoid shell expansion issues
+          # (bare words like "remove" trigger zsh glob errors when passed inline)
+          cat > /tmp/release-notes.md << 'NOTES_EOF'
+          ${{ steps.notes.outputs.body }}
+          NOTES_EOF
+
           gh release create "$VERSION" \
             --repo calltelemetry/calltelemetry \
             --title "$VERSION" \
             --draft \
-            --notes "${{ steps.notes.outputs.body }}"
+            --notes-file /tmp/release-notes.md
 
           echo "Created draft release: $VERSION"
 
