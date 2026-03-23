@@ -198,6 +198,53 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Monitor:** Watch the [draft release](https://github.com/calltelemetry/calltelemetry/releases/tag/$VERSION) for live build status checklist updates." >> $GITHUB_STEP_SUMMARY
 
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_RELEASE_TOKEN }}
+
+      - name: Generate version files
+        if: ${{ needs.create-releases.result == 'success' }}
+        run: |
+          VERSION="${{ inputs.version }}"
+          CT_MEDIA="${{ inputs.ct_media_version || inputs.version }}"
+
+          # Find the latest existing version file as template
+          TEMPLATE=$(ls -1 ova/versions/*.yaml 2>/dev/null | sort -V | tail -1)
+          if [ -z "$TEMPLATE" ]; then
+            echo "❌ No version template found in ova/versions/"
+            exit 1
+          fi
+
+          # Generate .yaml (docker-compose override with version-stamped images)
+          if [ ! -f "ova/versions/${VERSION}.yaml" ]; then
+            TEMPLATE_VER=$(basename "$TEMPLATE" .yaml)
+            sed "s/${TEMPLATE_VER}/${VERSION}/g" "$TEMPLATE" > "ova/versions/${VERSION}.yaml"
+            echo "✅ Generated ova/versions/${VERSION}.yaml from ${TEMPLATE_VER}"
+          else
+            echo "✅ ova/versions/${VERSION}.yaml already exists"
+          fi
+
+          # Generate .env (version environment variables)
+          TEMPLATE_ENV=$(ls -1 ova/versions/*.env 2>/dev/null | sort -V | tail -1)
+          if [ -n "$TEMPLATE_ENV" ] && [ ! -f "ova/versions/${VERSION}.env" ]; then
+            TEMPLATE_VER=$(basename "$TEMPLATE_ENV" .env)
+            sed "s/${TEMPLATE_VER}/${VERSION}/g" "$TEMPLATE_ENV" > "ova/versions/${VERSION}.env"
+            echo "✅ Generated ova/versions/${VERSION}.env"
+          fi
+
+          # Commit and push
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add ova/versions/${VERSION}.*
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "chore: auto-generate version files for ${VERSION}"
+            git push
+            echo "✅ Version files pushed"
+          fi
+
       - name: Dispatch Package Release Bundle
         if: ${{ needs.create-releases.result == 'success' }}
         env:
