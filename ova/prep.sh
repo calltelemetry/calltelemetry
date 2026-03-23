@@ -271,40 +271,9 @@ fi
 sudo usermod -aG docker "$INSTALL_USER"
 sudo systemctl restart docker
 
-# Create OpenTelemetry Collector config (docker-compose.yml mounts this file).
-# Without it, Docker creates a directory instead and otel-collector crash-loops.
-sudo mkdir -p "$INSTALL_DIR/otel-collector"
-sudo tee "$INSTALL_DIR/otel-collector/otel-collector-config.yaml" > /dev/null <<'OTELEOF'
-receivers:
-  otlp:
-    protocols:
-      grpc:
-        endpoint: 0.0.0.0:4317
-      http:
-        endpoint: 0.0.0.0:4318
-
-processors:
-  batch:
-
-exporters:
-  prometheus:
-    endpoint: 0.0.0.0:8889
-  otlp/tempo:
-    endpoint: tempo:4317
-    tls:
-      insecure: true
-
-service:
-  pipelines:
-    metrics:
-      receivers: [otlp]
-      processors: [batch]
-      exporters: [prometheus]
-    traces:
-      receivers: [otlp]
-      processors: [batch]
-      exporters: [otlp/tempo]
-OTELEOF
+# NOTE: otel-collector config is deployed via the release bundle (ct update),
+# not baked here. Creating it as root in prep.sh causes permission issues
+# when the ct-cli installer tries to update it later.
 
 # Set login banners (issue for local console, issue.net for SSH, motd for post-login)
 BANNER_CONTENT='Call Telemetry Appliance
