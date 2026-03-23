@@ -262,6 +262,5 @@ jobs:
         run: |
           gh workflow run "Notify OVA Build" \
             --repo calltelemetry/calltelemetry \
-            -f version=${{ inputs.version }} \
-            -f formats=both
-          echo "✅ OVA + QCOW2 builds dispatched"
+            -f version=${{ inputs.version }}
+          echo "✅ Appliance build dispatched (OVA + QCOW2 conversion)"
