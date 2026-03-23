@@ -379,10 +379,12 @@ if [ "$response" = "yes" ]; then
 
   # During OVA/image builds (CT_NONINTERACTIVE=1), do NOT restart sshd —
   # it would kill the Packer SSH session. The port change takes effect on
-  # first real boot. Only restart in interactive (manual) mode.
-  if [ "${CT_NONINTERACTIVE:-0}" = "1" ]; then
-    echo "Non-interactive mode: SSH port change will take effect on next boot"
+  # first real boot. Only restart in interactive mode or if explicitly
+  # requested via CT_RESTART_SSHD=1 (though that will break Packer).
+  if [ "${CT_NONINTERACTIVE:-0}" = "1" ] && [ "${CT_RESTART_SSHD:-0}" != "1" ]; then
+    echo "Non-interactive mode: SSH port configured for 2222 — takes effect on next boot"
   else
+    echo "Restarting sshd on port 2222..."
     sudo systemctl reload sshd || sudo systemctl restart sshd
   fi
 else
