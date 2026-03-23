@@ -377,8 +377,14 @@ if [ "$response" = "yes" ]; then
       echo "Unsupported OS. Please make sure your firewall allows access to port 2222 "
   fi
 
-  # Reload SSH service (preserves existing sessions for Packer/CI; new connections use port 2222)
-  sudo systemctl reload sshd || sudo systemctl restart sshd
+  # During OVA/image builds (CT_NONINTERACTIVE=1), do NOT restart sshd —
+  # it would kill the Packer SSH session. The port change takes effect on
+  # first real boot. Only restart in interactive (manual) mode.
+  if [ "${CT_NONINTERACTIVE:-0}" = "1" ]; then
+    echo "Non-interactive mode: SSH port change will take effect on next boot"
+  else
+    sudo systemctl reload sshd || sudo systemctl restart sshd
+  fi
 else
   echo "The SSH port change was not applied. Please rerun the script and choose 'yes' to complete the setup."
 fi
