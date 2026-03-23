@@ -192,16 +192,24 @@ NMDEOF
   # with firewalld on RHEL 9 / AlmaLinux 9 OVAs.
   local DAEMON_JSON="/etc/docker/daemon.json"
   if [ -f "$DAEMON_JSON" ] && command -v python3 &>/dev/null; then
-    if ! python3 -c "import json,sys; d=json.load(open('$DAEMON_JSON')); sys.exit(0 if d.get('firewall-backend')=='nftables' else 1)" 2>/dev/null; then
+    if ! python3 -c "import json,sys; d=json.load(open('$DAEMON_JSON')); sys.exit(0 if d.get('firewall-backend')=='nftables' and d.get('bip')=='100.64.0.1/24' else 1)" 2>/dev/null; then
       python3 - "$DAEMON_JSON" << 'PYEOF'
 import json, sys
 path = sys.argv[1]
 with open(path) as f:
     d = json.load(f)
-d["firewall-backend"] = "nftables"
-with open(path, "w") as f:
-    json.dump(d, f, indent=2)
-    f.write("\n")
+changed = False
+if d.get("firewall-backend") != "nftables":
+    d["firewall-backend"] = "nftables"
+    changed = True
+if d.get("bip") != "100.64.0.1/24":
+    d["bip"] = "100.64.0.1/24"
+    d["default-address-pools"] = [{"base": "100.64.0.0/14", "size": 24}]
+    changed = True
+if changed:
+    with open(path, "w") as f:
+        json.dump(d, f, indent=2)
+        f.write("\n")
 PYEOF
       sudo systemctl reload-or-restart docker 2>/dev/null || true
     fi

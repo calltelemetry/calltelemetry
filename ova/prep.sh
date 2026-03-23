@@ -50,7 +50,11 @@ sudo sysctl -p /etc/sysctl.d/99-docker-ipforward.conf
 sudo mkdir -p /etc/docker
 sudo tee /etc/docker/daemon.json > /dev/null <<'EOF'
 {
-  "firewall-backend": "nftables"
+  "firewall-backend": "nftables",
+  "bip": "100.64.0.1/24",
+  "default-address-pools": [
+    { "base": "100.64.0.0/14", "size": 24 }
+  ]
 }
 EOF
 
