@@ -1,8 +1,7 @@
 name: Package Release Bundle
 
 on:
-  release:
-    types: [published]
+  # Triggered explicitly by Unified Release workflow (no release:published dependency)
   workflow_dispatch:
     inputs:
       version:
