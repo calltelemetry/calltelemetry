@@ -271,6 +271,41 @@ fi
 sudo usermod -aG docker "$INSTALL_USER"
 sudo systemctl restart docker
 
+# Create OpenTelemetry Collector config (docker-compose.yml mounts this file).
+# Without it, Docker creates a directory instead and otel-collector crash-loops.
+sudo mkdir -p "$INSTALL_DIR/otel-collector"
+sudo tee "$INSTALL_DIR/otel-collector/otel-collector-config.yaml" > /dev/null <<'OTELEOF'
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+
+exporters:
+  prometheus:
+    endpoint: 0.0.0.0:8889
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [prometheus]
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp/tempo]
+OTELEOF
+
 # Set login banners (issue for local console, issue.net for SSH, motd for post-login)
 BANNER_CONTENT='Call Telemetry Appliance
 
@@ -322,13 +357,8 @@ sudo tee /etc/profile.d/ct-firstboot.sh > /dev/null <<'PROFILE_EOF'
 command -v ct >/dev/null 2>&1 || return 0
 
 echo ""
-echo "  ╔═══════════════════════════════════════════════════════════╗"
-echo "  ║  Try the new onboarding experience:                      ║"
-echo "  ║                                                          ║"
-echo "  ║    ct shell   — guided setup + TUI management interface  ║"
-echo "  ║    ct         — TUI management dashboard                 ║"
-echo "  ║                                                          ║"
-echo "  ╚═══════════════════════════════════════════════════════════╝"
+echo "  Type 'ct' for the management dashboard"
+echo "  Type 'ct setup' to reconfigure network, hostname, and preferences"
 echo ""
 PROFILE_EOF
 sudo chmod +x /etc/profile.d/ct-firstboot.sh
