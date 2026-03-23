@@ -1964,6 +1964,21 @@ download_bundle() {
     fi
   fi
 
+  # otel-collector config
+  if [ -f "$extract_dir/otel-collector/otel-collector-config.yaml" ]; then
+    mkdir -p ./otel-collector
+    # Docker may have created config.yaml as a directory — remove it first
+    if [ -d "./otel-collector/otel-collector-config.yaml" ]; then
+      rm -rf "./otel-collector/otel-collector-config.yaml"
+      echo "  ✅ otel-collector-config.yaml (removed Docker-created directory)"
+    fi
+    if cp "$extract_dir/otel-collector/otel-collector-config.yaml" ./otel-collector/otel-collector-config.yaml; then
+      echo "  ✅ otel-collector-config.yaml"
+    else
+      echo "  ⚠️  otel-collector-config.yaml (failed to copy — check permissions)"
+    fi
+  fi
+
   # Cleanup
   rm -f "$bundle_name"
   rm -rf "$extract_dir"
