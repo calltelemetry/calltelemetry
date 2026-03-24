@@ -313,6 +313,11 @@ apply_postgres_profile() {
       env_set "PG_EFFECTIVE_CACHE_SIZE" "1536MB"
       env_set "PG_WORK_MEM" "8MB"
       env_set "PG_MAINTENANCE_WORK_MEM" "128MB"
+      env_set "PG_MAX_CONNECTIONS" "60"
+      env_set "DB_POOL_SIZE" "20"
+      env_set "DB_BACKGROUND_POOL_SIZE" "8"
+      env_set "DB_DISCOVERY_POOL_SIZE" "8"
+      env_set "DB_OBAN_POOL_SIZE" "8"
       ;;
     medium)
       env_set "PG_PROFILE" "medium"
@@ -321,6 +326,11 @@ apply_postgres_profile() {
       env_set "PG_EFFECTIVE_CACHE_SIZE" "6GB"
       env_set "PG_WORK_MEM" "16MB"
       env_set "PG_MAINTENANCE_WORK_MEM" "256MB"
+      env_set "PG_MAX_CONNECTIONS" "120"
+      env_set "DB_POOL_SIZE" "45"
+      env_set "DB_BACKGROUND_POOL_SIZE" "18"
+      env_set "DB_DISCOVERY_POOL_SIZE" "18"
+      env_set "DB_OBAN_POOL_SIZE" "14"
       ;;
     large)
       env_set "PG_PROFILE" "large"
@@ -329,6 +339,11 @@ apply_postgres_profile() {
       env_set "PG_EFFECTIVE_CACHE_SIZE" "12GB"
       env_set "PG_WORK_MEM" "32MB"
       env_set "PG_MAINTENANCE_WORK_MEM" "512MB"
+      env_set "PG_MAX_CONNECTIONS" "200"
+      env_set "DB_POOL_SIZE" "60"
+      env_set "DB_BACKGROUND_POOL_SIZE" "24"
+      env_set "DB_DISCOVERY_POOL_SIZE" "24"
+      env_set "DB_OBAN_POOL_SIZE" "20"
       ;;
     *)
       echo "Usage: cli.sh postgres profile <small|medium|large|show>"
@@ -340,6 +355,11 @@ apply_postgres_profile() {
   echo "  effective_cache_size:  $(env_get PG_EFFECTIVE_CACHE_SIZE)"
   echo "  work_mem:              $(env_get PG_WORK_MEM)"
   echo "  maintenance_work_mem:  $(env_get PG_MAINTENANCE_WORK_MEM)"
+  echo "  max_connections:       $(env_get PG_MAX_CONNECTIONS)"
+  echo "  db_pool (main):        $(env_get DB_POOL_SIZE)"
+  echo "  db_pool (background):  $(env_get DB_BACKGROUND_POOL_SIZE)"
+  echo "  db_pool (discovery):   $(env_get DB_DISCOVERY_POOL_SIZE)"
+  echo "  db_pool (oban):        $(env_get DB_OBAN_POOL_SIZE)"
   echo ""
   echo "Restart required to apply: cli.sh restart"
 }
