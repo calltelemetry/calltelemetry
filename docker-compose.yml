@@ -62,7 +62,7 @@ services:
       - PGDATA=/bitnami/postgresql/data
     command: >
       postgres
-      -c max_connections=300
+      -c max_connections=${PG_MAX_CONNECTIONS:-100}
       -c shared_buffers=${PG_SHARED_BUFFERS:-512MB}
       -c effective_cache_size=${PG_EFFECTIVE_CACHE_SIZE:-1536MB}
       -c work_mem=${PG_WORK_MEM:-8MB}
@@ -83,6 +83,10 @@ services:
       - ./postgres-data:/bitnami/postgresql
     networks:
       - ct
+    deploy:
+      resources:
+        limits:
+          memory: ${DB_MEM_LIMIT:-2g}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-calltelemetry} -d $${POSTGRES_DB:-calltelemetry_prod}"]
       interval: 30s
@@ -150,6 +154,10 @@ services:
       # OpenTelemetry (enable via: ct otel enable)
       - OTEL_ENABLED=${OTEL_ENABLED:-false}
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}
+    deploy:
+      resources:
+        limits:
+          memory: ${WEB_MEM_LIMIT:-512m}
     tmpfs:
       - /var/log:rw,mode=0555,size=5000m
     networks:
