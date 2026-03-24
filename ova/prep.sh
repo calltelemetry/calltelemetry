@@ -388,21 +388,21 @@ if [ "$response" = "yes" ]; then
   if grep -q "AlmaLinux" /etc/os-release; then
     echo "Detected Alma Linux. Installing semanage tools and configuring firewall..."
     sudo yum install policycoreutils-python-utils -y
-    sudo semanage port -a -t ssh_port_t -p tcp 2222
+    sudo semanage port -a -t ssh_port_t -p tcp 2222 2>/dev/null || sudo semanage port -m -t ssh_port_t -p tcp 2222 2>/dev/null || true
     sudo firewall-cmd --zone=public --add-port=2222/tcp --permanent
     sudo firewall-cmd --reload
 
   elif grep -q "CentOS" /etc/os-release; then
     echo "Detected CentOS Linux. Installing semanage tools and configuring firewall..."
     sudo yum install policycoreutils-python-utils -y
-    sudo semanage port -a -t ssh_port_t -p tcp 2222
+    sudo semanage port -a -t ssh_port_t -p tcp 2222 2>/dev/null || sudo semanage port -m -t ssh_port_t -p tcp 2222 2>/dev/null || true
     sudo firewall-cmd --zone=public --add-port=2222/tcp --permanent
     sudo firewall-cmd --reload
 
   elif grep -q "Red Hat Enterprise Linux" /etc/os-release; then
     echo "Detected Red Hat Enterprise Linux. Installing semanage tools and configuring firewall..."
     sudo yum install policycoreutils-python-utils -y
-    sudo semanage port -a -t ssh_port_t -p tcp 2222
+    sudo semanage port -a -t ssh_port_t -p tcp 2222 2>/dev/null || sudo semanage port -m -t ssh_port_t -p tcp 2222 2>/dev/null || true
     sudo firewall-cmd --zone=public --add-port=2222/tcp --permanent
     sudo firewall-cmd --reload
 
