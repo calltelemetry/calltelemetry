@@ -87,6 +87,12 @@ sudo tee /etc/systemd/system/docker.service.d/override.conf > /dev/null <<'EOF'
 After=network-online.target firewalld.service
 Wants=network-online.target
 EOF
+# Cap Docker daemon at 90% RAM — reserve 10% for OS (kernel, systemd, sshd)
+sudo tee /etc/systemd/system/docker.service.d/memory-limit.conf > /dev/null <<'EOF'
+[Service]
+MemoryMax=90%
+EOF
+
 sudo systemctl daemon-reload
 
 # Enable and Start Docker
