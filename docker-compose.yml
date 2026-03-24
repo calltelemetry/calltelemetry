@@ -86,7 +86,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: ${DB_MEM_LIMIT:-2g}
+          memory: ${DB_MEM_LIMIT:-3g}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-calltelemetry} -d $${POSTGRES_DB:-calltelemetry_prod}"]
       interval: 30s
@@ -157,7 +157,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: ${WEB_MEM_LIMIT:-512m}
+          memory: ${WEB_MEM_LIMIT:-4g}
     tmpfs:
       - /var/log:rw,mode=0555,size=5000m
     networks:
