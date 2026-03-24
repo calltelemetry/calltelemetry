@@ -134,7 +134,7 @@ services:
       - ERL_CRASH_DUMP=/tmp/crash-dumps/erl_crash.dump
       - ERL_CRASH_DUMP_NICE=1
       # BEAM VM tuning — async I/O threads, buffer limit, scheduler idle, GC frequency
-      - ERL_FLAGS=+A 256 +zdbbl 8192 +sbwt none +sbwtdcpu none +sbwtdio none
+      - ERL_FLAGS=+A 64 +zdbbl 8192 +sbwt none +sbwtdcpu none +sbwtdio none
       - ERL_FULLSWEEP_AFTER=1000
       - PROM_EX_UPLOAD_DASHBOARDS=${PROM_EX_UPLOAD_DASHBOARDS:-true}
       - GRAFANA_HOST=${GRAFANA_HOST_INTERNAL:-http://grafana:3000/grafana}
