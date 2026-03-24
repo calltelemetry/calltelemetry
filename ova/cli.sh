@@ -2680,6 +2680,17 @@ update() {
       fi
     fi
 
+    # Cap Docker daemon at 80% RAM — reserve 20% for OS (kernel, systemd, sshd)
+    DOCKER_DROPIN_DIR="/etc/systemd/system/docker.service.d"
+    DOCKER_DROPIN_FILE="${DOCKER_DROPIN_DIR}/memory-limit.conf"
+    if [ ! -f "$DOCKER_DROPIN_FILE" ]; then
+      echo "Applying Docker memory limit (80% of RAM)..."
+      sudo mkdir -p "$DOCKER_DROPIN_DIR"
+      printf '[Service]\nMemoryMax=80%%\n' | sudo tee "$DOCKER_DROPIN_FILE" > /dev/null
+      sudo systemctl daemon-reload
+      echo "✅ Docker memory limit applied (restart on next boot)"
+    fi
+
     if [ $services_ok -eq 0 ]; then
       echo "✅ Update complete! All services are running and ready."
     else
