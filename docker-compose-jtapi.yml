@@ -169,6 +169,9 @@ services:
       -master.defaultReplication=000
       -metricsPort=9325
     restart: unless-stopped
+    cpus: 0.5
+    environment:
+      - GOGC=50
     expose:
       - "8333"   # S3 API
       - "8888"   # Filer
