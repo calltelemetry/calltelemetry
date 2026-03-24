@@ -2628,26 +2628,36 @@ update() {
     wait_for_services
     services_ok=$?
 
-    # Ensure Node.js 22+ is available for @calltelemetry MCP servers
+    # Platform migration: Node.js 22 (one-time, skip if already done)
     REQUIRED_NODE_MAJOR=22
     CURRENT_NODE_MAJOR=$(node --version 2>/dev/null | sed 's/v\([0-9]*\).*/\1/' || echo "0")
 
-    if [ "$CURRENT_NODE_MAJOR" -lt "$REQUIRED_NODE_MAJOR" ] 2>/dev/null; then
-      echo "Installing Node.js $REQUIRED_NODE_MAJOR (current: v${CURRENT_NODE_MAJOR:-none})..."
-      # Force-remove rpm-managed nodejs packages that may block dnf --allowerasing
+    if [ "$CURRENT_NODE_MAJOR" -ge "$REQUIRED_NODE_MAJOR" ] 2>/dev/null; then
+      echo "✅ Node.js $(node --version) (meets requirement)"
+    else
+      echo "Migrating Node.js to v${REQUIRED_NODE_MAJOR} (current: v${CURRENT_NODE_MAJOR:-none})..."
+      # Remove old Node packages
       sudo rpm -e --nodeps npm nodejs-full-i18n 2>/dev/null || true
       sudo rpm -e --nodeps nodejs 2>/dev/null || true
-      # Install Node 22 via dnf, allowing it to replace any conflicting packages
-      sudo dnf install -y nodejs --allowerasing &>/dev/null && echo "✅ Node.js $(node --version) installed" || echo "⚠️  Node.js install failed (non-critical)"
-    else
-      echo "✅ Node.js v${CURRENT_NODE_MAJOR} already meets minimum (>=${REQUIRED_NODE_MAJOR})"
+      # Enable Node 22 module stream (AlmaLinux AppStream default is v16)
+      sudo dnf module reset nodejs -y &>/dev/null || true
+      sudo dnf module enable nodejs:22 -y &>/dev/null || true
+      sudo dnf install -y nodejs --allowerasing &>/dev/null
+      NEW_NODE=$(node --version 2>/dev/null || echo "none")
+      NEW_MAJOR=$(echo "$NEW_NODE" | sed 's/v\([0-9]*\).*/\1/' || echo "0")
+      if [ "$NEW_MAJOR" -ge "$REQUIRED_NODE_MAJOR" ] 2>/dev/null; then
+        echo "✅ Node.js ${NEW_NODE} installed"
+      else
+        echo "⚠️  Node.js migration failed (got ${NEW_NODE}, need v${REQUIRED_NODE_MAJOR}+) — ct CLI may not work"
+      fi
     fi
 
-    # Update the ct CLI to the latest published version
-    # Remove any old bash wrapper that may shadow the npm binary
-    [ -f /usr/local/bin/ct ] && sudo rm -f /usr/local/bin/ct
-    echo "Updating @calltelemetry/cli..."
-    sudo npm install -g @calltelemetry/cli &>/dev/null && echo "✅ ct CLI updated to $(ct --version)" || echo "⚠️  ct CLI update failed (non-critical)"
+    # Update ct CLI (skip if node migration failed)
+    if command -v node &>/dev/null && command -v npm &>/dev/null; then
+      [ -f /usr/local/bin/ct ] && sudo rm -f /usr/local/bin/ct
+      echo "Updating @calltelemetry/cli..."
+      sudo npm install -g @calltelemetry/cli &>/dev/null && echo "✅ ct CLI updated to $(ct --version 2>/dev/null || echo 'unknown')" || echo "⚠️  ct CLI update failed (non-critical)"
+    fi
 
     # Apply console loglevel fix for existing VMs
     # nft_compat / ip_set are loaded by Docker/firewalld and emit KERN_WARNING (level 4).
