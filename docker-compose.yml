@@ -201,6 +201,30 @@ services:
       retries: 3
       start_period: 10s
 
+  nats-exporter:
+    image: "natsio/prometheus-nats-exporter:0.19.1"
+    restart: "always"
+    command:
+      - "-varz"
+      - "-jsz=all"
+      - "-connz"
+      - "-routez"
+      - "-subz"
+      - "http://nats:8222"
+    expose:
+      - "7777"
+    networks:
+      - ct
+    depends_on:
+      nats:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:7777/metrics"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
   prometheus:
     image: prom/prometheus:v2.52.0
     restart: "always"
