@@ -4701,10 +4701,9 @@ case "$1" in
         echo "  cli.sh postgres profile <small|medium|large|show>  Set memory sizing profile"
         ;;
       profile)
-        local subaction="${3:-show}"
+        subaction="${3:-show}"
         case "$subaction" in
           show)
-            local current
             current=$(env_get "PG_PROFILE")
             echo "Current PostgreSQL profile: ${current:-small (default)}"
             echo ""
