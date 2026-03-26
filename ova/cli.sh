@@ -2543,7 +2543,7 @@ update() {
       skipped=$((skipped + 1))
     else
       echo "  ↓ $img (pulling...)"
-      if docker pull "$img" >/dev/null 2>&1; then
+      if docker pull "$img"; then
         pulled=$((pulled + 1))
       else
         echo "  ❌ Failed to pull $img"
@@ -2563,7 +2563,7 @@ update() {
           skipped=$((skipped + 1))
         else
           echo "  ↓ $img (pulling...)"
-          docker pull "$img" >/dev/null 2>&1 || echo "  ⚠️  $img not available yet"
+          docker pull "$img" || echo "  ⚠️  $img not available yet"
           pulled=$((pulled + 1))
         fi
       fi
