@@ -46,7 +46,7 @@ groups:
           severity: critical
         annotations:
           summary: 'CallTelemetry API is DOWN'
-          description: 'The Elixir API has been unreachable for 30 seconds.'
+          description: 'The Call Telemetry API has been unreachable for 30 seconds.'
 
           generator_url: '/grafana/d/ct-system-resources/system-resources?viewPanel=5&from=now-1h&to=now'
 
@@ -66,8 +66,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: 'BEAM process count {{ $value }} exceeds 50000'
-          description: 'High Erlang process count may indicate a resource leak.'
+          summary: 'Active task count {{ $value }} exceeds 50000'
+          description: 'High active task count may indicate a resource leak in the Call Telemetry service.'
           generator_url: '/grafana/d/ct-system-resources/system-resources?viewPanel=6&from=now-1h&to=now'
 
   - name: oban_health
@@ -78,8 +78,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: 'Oban queue {{ $labels.queue }} has {{ $value }} retryable jobs'
-          description: 'High retryable job count may indicate persistent failures.'
+          summary: 'Background processing queue {{ $labels.queue }} has {{ $value }} retryable jobs'
+          description: 'High retryable job count in the {{ $labels.queue }} queue may indicate persistent failures.'
           generator_url: '/grafana/d/ct-oban-job-health/oban-job-health?viewPanel=4&from=now-1h&to=now'
 
       - alert: ObanAvailableBacklog
@@ -88,8 +88,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: 'Oban queue {{ $labels.queue }} backlog: {{ $value }} available jobs'
-          description: 'Job backlog building up — workers may be overwhelmed.'
+          summary: 'Background job backlog: {{ $value | printf "%.0f" }} pending jobs in {{ $labels.queue }} queue'
+          description: 'A background processing queue has accumulated pending jobs for over 10 minutes. This may indicate a stalled or failing subsystem.'
           generator_url: '/grafana/d/ct-oban-job-health/oban-job-health?viewPanel=5&from=now-1h&to=now'
 
       - alert: PurgeHealthQueueRetryable
@@ -98,8 +98,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: 'Purge health queue has {{ $value }} retryable jobs'
-          description: 'The db_purge_health Oban queue has failing jobs. Purge health audits may not be running.'
+          summary: 'Data retention health queue has {{ $value }} retryable jobs'
+          description: 'The data retention health queue has failing jobs. Purge health audits may not be running.'
 
       - alert: PurgeDispatchQueueRetryable
         expr: ct_oban_queue_depth{queue="db_purge_dispatch", state="retryable"} > 5
@@ -107,8 +107,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: 'Purge dispatch queue has {{ $value }} retryable jobs'
-          description: 'The db_purge_dispatch Oban queue has failing jobs. Scheduled purges may not be running.'
+          summary: 'Data retention dispatch queue has {{ $value }} retryable jobs'
+          description: 'The data retention dispatch queue has failing jobs. Scheduled purges may not be running.'
 
   - name: call_health
     rules:
@@ -236,7 +236,7 @@ groups:
           severity: warning
         annotations:
           summary: '{{ $value }} table(s) not purged in 48h for org {{ $labels.org_id }}'
-          description: 'Tables have not been purged in over 48 hours. Data retention policies are not being enforced. Check purge dispatcher and Oban queue health.'
+          description: 'Tables have not been purged in over 48 hours. Data retention policies are not being enforced. Check purge dispatcher and background processing queue health.'
 
       - alert: PurgeAuditCriticalIssues
         expr: ct_purge_audit_critical_issues > 0
