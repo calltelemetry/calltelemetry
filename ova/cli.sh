@@ -2700,6 +2700,25 @@ update() {
       fi
     fi
 
+    # Generate GRAFANA_PASSWORD if missing (required for dashboard provisioning)
+    # Both web and grafana containers read this from .env as basic auth credential.
+    if ! grep -q '^GRAFANA_PASSWORD=' "$ENV_FILE" 2>/dev/null; then
+      local gf_pw
+      gf_pw=$(openssl rand -hex 16)
+      env_set "GRAFANA_PASSWORD" "$gf_pw"
+      echo "✅ Generated GRAFANA_PASSWORD"
+
+      # Remove stale GRAFANA_TOKEN (replaced by GRAFANA_PASSWORD)
+      env_remove "GRAFANA_TOKEN"
+
+      # Reset Grafana admin password for existing volumes
+      if $DOCKER_COMPOSE_CMD exec -T grafana grafana-cli admin reset-admin-password "$gf_pw" &>/dev/null; then
+        echo "✅ Grafana admin password synced"
+      else
+        echo "  ℹ️  Grafana container not running yet — password will apply on next start"
+      fi
+    fi
+
     # Cap Docker daemon at 90% RAM — reserve 10% for OS (kernel, systemd, sshd)
     DOCKER_DROPIN_DIR="/etc/systemd/system/docker.service.d"
     DOCKER_DROPIN_FILE="${DOCKER_DROPIN_DIR}/memory-limit.conf"
