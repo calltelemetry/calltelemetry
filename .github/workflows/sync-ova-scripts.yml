@@ -3,6 +3,7 @@ name: Sync OVA scripts to GCS
 on:
   push:
     paths:
+      - ova/cli.sh
       - ova/reset.sh
       - ova/backup.sh
     branches:
@@ -22,6 +23,7 @@ jobs:
 
       - name: Upload OVA scripts to GCS
         run: |
+          gcloud storage cp ova/cli.sh gs://ct_releases/cli.sh
           gcloud storage cp ova/reset.sh gs://ct_releases/reset.sh
           gcloud storage cp ova/backup.sh gs://ct_releases/backup.sh
-          echo "Uploaded reset.sh and backup.sh to gs://ct_releases/"
+          echo "Uploaded cli.sh, reset.sh and backup.sh to gs://ct_releases/"
