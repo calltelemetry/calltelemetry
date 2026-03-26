@@ -12,6 +12,9 @@
 }
 
 :443 {
+    # Expose Caddy metrics for Prometheus scraping (served on admin API :2019/metrics)
+    metrics
+
     reverse_proxy /api* web:4000
 
     # Grafana SSO — Caddy validates CT JWT, passes user email to Grafana auth proxy
