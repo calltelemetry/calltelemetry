@@ -21,6 +21,12 @@ scrape_configs:
     scrape_interval: 30s
     static_configs:
       - targets: ["web:4080"]
+    metric_relabel_configs:
+      # Strip the cdrcisco_ OTP app prefix from all app metrics
+      - source_labels: [__name__]
+        regex: 'cdrcisco_(.*)'
+        target_label: __name__
+        replacement: '$1'
 
   # PostgreSQL metrics via postgres-exporter
   - job_name: postgresql
