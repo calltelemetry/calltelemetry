@@ -95,7 +95,7 @@
       "pluginVersion": "11.0.0",
       "targets": [
         {
-          "expr": "sum(increase(cdrcisco_curri_event_response_accumulator_responses_inserted_total[24h]))",
+          "expr": "sum(increase(curri_event_response_accumulator_responses_inserted_total[24h]))",
           "legendFormat": "Events Inserted (24h)",
           "refId": "A"
         }
@@ -131,7 +131,7 @@
       "pluginVersion": "11.0.0",
       "targets": [
         {
-          "expr": "sum(increase(cdrcisco_curri_pipeline_artifact_accumulator_artifacts_inserted_total[24h]))",
+          "expr": "sum(increase(curri_pipeline_artifact_accumulator_artifacts_inserted_total[24h]))",
           "legendFormat": "Artifacts (24h)",
           "refId": "A"
         }
@@ -233,17 +233,17 @@
       "pluginVersion": "11.0.0",
       "targets": [
         {
-          "expr": "sum(rate(cdrcisco_curri_event_response_accumulator_responses_inserted_total[5m])) * 60",
+          "expr": "sum(rate(curri_event_response_accumulator_responses_inserted_total[5m])) * 60",
           "legendFormat": "Event Responses/min",
           "refId": "A"
         },
         {
-          "expr": "sum(rate(cdrcisco_curri_event_update_accumulator_debug_events_inserted_total[5m])) * 60",
+          "expr": "sum(rate(curri_event_update_accumulator_debug_events_inserted_total[5m])) * 60",
           "legendFormat": "Debug Events/min",
           "refId": "B"
         },
         {
-          "expr": "sum(rate(cdrcisco_curri_pipeline_artifact_accumulator_artifacts_inserted_total[5m])) * 60",
+          "expr": "sum(rate(curri_pipeline_artifact_accumulator_artifacts_inserted_total[5m])) * 60",
           "legendFormat": "Artifacts/min",
           "refId": "C"
         }
@@ -294,12 +294,12 @@
       "pluginVersion": "11.0.0",
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, sum(rate(cdrcisco_curri_event_response_accumulator_batch_size_bucket[5m])) by (le))",
+          "expr": "histogram_quantile(0.50, sum(rate(curri_event_response_accumulator_batch_size_bucket[5m])) by (le))",
           "legendFormat": "Response Batch p50",
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.95, sum(rate(cdrcisco_curri_event_response_accumulator_batch_size_bucket[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(curri_event_response_accumulator_batch_size_bucket[5m])) by (le))",
           "legendFormat": "Response Batch p95",
           "refId": "B"
         }

@@ -341,17 +341,17 @@
       "pluginVersion": "11.0.0",
       "targets": [
         {
-          "expr": "sum(increase(cdrcisco_db_purge_started_total[24h]))",
+          "expr": "sum(increase(db_purge_started_total[24h]))",
           "legendFormat": "Purges Started (24h)",
           "refId": "A"
         },
         {
-          "expr": "sum(increase(cdrcisco_db_vacuum_completed_total[24h]))",
+          "expr": "sum(increase(db_vacuum_completed_total[24h]))",
           "legendFormat": "VACUUMs Completed (24h)",
           "refId": "B"
         },
         {
-          "expr": "sum(increase(cdrcisco_db_table_threshold_exceeded_total[24h]))",
+          "expr": "sum(increase(db_table_threshold_exceeded_total[24h]))",
           "legendFormat": "Size Threshold Exceeded (24h)",
           "refId": "C"
         }

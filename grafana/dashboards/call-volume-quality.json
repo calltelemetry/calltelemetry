@@ -58,7 +58,7 @@
       "pluginVersion": "11.0.0",
       "targets": [
         {
-          "expr": "sum(cdrcisco_curri_calls_per_second)",
+          "expr": "sum(curri_calls_per_second)",
           "legendFormat": "Calls/sec",
           "refId": "A"
         }
@@ -219,7 +219,7 @@
       "pluginVersion": "11.0.0",
       "targets": [
         {
-          "expr": "sum(cdrcisco_curri_calls_per_second)",
+          "expr": "sum(curri_calls_per_second)",
           "legendFormat": "Calls/sec",
           "refId": "A"
         },

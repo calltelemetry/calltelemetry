@@ -175,7 +175,7 @@
       "pluginVersion": "11.0.0",
       "targets": [
         {
-          "expr": "cdrcisco_curri_debug_batcher_circuit_breaker_state",
+          "expr": "curri_debug_batcher_circuit_breaker_state",
           "legendFormat": "Circuit Breaker",
           "refId": "A"
         }
@@ -302,7 +302,7 @@
           "refId": "A"
         },
         {
-          "expr": "sum(rate(cdrcisco_curri_debug_batcher_events_added_total[5m]))",
+          "expr": "sum(rate(curri_debug_batcher_events_added_total[5m]))",
           "legendFormat": "Debug Batcher Events/sec",
           "refId": "B"
         }
@@ -362,17 +362,17 @@
       "pluginVersion": "11.0.0",
       "targets": [
         {
-          "expr": "sum(rate(cdrcisco_curri_debug_batcher_nats_publish_success_total[5m])) * 60",
+          "expr": "sum(rate(curri_debug_batcher_nats_publish_success_total[5m])) * 60",
           "legendFormat": "Success/min",
           "refId": "A"
         },
         {
-          "expr": "sum(rate(cdrcisco_curri_debug_batcher_nats_publish_error_total[5m])) * 60",
+          "expr": "sum(rate(curri_debug_batcher_nats_publish_error_total[5m])) * 60",
           "legendFormat": "Error/min",
           "refId": "B"
         },
         {
-          "expr": "sum(increase(cdrcisco_curri_debug_batcher_circuit_breaker_opened_total[1h]))",
+          "expr": "sum(increase(curri_debug_batcher_circuit_breaker_opened_total[1h]))",
           "legendFormat": "CB Opens (1h)",
           "refId": "C"
         }
