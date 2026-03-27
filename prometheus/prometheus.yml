@@ -31,11 +31,26 @@ scrape_configs:
         target_label: __name__
         replacement: '$1'
 
+  # Host machine metrics via node-exporter
+  - job_name: node
+    static_configs:
+      - targets: ["node-exporter:9100"]
+    scrape_interval: 15s
+
   # PostgreSQL metrics via postgres-exporter
   - job_name: postgresql
     static_configs:
       - targets: ['postgres-exporter:9187']
     scrape_interval: 15s
+    metric_relabel_configs:
+      # Drop TimescaleDB internal schema tables — catalog/cache/config, not application tables
+      - source_labels: [schemaname]
+        regex: '_timescaledb_(catalog|internal|cache|config)'
+        action: drop
+      # Drop static PostgreSQL config flags — never change, not useful as time-series
+      - source_labels: [__name__]
+        regex: 'pg_settings_.*'
+        action: drop
 
   # Caddy reverse proxy gateway metrics
   - job_name: caddy
