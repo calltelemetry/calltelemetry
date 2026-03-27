@@ -30,4 +30,4 @@ jobs:
           token: ${{ secrets.CT_WORKSPACE_DISPATCH_TOKEN }}
           repository: calltelemetry/ct-appliance
           event-type: build-ova
-          client-payload: '{"version": "${{ steps.ver.outputs.version }}", "image_format": "ova", "skip_image_wait": true}'
+          client-payload: '{"version": "${{ steps.ver.outputs.version }}", "image_format": "ova"}'
