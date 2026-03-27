@@ -1,5 +1,10 @@
 # Caddyfile
 
+{
+    # Bind admin API to all interfaces so Prometheus can scrape :2019/metrics
+    admin 0.0.0.0:2019
+}
+
 # HTTP: proxy CURRI/XCC/phone-portal paths to Phoenix, redirect everything else to HTTPS
 :80 {
     @backend path /api/* /healthz /org/* /socket/* /live/*

@@ -2,15 +2,25 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
+
+rule_files:
+  - /etc/prometheus/alert_rules.yml
+
 scrape_configs:
   - job_name: prometheus
     static_configs:
       - targets: ["localhost:9090"]
 
-  - job_name: caddy
+  # CallTelemetry application metrics (PromEx on CURRI endpoint)
+  - job_name: calltelemetry
     metrics_path: /metrics
+    scrape_interval: 30s
     static_configs:
-      - targets: ["caddy:2019"]
+      - targets: ["web:4080"]
 
   # PostgreSQL metrics via postgres-exporter
   - job_name: postgresql
@@ -18,35 +28,23 @@ scrape_configs:
       - targets: ["postgres-exporter:9187"]
     scrape_interval: 15s
 
-  # Uncomment these jobs when the web service exposes a /metrics endpoint:
-  # - job_name: cdrcisco-web
-  #   metrics_path: /metrics
-  #   static_configs:
-  #     - targets: ["web:4080"]
+  # Caddy reverse proxy gateway metrics
+  - job_name: caddy
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["caddy:2019"]
+    scrape_interval: 15s
 
-  # - job_name: curri-policy
-  #   metrics_path: /metrics
-  #   static_configs:
-  #     - targets: ["web:4080"]
-  #   metric_relabel_configs:
-  #     - source_labels: [__name__]
-  #       regex: curri_.+
-  #       action: keep
-  #   relabel_configs:
-  #     - target_label: service
-  #       replacement: curri
+  # SeaweedFS S3 storage metrics
+  - job_name: seaweedfs
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["seaweedfs:9325"]
+    scrape_interval: 30s
 
-  # - job_name: cdrcisco-repo
-  #   metrics_path: /metrics
-  #   static_configs:
-  #     - targets: ["web:4080"]
-
-  # - job_name: remote_control_metrics
-  #   metrics_path: /api/metrics/remote_control
-  #   static_configs:
-  #     - targets: ['web:4080']
-
-  # - job_name: ris_metrics
-  #   metrics_path: /api/metrics/ris
-  #   static_configs:
-  #     - targets: ['web:4080']
+  # NATS JetStream metrics via prometheus-nats-exporter
+  - job_name: nats
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["nats-exporter:7777"]
+    scrape_interval: 30s
