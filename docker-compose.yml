@@ -105,8 +105,8 @@ services:
       - --collector.filesystem.fs-types-exclude=^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|iso9660|mqueue|nsfs|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tracefs)$$
     volumes:
       - /:/host:ro,rslave
-    expose:
-      - "9100"
+    ports:
+      - "9100:9100"
     networks:
       - ct
 
