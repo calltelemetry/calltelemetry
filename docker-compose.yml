@@ -283,7 +283,7 @@ services:
       - GF_AUTH_PROXY_AUTO_SIGN_UP=true
       # Empty whitelist = trust all sources (Grafana only reachable via Caddy on internal network)
       - GF_AUTH_PROXY_WHITELIST=
-      - GF_AUTH_DISABLE_LOGIN_FORM=false
+      - GF_AUTH_DISABLE_LOGIN_FORM=true
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
