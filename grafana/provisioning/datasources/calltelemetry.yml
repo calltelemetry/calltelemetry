@@ -21,6 +21,14 @@ datasources:
       implementation: prometheus
       handleGrafanaManagedAlerts: false
 
+  - name: CallTelemetry Loki
+    uid: calltelemetry-loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    isDefault: false
+    editable: false
+
   - name: CallTelemetry Tempo
     uid: calltelemetry-tempo
     type: tempo
@@ -33,6 +41,6 @@ datasources:
       nodeGraph:
         enabled: true
       tracesToLogs:
-        datasourceUid: ''
+        datasourceUid: calltelemetry-loki
       lokiSearch:
-        datasourceUid: ''
+        datasourceUid: calltelemetry-loki
