@@ -337,7 +337,7 @@ services:
       - ct
 
   # ─────────────────────────────────────────────────────────────────
-  # CT Syslog Ingest — UDP syslog receiver for Cisco UC platforms
+  # CT Syslog Ingest — UDP+TCP syslog receiver for Cisco UC platforms
   # Receives syslog from CUCM, CUBE, CMS, Expressway, Unity, IM&P
   # Parses, routes critical alerts to NATS, stores all in Loki
   # ─────────────────────────────────────────────────────────────────
@@ -357,6 +357,7 @@ services:
       - NET_BIND_SERVICE
     ports:
       - "514:514/udp"
+      - "514:514/tcp"
     expose:
       - "5514"
     environment:
