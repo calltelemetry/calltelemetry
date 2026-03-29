@@ -1719,7 +1719,7 @@ extract_images() {
   fi
 
   # Extract raw image lines and resolve env vars
-  grep -E "image.*calltelemetry" "$compose_file" | sed 's/.*image: *"//' | sed 's/".*//' | grep -v "^$" | while read -r img; do
+  grep -E "^\s+image:.*calltelemetry" "$compose_file" | sed 's/.*image: *["]*//;s/["]*$//' | grep -v "^$" | while read -r img; do
     # Resolve ${VAR:-default} patterns
     resolved="$img"
     while echo "$resolved" | grep -qE '\$\{[A-Z_]+:-[^}]*\}'; do
@@ -1884,7 +1884,7 @@ download_bundle() {
   if [ -f "$extract_dir/.env" ]; then
     if [ -f "$ENV_FILE" ]; then
       # Merge only version keys from bundle .env into existing .env
-      for key in WEB_VERSION VUE_VERSION TRACEROUTE_VERSION JTAPI_VERSION CT_MEDIA_VERSION; do
+      for key in WEB_VERSION VUE_VERSION TRACEROUTE_VERSION JTAPI_VERSION CT_MEDIA_VERSION CT_SYSLOG_INGEST_VERSION; do
         local val
         val=$(grep "^${key}=" "$extract_dir/.env" 2>/dev/null | head -1 | cut -d= -f2-)
         if [ -n "$val" ]; then
