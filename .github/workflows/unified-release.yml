@@ -134,6 +134,8 @@ jobs:
             label: jtapi-operator
           - repo: tracer
             label: tracer
+          - repo: ct-syslog-ingest
+            label: ct-syslog-ingest
     steps:
       - name: Create ${{ matrix.label }} release
         env:
@@ -182,7 +184,7 @@ jobs:
           VERSION="${{ inputs.version }}"
           CT_MEDIA="${{ inputs.ct_media_version || inputs.version }}"
 
-          IMAGES="web:${VERSION} vue:${VERSION} jtapi-sidecar:${VERSION} ct-media:${CT_MEDIA} traceroute:${VERSION}"
+          IMAGES="web:${VERSION} vue:${VERSION} jtapi-sidecar:${VERSION} ct-media:${CT_MEDIA} traceroute:${VERSION} ct-syslog-ingest:${VERSION}"
           MAX_ATTEMPTS=30  # 30 minutes max
           ATTEMPT=0
 
@@ -239,6 +241,7 @@ jobs:
           echo "| ct-media | $CT_MEDIA | ${{ inputs.target_branch }} |" >> $GITHUB_STEP_SUMMARY
           echo "| jtapi-operator | $VERSION | ${{ inputs.target_branch }} |" >> $GITHUB_STEP_SUMMARY
           echo "| tracer | $VERSION | master |" >> $GITHUB_STEP_SUMMARY
+          echo "| ct-syslog-ingest | $VERSION | main |" >> $GITHUB_STEP_SUMMARY
 
       - name: Checkout
         uses: actions/checkout@v4
