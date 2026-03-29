@@ -1,0 +1,83 @@
+// =============================================================================
+// Grafana Alloy — Docker container log collection for Call Telemetry
+//
+// Tails container stdout/stderr via Docker socket and pushes to Loki.
+// Per-service pipelines: JSON parsing for ct-api, pass-through for others.
+//
+// Label cardinality rules:
+//   LABELS (indexed):  compose_service, level  (bounded, ~6 * 4 = 24 streams)
+//   PARSED (queryable): module, org_id, request_id, pid, trace_id  (via | json)
+// =============================================================================
+
+// ---------------------------------------------------------------------------
+// Docker log discovery — finds all running containers
+// ---------------------------------------------------------------------------
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+// ---------------------------------------------------------------------------
+// Relabel: extract compose_service from container labels
+// ---------------------------------------------------------------------------
+discovery.relabel "docker_labels" {
+  targets = discovery.docker.containers.targets
+
+  // Extract compose service name
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "compose_service"
+  }
+
+  // Extract container name (strip leading slash)
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Source: tail Docker container logs
+// ---------------------------------------------------------------------------
+loki.source.docker "default" {
+  host    = "unix:///var/run/docker.sock"
+  targets = discovery.relabel.docker_labels.output
+
+  forward_to = [loki.process.pipeline.receiver]
+}
+
+// ---------------------------------------------------------------------------
+// Processing pipeline: JSON parse for structured services, pass-through rest
+// ---------------------------------------------------------------------------
+loki.process "pipeline" {
+  // Stage 1: Try JSON parse (succeeds for ct-api with LoggerJSON, no-op for plain text)
+  stage.json {
+    expressions = {
+      level    = "severity",
+      msg      = "message",
+    }
+  }
+
+  // Stage 2: Normalize level label from parsed JSON (only if present)
+  stage.label_drop {
+    values = ["filename"]
+  }
+
+  // Stage 3: Promote only low-cardinality fields to labels
+  stage.labels {
+    values = {
+      level = "",
+    }
+  }
+
+  forward_to = [loki.write.loki.receiver]
+}
+
+// ---------------------------------------------------------------------------
+// Write: push to Loki
+// ---------------------------------------------------------------------------
+loki.write "loki" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

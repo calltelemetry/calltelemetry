@@ -139,6 +139,7 @@ services:
       - DB_PORT=5432
       - EXTERNAL_IP=${DEFAULT_IPV4:-127.0.0.1}
       - LOGGING_LEVEL=warning
+      - LOG_FORMAT=json
       - ADMIN_NODE=TRUE
       - WORKER_NODE=TRUE
       - CERT_KEY=/home/app/cert/appliance_key.pem
@@ -584,6 +585,40 @@ services:
       timeout: 5s
       retries: 3
       start_period: 15s
+
+  # ─────────────────────────────────────────────────────────────────
+  # Grafana Alloy — Docker container log collection → Loki
+  # Tails stdout/stderr from all containers, parses JSON from ct-api,
+  # promotes only low-cardinality labels (compose_service, level).
+  # ─────────────────────────────────────────────────────────────────
+
+  alloy:
+    image: grafana/alloy:v1.8
+    restart: unless-stopped
+    command: run --server.http.listen-addr=0.0.0.0:12345 /etc/alloy/config.alloy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
+    expose:
+      - "12345"
+    depends_on:
+      loki:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:12345/ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    mem_limit: 256m
+    cpus: 0.5
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - ct
 
 networks:
   ct:
