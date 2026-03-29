@@ -106,7 +106,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: ${DB_MEM_LIMIT:-3g}
+          memory: ${DB_MEM_LIMIT:-2g}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-calltelemetry} -d $${POSTGRES_DB:-calltelemetry_prod}"]
       interval: 30s
