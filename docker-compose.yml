@@ -11,6 +11,11 @@ services:
       - ./certs:/certs:ro
     networks:
       - ct
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "25m"
+        max-file: "3"
     healthcheck:
       test:
         [
@@ -29,6 +34,11 @@ services:
       - "80"
     networks:
       - ct
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "25m"
+        max-file: "3"
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:80"]
       interval: 30s
@@ -43,6 +53,11 @@ services:
       - "4100"
     networks:
       - ct
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     healthcheck:
       test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/4100'"]
       interval: 30s
@@ -55,6 +70,11 @@ services:
     user: root
     restart: "always"
     shm_size: "${PG_SHM_SIZE:-1gb}"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
     environment:
       - POSTGRES_USER=${POSTGRES_USER:-calltelemetry}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
@@ -99,6 +119,11 @@ services:
     image: prom/node-exporter:v1.8.2
     restart: unless-stopped
     pid: host
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     command:
       - --path.rootfs=/host
       - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)
@@ -119,6 +144,11 @@ services:
     depends_on:
       - db
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - ct
 
@@ -210,6 +240,11 @@ services:
       - "8222"
     networks:
       - ct
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "25m"
+        max-file: "3"
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:8222/healthz"]
       interval: 30s
@@ -220,6 +255,11 @@ services:
   nats-exporter:
     image: "natsio/prometheus-nats-exporter:0.19.1"
     restart: "always"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     command:
       - "-varz"
       - "-jsz=all"
@@ -245,6 +285,11 @@ services:
     image: prom/prometheus:v2.52.0
     restart: "always"
     user: root
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "25m"
+        max-file: "3"
     ports:
       - "9090:9090"
     command:
@@ -265,6 +310,11 @@ services:
   alertmanager:
     image: prom/alertmanager:v0.28.1
     restart: "always"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     ports:
       - "9093:9093"
     command:
@@ -284,6 +334,11 @@ services:
     user: "472"
     depends_on:
       - prometheus
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "25m"
+        max-file: "3"
     ports:
       - "3000:3000"
     environment:
@@ -406,6 +461,11 @@ services:
       - "4317"   # OTLP gRPC
       - "4318"   # OTLP HTTP
       - "8889"   # Prometheus metrics
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "25m"
+        max-file: "3"
     networks:
       - ct
 
@@ -427,6 +487,11 @@ services:
       - "3200"   # Tempo HTTP API (Grafana queries this)
       - "4317"   # OTLP gRPC receiver
       - "4318"   # OTLP HTTP receiver
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "25m"
+        max-file: "3"
     networks:
       - ct
 
@@ -475,6 +540,11 @@ services:
     image: "calltelemetry/jtapi-sidecar:${JTAPI_VERSION}"
     restart: unless-stopped
     mem_limit: 1g
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
     expose:
       - "50051"
       - "8080"
@@ -527,6 +597,11 @@ services:
     profiles: ["jtapi"]
     image: "calltelemetry/ct-media:${CT_MEDIA_VERSION}"
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "25m"
+        max-file: "3"
     expose:
       - "50053"
     environment:
@@ -555,6 +630,11 @@ services:
     image: chrislusf/seaweedfs:4.13
     pull_policy: if_not_present
     init: true
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "25m"
+        max-file: "3"
     entrypoint: /usr/bin/weed
     command: >
       -logtostderr=true server -dir=/data
