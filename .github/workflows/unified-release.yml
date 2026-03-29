@@ -3,8 +3,9 @@ run-name: "Unified Release ${{ inputs.version }}"
 
 # Single workflow dispatch that stamps ONE version across all 6 repos.
 # Docker builds are triggered by the release:published events.
-# Build completions are collected by collect-docker-builds.yml via
-# repository_dispatch (zero polling, no API rate limit burn).
+# After all Docker images are confirmed on Docker Hub, this workflow
+# generates OVA version files, packages the release bundle, triggers
+# the appliance build, and publishes the release — all automatically.
 
 on:
   workflow_dispatch:
@@ -166,15 +167,61 @@ jobs:
           echo "Created release: calltelemetry/$REPO@$VERSION"
 
   # ─────────────────────────────────────────────────────────────────
-  # Job 3: Summary — no polling, no waiting
-  # Docker build completions flow back via repository_dispatch to
-  # collect-docker-builds.yml, which triggers OVA when all 6 are done.
+  # Job 3: Wait for Docker images, generate OVA files, package, deploy
+  # Polls Docker Hub until all 5 images are available, then runs the
+  # full OVA pipeline in sequence. No manual intervention needed.
   # ─────────────────────────────────────────────────────────────────
-  summary:
+  finalize:
     needs: [generate-release-notes, create-releases]
-    if: always()
+    if: ${{ needs.create-releases.result == 'success' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
+      - name: Wait for all Docker images on Docker Hub
+        run: |
+          VERSION="${{ inputs.version }}"
+          CT_MEDIA="${{ inputs.ct_media_version || inputs.version }}"
+
+          IMAGES="web:${VERSION} vue:${VERSION} jtapi-sidecar:${VERSION} ct-media:${CT_MEDIA} traceroute:${VERSION}"
+          MAX_ATTEMPTS=30  # 30 minutes max
+          ATTEMPT=0
+
+          echo "Waiting for all Docker images to be available on Docker Hub..."
+          echo ""
+
+          while true; do
+            ATTEMPT=$((ATTEMPT + 1))
+            ALL_READY=true
+            echo "=== Poll $ATTEMPT/$MAX_ATTEMPTS ($(date -u +%H:%M:%S UTC)) ==="
+
+            for entry in $IMAGES; do
+              IMAGE=$(echo "$entry" | cut -d: -f1)
+              TAG=$(echo "$entry" | cut -d: -f2)
+              if curl -sf "https://hub.docker.com/v2/repositories/calltelemetry/${IMAGE}/tags/${TAG}/" > /dev/null 2>&1; then
+                echo "  ✅ calltelemetry/${IMAGE}:${TAG}"
+              else
+                echo "  ⏳ calltelemetry/${IMAGE}:${TAG} — not ready"
+                ALL_READY=false
+              fi
+            done
+
+            if [ "$ALL_READY" = true ]; then
+              echo ""
+              echo "🎉 All 5 Docker images are available!"
+              break
+            fi
+
+            if [ "$ATTEMPT" -ge "$MAX_ATTEMPTS" ]; then
+              echo ""
+              echo "❌ Timeout: Not all images available after ${MAX_ATTEMPTS} minutes"
+              exit 1
+            fi
+
+            echo "  Waiting 60s before next poll..."
+            echo ""
+            sleep 60
+          done
+
       - name: Release Summary
         run: |
           VERSION="${{ inputs.version }}"
@@ -182,10 +229,7 @@ jobs:
 
           echo "### Unified Release: $VERSION" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Releases created in all 6 repos. Docker builds triggered by release events." >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Build tracking:** Each Docker workflow reports completion via \`repository_dispatch\`" >> $GITHUB_STEP_SUMMARY
-          echo "to \`collect-docker-builds.yml\`. OVA is triggered automatically when all 6 complete." >> $GITHUB_STEP_SUMMARY
+          echo "All Docker images confirmed available. Proceeding with OVA packaging." >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Repo | Tag | Branch |" >> $GITHUB_STEP_SUMMARY
           echo "|------|-----|--------|" >> $GITHUB_STEP_SUMMARY
@@ -195,8 +239,6 @@ jobs:
           echo "| ct-media | $CT_MEDIA | ${{ inputs.target_branch }} |" >> $GITHUB_STEP_SUMMARY
           echo "| jtapi-operator | $VERSION | ${{ inputs.target_branch }} |" >> $GITHUB_STEP_SUMMARY
           echo "| tracer | $VERSION | master |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Monitor:** Watch the [draft release](https://github.com/calltelemetry/calltelemetry/releases/tag/$VERSION) for live build status checklist updates." >> $GITHUB_STEP_SUMMARY
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -204,7 +246,6 @@ jobs:
           token: ${{ secrets.GH_RELEASE_TOKEN }}
 
       - name: Generate version files
-        if: ${{ needs.create-releases.result == 'success' }}
         run: |
           VERSION="${{ inputs.version }}"
           CT_MEDIA="${{ inputs.ct_media_version || inputs.version }}"
@@ -245,8 +286,24 @@ jobs:
             echo "✅ Version files pushed"
           fi
 
+      - name: Upload version files to release
+        env:
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+        run: |
+          VERSION="${{ inputs.version }}"
+
+          # Upload .env and .yaml as release assets
+          for ext in env yaml; do
+            FILE="ova/versions/${VERSION}.${ext}"
+            if [ -f "$FILE" ]; then
+              gh release upload "$VERSION" "$FILE" \
+                --repo calltelemetry/calltelemetry \
+                --clobber
+              echo "✅ Uploaded ${FILE} to release"
+            fi
+          done
+
       - name: Dispatch Package Release Bundle
-        if: ${{ needs.create-releases.result == 'success' }}
         env:
           GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
         run: |
@@ -256,7 +313,6 @@ jobs:
           echo "✅ Package Release Bundle dispatched"
 
       - name: Dispatch Notify OVA Build
-        if: ${{ needs.create-releases.result == 'success' }}
         env:
           GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
         run: |
@@ -264,3 +320,13 @@ jobs:
             --repo calltelemetry/calltelemetry \
             -f version=${{ inputs.version }}
           echo "✅ Appliance build dispatched (OVA + QCOW2 conversion)"
+
+      - name: Publish release (draft → published)
+        env:
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+        run: |
+          VERSION="${{ inputs.version }}"
+          gh release edit "$VERSION" \
+            --repo calltelemetry/calltelemetry \
+            --draft=false
+          echo "✅ Release $VERSION published"

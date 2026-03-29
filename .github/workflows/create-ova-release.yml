@@ -1,4 +1,6 @@
-name: Create OVA Release
+# DEPRECATED: OVA release is now handled by unified-release.yml.
+# Kept for manual emergency use only.
+name: Create OVA Release (Legacy)
 
 on:
   workflow_dispatch:
