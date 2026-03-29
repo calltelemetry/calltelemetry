@@ -136,112 +136,15 @@ metrics_generator:
         send_exemplars: true
 TEMPOEOF
 fi
-# Loki — log aggregation backend
-if [ -d "${INSTALL_DIR}/loki/loki.yaml" ]; then
-  rm -rf "${INSTALL_DIR}/loki/loki.yaml"
-fi
-mkdir -p "${INSTALL_DIR}/loki"
-if [ ! -f "${INSTALL_DIR}/loki/loki.yaml" ]; then
-  cat > "${INSTALL_DIR}/loki/loki.yaml" << 'LOKIEOF'
-auth_enabled: false
-
-server:
-  http_listen_port: 3100
-
-common:
-  path_prefix: /loki
-  replication_factor: 1
-  ring:
-    kvstore:
-      store: inmemory
-
-schema_config:
-  configs:
-    - from: 2024-01-01
-      store: tsdb
-      object_store: filesystem
-      schema: v13
-      index:
-        prefix: index_
-        period: 24h
-
-storage_config:
-  filesystem:
-    directory: /loki/chunks
-
-limits_config:
-  retention_period: 168h
-  reject_old_samples: true
-  reject_old_samples_max_age: 168h
-  ingestion_rate_mb: 8
-  ingestion_burst_size_mb: 16
-
-compactor:
-  working_directory: /loki/compactor
-  retention_enabled: true
-  delete_request_store: filesystem
-LOKIEOF
-fi
-# Alloy — Docker container log collection
-if [ -d "${INSTALL_DIR}/alloy/config.alloy" ]; then
-  rm -rf "${INSTALL_DIR}/alloy/config.alloy"
-fi
-mkdir -p "${INSTALL_DIR}/alloy"
-if [ ! -f "${INSTALL_DIR}/alloy/config.alloy" ]; then
-  cat > "${INSTALL_DIR}/alloy/config.alloy" << 'ALLOYEOF'
-discovery.docker "containers" {
-  host = "unix:///var/run/docker.sock"
-}
-
-discovery.relabel "docker_labels" {
-  targets = discovery.docker.containers.targets
-
-  rule {
-    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
-    target_label  = "compose_service"
-  }
-
-  rule {
-    source_labels = ["__meta_docker_container_name"]
-    regex         = "/(.*)"
-    target_label  = "container"
-  }
-}
-
-loki.source.docker "default" {
-  host    = "unix:///var/run/docker.sock"
-  targets = discovery.relabel.docker_labels.output
-  forward_to = [loki.process.pipeline.receiver]
-}
-
-loki.process "pipeline" {
-  stage.json {
-    expressions = {
-      level = "severity",
-      msg   = "message",
-    }
-  }
-
-  stage.label_drop {
-    values = ["filename"]
-  }
-
-  stage.labels {
-    values = {
-      level = "",
-    }
-  }
-
-  forward_to = [loki.write.loki.receiver]
-}
-
-loki.write "loki" {
-  endpoint {
-    url = "http://loki:3100/loki/api/v1/push"
-  }
-}
-ALLOYEOF
-fi
+# Repair Docker-created directories for Loki/Alloy/Tempo config bind mounts.
+# Docker creates mount targets as directories when the source file doesn't exist.
+# The actual config files are deployed via the release bundle (bundle-manifest.yml).
+for _config_pair in "loki/loki.yaml" "alloy/config.alloy" "tempo/tempo.yaml" "otel-collector/otel-collector-config.yaml"; do
+  _config_path="${INSTALL_DIR}/${_config_pair}"
+  if [ -d "$_config_path" ]; then
+    rm -rf "$_config_path"
+  fi
+done
 mkdir -p "${INSTALL_DIR}/prometheus"
 if [ ! -f "${INSTALL_DIR}/prometheus/alert_rules.yml" ]; then
   echo 'groups: []' > "${INSTALL_DIR}/prometheus/alert_rules.yml"
@@ -2762,9 +2665,10 @@ update() {
     # Configure IPv6 settings based on --ipv6 flag
     configure_ipv6 "$ORIGINAL_FILE" "$enable_ipv6"
 
-    # Pre-flight: repair Docker-created directories for config bind mounts
+    # Pre-flight: repair Docker-created directories for config bind mounts.
     # When upgrading from versions that didn't have Loki/Alloy/Tempo, Docker
     # creates the mount target as a directory instead of a file. Fix it now.
+    # Actual config files are deployed via the release bundle (bundle-manifest.yml).
     for config_pair in "loki/loki.yaml" "alloy/config.alloy" "tempo/tempo.yaml" "otel-collector/otel-collector-config.yaml"; do
       config_path="${INSTALL_DIR}/${config_pair}"
       if [ -d "$config_path" ]; then
@@ -2772,83 +2676,6 @@ update() {
         rm -rf "$config_path"
       fi
     done
-    # Ensure config files exist (generates defaults if missing)
-    # The inline defaults at the top of cli.sh only run on fresh invocations.
-    # For in-flight upgrades, we need to create them here too.
-    if [ ! -f "${INSTALL_DIR}/loki/loki.yaml" ]; then
-      mkdir -p "${INSTALL_DIR}/loki"
-      cat > "${INSTALL_DIR}/loki/loki.yaml" << 'LOKIMIGEOF'
-auth_enabled: false
-server:
-  http_listen_port: 3100
-common:
-  path_prefix: /loki
-  replication_factor: 1
-  ring:
-    kvstore:
-      store: inmemory
-schema_config:
-  configs:
-    - from: 2024-01-01
-      store: tsdb
-      object_store: filesystem
-      schema: v13
-      index:
-        prefix: index_
-        period: 24h
-storage_config:
-  filesystem:
-    directory: /loki/chunks
-limits_config:
-  retention_period: 168h
-  reject_old_samples: true
-  reject_old_samples_max_age: 168h
-  ingestion_rate_mb: 8
-  ingestion_burst_size_mb: 16
-compactor:
-  working_directory: /loki/compactor
-  retention_enabled: true
-  delete_request_store: filesystem
-LOKIMIGEOF
-      echo "  Created default loki/loki.yaml"
-    fi
-    if [ ! -f "${INSTALL_DIR}/alloy/config.alloy" ]; then
-      mkdir -p "${INSTALL_DIR}/alloy"
-      cat > "${INSTALL_DIR}/alloy/config.alloy" << 'ALLOYMIGEOF'
-discovery.docker "containers" {
-  host = "unix:///var/run/docker.sock"
-}
-discovery.relabel "docker_labels" {
-  targets = discovery.docker.containers.targets
-  rule {
-    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
-    target_label  = "compose_service"
-  }
-  rule {
-    source_labels = ["__meta_docker_container_name"]
-    regex         = "/(.*)"
-    target_label  = "container"
-  }
-}
-loki.source.docker "default" {
-  host    = "unix:///var/run/docker.sock"
-  targets = discovery.relabel.docker_labels.output
-  forward_to = [loki.process.pipeline.receiver]
-}
-loki.process "pipeline" {
-  stage.json {
-    expressions = { level = "severity", msg = "message" }
-  }
-  stage.label_drop { values = ["filename"] }
-  stage.labels { values = { level = "" } }
-  forward_to = [loki.write.loki.receiver]
-}
-loki.write "loki" {
-  endpoint { url = "http://loki:3100/loki/api/v1/push" }
-}
-ALLOYMIGEOF
-      echo "  Created default alloy/config.alloy"
-    fi
 
     fix_systemd_service_if_needed
     fix_systemd_compose_files
