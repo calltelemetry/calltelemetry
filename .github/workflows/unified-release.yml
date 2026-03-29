@@ -120,6 +120,7 @@ jobs:
     if: ${{ !inputs.skip_component_releases }}
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         include:
           - repo: cisco-cdr
@@ -175,7 +176,7 @@ jobs:
   # ─────────────────────────────────────────────────────────────────
   finalize:
     needs: [generate-release-notes, create-releases]
-    if: ${{ needs.create-releases.result == 'success' }}
+    if: ${{ !cancelled() && (needs.create-releases.result == 'success' || needs.create-releases.result == 'failure') }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
