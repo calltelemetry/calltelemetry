@@ -145,6 +145,15 @@ for _config_pair in "loki/loki.yaml" "alloy/config.alloy" "tempo/tempo.yaml" "ot
     rm -rf "$_config_path"
   fi
 done
+# Remove file-provisioned Grafana dashboards that are now API-managed by BootProvisioner.
+# Grafana rejects API writes to file-provisioned dashboards ("Cannot save provisioned dashboard").
+# These dashboards are now generated dynamically per-org by the Elixir dashboard factory.
+for _stale_dashboard in "calltelemetry-system-health.json" "alarm-overview.json" "oban-job-health.json"; do
+  _dash_path="${INSTALL_DIR}/grafana/dashboards/${_stale_dashboard}"
+  if [ -f "$_dash_path" ]; then
+    rm -f "$_dash_path"
+  fi
+done
 mkdir -p "${INSTALL_DIR}/prometheus"
 if [ ! -f "${INSTALL_DIR}/prometheus/alert_rules.yml" ]; then
   echo 'groups: []' > "${INSTALL_DIR}/prometheus/alert_rules.yml"
