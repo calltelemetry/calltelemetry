@@ -286,6 +286,7 @@ jobs:
             echo "No changes to commit"
           else
             git commit -m "chore: auto-generate version files for ${VERSION}"
+            git pull --rebase origin master || git pull --rebase origin main || true
             git push
             echo "✅ Version files pushed"
           fi
