@@ -143,6 +143,57 @@ jobs:
             fi
           done
 
+      - name: Copy Tempo config
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          BUNDLE_DIR="${BUNDLE_NAME}-${VERSION}"
+          MANIFEST="ova/bundle-manifest.yml"
+
+          echo "--- Tempo ---"
+          mkdir -p "$BUNDLE_DIR/tempo"
+          for file in $(yq '.tempo[]' "$MANIFEST" 2>/dev/null); do
+            if [ -f "$file" ]; then
+              cp "$file" "$BUNDLE_DIR/tempo/"
+              echo "✅ $(basename $file)"
+            else
+              echo "⚠️  Not found: $file"
+            fi
+          done
+
+      - name: Copy Loki config
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          BUNDLE_DIR="${BUNDLE_NAME}-${VERSION}"
+          MANIFEST="ova/bundle-manifest.yml"
+
+          echo "--- Loki ---"
+          mkdir -p "$BUNDLE_DIR/loki"
+          for file in $(yq '.loki[]' "$MANIFEST" 2>/dev/null); do
+            if [ -f "$file" ]; then
+              cp "$file" "$BUNDLE_DIR/loki/"
+              echo "✅ $(basename $file)"
+            else
+              echo "⚠️  Not found: $file"
+            fi
+          done
+
+      - name: Copy Alloy config
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          BUNDLE_DIR="${BUNDLE_NAME}-${VERSION}"
+          MANIFEST="ova/bundle-manifest.yml"
+
+          echo "--- Alloy ---"
+          mkdir -p "$BUNDLE_DIR/alloy"
+          for file in $(yq '.alloy[]' "$MANIFEST" 2>/dev/null); do
+            if [ -f "$file" ]; then
+              cp "$file" "$BUNDLE_DIR/alloy/"
+              echo "✅ $(basename $file)"
+            else
+              echo "⚠️  Not found: $file"
+            fi
+          done
+
       - name: Copy JTAPI overlay (backwards compat)
         run: |
           VERSION="${{ steps.version.outputs.version }}"

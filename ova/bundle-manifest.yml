@@ -39,6 +39,18 @@ grafana:
 otel:
   - otel-collector/otel-collector-config.yaml
 
+# Tempo distributed tracing configuration
+tempo:
+  - tempo/tempo.yaml
+
+# Loki log aggregation configuration
+loki:
+  - loki/loki.yaml
+
+# Alloy Docker log collection configuration
+alloy:
+  - alloy/config.alloy
+
 # Environment template (new deployments copy this to .env)
 env:
   - .env.example
