@@ -176,7 +176,7 @@ jobs:
   # ─────────────────────────────────────────────────────────────────
   finalize:
     needs: [generate-release-notes, create-releases]
-    if: ${{ !cancelled() && (needs.create-releases.result == 'success' || needs.create-releases.result == 'failure') }}
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
