@@ -318,39 +318,16 @@ jobs:
             fi
           done
 
-          # Determine if this is a stable or pre-release
-          # For release events: check prerelease flag
-          # For workflow_dispatch: check stable input
-          IS_STABLE="false"
-          if [ "${{ github.event_name }}" = "release" ]; then
-            if [ "${{ github.event.release.prerelease }}" != "true" ]; then
-              IS_STABLE="true"
-            fi
-          else
-            # workflow_dispatch - check stable input
-            if [ "${{ inputs.stable }}" = "true" ]; then
-              IS_STABLE="true"
-            fi
-          fi
-
-          # Update only the appropriate version marker (they don't cross-update)
-          if [ "$IS_STABLE" = "true" ]; then
-            echo "$VERSION" > latest-stable.txt
-            gsutil cp latest-stable.txt "gs://${GCS_BUCKET}/latest-stable.txt"
-            gsutil cp "$BUNDLE_FILE" "gs://${GCS_BUCKET}/releases/latest/${BUNDLE_NAME}-latest.tar.gz"
-            gsutil cp "${BUNDLE_FILE}.sha256" "gs://${GCS_BUCKET}/releases/latest/${BUNDLE_NAME}-latest.tar.gz.sha256"
-            echo "✅ Updated latest-stable.txt → $VERSION"
-          else
-            echo "$VERSION" > latest.txt
-            gsutil cp latest.txt "gs://${GCS_BUCKET}/latest.txt"
-            echo "✅ Updated latest.txt → $VERSION"
-          fi
+          # NOTE: latest.txt and latest-stable.txt are NOT updated here.
+          # Use the "Promote Release" workflow to manually promote a version
+          # to latest or stable after validation.
 
           echo "✅ Uploaded to GCS:"
           echo "   gs://${GCS_BUCKET}/releases/${VERSION}/${BUNDLE_FILE}"
           echo "   gs://${GCS_BUCKET}/cli.sh"
           echo "   gs://${GCS_BUCKET}/prep.sh"
-          echo "   gs://${GCS_BUCKET}/latest.txt"
+          echo ""
+          echo "⚠️  To promote this version to latest, run the Promote Release workflow."
 
       - name: Upload bundle to GitHub Release
         if: github.event_name == 'release'

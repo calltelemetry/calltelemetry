@@ -1,0 +1,131 @@
+name: Promote Release
+run-name: "Promote ${{ inputs.version }} → ${{ inputs.channel }}"
+
+# Manual workflow to promote a validated release to latest or stable.
+# This controls what version `curl https://get.calltelemetry.com | sudo sh -s -- update` pulls.
+# Releases are NOT auto-promoted — this must be triggered explicitly after validation.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to promote (e.g., 0.8.6-rc172)"
+        required: true
+        type: string
+      channel:
+        description: "Promotion channel"
+        required: true
+        type: choice
+        options:
+          - latest
+          - stable
+
+env:
+  GCS_BUCKET: ${{ secrets.GCS_BUCKET }}
+  BUNDLE_NAME: calltelemetry-bundle
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate version exists
+        run: |
+          VERSION="${{ inputs.version }}"
+          CHANNEL="${{ inputs.channel }}"
+
+          echo "Promoting ${VERSION} → ${CHANNEL}"
+          echo ""
+
+          # Verify the GitHub release exists
+          gh release view "$VERSION" --repo calltelemetry/calltelemetry > /dev/null 2>&1 || {
+            echo "❌ Release $VERSION not found on calltelemetry/calltelemetry"
+            exit 1
+          }
+          echo "✅ Release $VERSION exists"
+
+        env:
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCS_SERVICE_ACCOUNT_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Verify bundle exists in GCS
+        run: |
+          VERSION="${{ inputs.version }}"
+          BUNDLE="gs://${GCS_BUCKET}/releases/${VERSION}/${BUNDLE_NAME}-${VERSION}.tar.gz"
+
+          gsutil stat "$BUNDLE" > /dev/null 2>&1 || {
+            echo "❌ Bundle not found: $BUNDLE"
+            echo "Run the Package Release Bundle workflow first."
+            exit 1
+          }
+          echo "✅ Bundle exists: $BUNDLE"
+
+      - name: Promote to channel
+        run: |
+          VERSION="${{ inputs.version }}"
+          CHANNEL="${{ inputs.channel }}"
+          BUNDLE_FILE="${BUNDLE_NAME}-${VERSION}.tar.gz"
+          BUNDLE_PATH="gs://${GCS_BUCKET}/releases/${VERSION}/${BUNDLE_FILE}"
+          BUNDLE_SHA="${BUNDLE_PATH}.sha256"
+
+          if [ "$CHANNEL" = "stable" ]; then
+            # Update latest-stable.txt and copy bundle to releases/latest/
+            echo "$VERSION" > latest-stable.txt
+            gsutil cp latest-stable.txt "gs://${GCS_BUCKET}/latest-stable.txt"
+            gsutil cp "$BUNDLE_PATH" "gs://${GCS_BUCKET}/releases/latest/${BUNDLE_NAME}-latest.tar.gz"
+            gsutil cp "$BUNDLE_SHA" "gs://${GCS_BUCKET}/releases/latest/${BUNDLE_NAME}-latest.tar.gz.sha256"
+            echo "✅ Promoted $VERSION → stable (latest-stable.txt)"
+
+            # Also update latest.txt (stable is always also latest)
+            echo "$VERSION" > latest.txt
+            gsutil cp latest.txt "gs://${GCS_BUCKET}/latest.txt"
+            echo "✅ Also updated latest.txt → $VERSION"
+          else
+            # Update latest.txt only
+            echo "$VERSION" > latest.txt
+            gsutil cp latest.txt "gs://${GCS_BUCKET}/latest.txt"
+            echo "✅ Promoted $VERSION → latest (latest.txt)"
+          fi
+
+      - name: Mark GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+        run: |
+          VERSION="${{ inputs.version }}"
+          CHANNEL="${{ inputs.channel }}"
+
+          if [ "$CHANNEL" = "stable" ]; then
+            # Mark as latest release (not prerelease)
+            gh release edit "$VERSION" \
+              --repo calltelemetry/calltelemetry \
+              --latest \
+              --prerelease=false
+            echo "✅ Marked $VERSION as latest stable release on GitHub"
+          else
+            # Mark as prerelease but latest
+            gh release edit "$VERSION" \
+              --repo calltelemetry/calltelemetry \
+              --latest
+            echo "✅ Marked $VERSION as latest pre-release on GitHub"
+          fi
+
+      - name: Summary
+        run: |
+          VERSION="${{ inputs.version }}"
+          CHANNEL="${{ inputs.channel }}"
+
+          echo "## 🚀 Release Promoted" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** \`${VERSION}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Channel:** \`${CHANNEL}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Appliances will pull this version on next update:" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "curl -fsSL https://get.calltelemetry.com | sudo sh -s -- update" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
