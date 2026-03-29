@@ -2006,6 +2006,39 @@ download_bundle() {
     fi
   fi
 
+  # Tempo config
+  if [ -f "$extract_dir/tempo/tempo.yaml" ]; then
+    mkdir -p ./tempo
+    [ -d "./tempo/tempo.yaml" ] && rm -rf "./tempo/tempo.yaml" && echo "  ✅ tempo/tempo.yaml (removed Docker-created directory)"
+    if cp "$extract_dir/tempo/tempo.yaml" ./tempo/tempo.yaml; then
+      echo "  ✅ tempo/tempo.yaml"
+    else
+      echo "  ⚠️  tempo/tempo.yaml (failed to copy — check permissions)"
+    fi
+  fi
+
+  # Loki config
+  if [ -f "$extract_dir/loki/loki.yaml" ]; then
+    mkdir -p ./loki
+    [ -d "./loki/loki.yaml" ] && rm -rf "./loki/loki.yaml" && echo "  ✅ loki/loki.yaml (removed Docker-created directory)"
+    if cp "$extract_dir/loki/loki.yaml" ./loki/loki.yaml; then
+      echo "  ✅ loki/loki.yaml"
+    else
+      echo "  ⚠️  loki/loki.yaml (failed to copy — check permissions)"
+    fi
+  fi
+
+  # Alloy config
+  if [ -f "$extract_dir/alloy/config.alloy" ]; then
+    mkdir -p ./alloy
+    [ -d "./alloy/config.alloy" ] && rm -rf "./alloy/config.alloy" && echo "  ✅ alloy/config.alloy (removed Docker-created directory)"
+    if cp "$extract_dir/alloy/config.alloy" ./alloy/config.alloy; then
+      echo "  ✅ alloy/config.alloy"
+    else
+      echo "  ⚠️  alloy/config.alloy (failed to copy — check permissions)"
+    fi
+  fi
+
   # Cleanup
   rm -f "$bundle_name"
   rm -rf "$extract_dir"
@@ -5195,6 +5228,31 @@ case "$1" in
         [ -d "./otel-collector/otel-collector-config.yaml" ] && rm -rf "./otel-collector/otel-collector-config.yaml"
         cp "$inner_dir/otel-collector/otel-collector-config.yaml" ./otel-collector/otel-collector-config.yaml
         echo "  - otel-collector-config.yaml"
+      fi
+
+      # Install Tempo config if present
+      if [ -f "$inner_dir/tempo/tempo.yaml" ]; then
+        mkdir -p tempo
+        [ -d "./tempo/tempo.yaml" ] && rm -rf "./tempo/tempo.yaml"
+        cp "$inner_dir/tempo/tempo.yaml" ./tempo/tempo.yaml
+        echo "  - tempo/tempo.yaml"
+      fi
+
+      # Install Loki config if present
+      if [ -f "$inner_dir/loki/loki.yaml" ]; then
+        mkdir -p loki
+        # Docker may have created loki.yaml as a directory — remove it first
+        [ -d "./loki/loki.yaml" ] && rm -rf "./loki/loki.yaml"
+        cp "$inner_dir/loki/loki.yaml" ./loki/loki.yaml
+        echo "  - loki/loki.yaml"
+      fi
+
+      # Install Alloy config if present
+      if [ -f "$inner_dir/alloy/config.alloy" ]; then
+        mkdir -p alloy
+        [ -d "./alloy/config.alloy" ] && rm -rf "./alloy/config.alloy"
+        cp "$inner_dir/alloy/config.alloy" ./alloy/config.alloy
+        echo "  - alloy/config.alloy"
       fi
 
       # Cleanup extraction directory
