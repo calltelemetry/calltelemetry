@@ -673,7 +673,7 @@ services:
   # ─────────────────────────────────────────────────────────────────
 
   alloy:
-    image: grafana/alloy:v1.8
+    image: grafana/alloy:v1.8.0
     restart: unless-stopped
     command: run --server.http.listen-addr=0.0.0.0:12345 /etc/alloy/config.alloy
     volumes:
