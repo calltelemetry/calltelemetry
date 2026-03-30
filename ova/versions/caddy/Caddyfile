@@ -32,11 +32,15 @@
         }
     }
 
-    # Prometheus - pass requests with /prometheus prefix intact
+    # CT app metrics — unauthenticated, for PRTG/external Prometheus scraping
+    handle /metrics {
+        reverse_proxy web:4080
+    }
+
+    # Prometheus UI and API — strip prefix before proxying
     handle /prometheus* {
-        reverse_proxy prometheus:9090 {
-            header_up X-Forwarded-Host {http.request.host}
-        }
+        uri strip_prefix /prometheus
+        reverse_proxy prometheus:9090
     }
 
     reverse_proxy /* vue-web:8080

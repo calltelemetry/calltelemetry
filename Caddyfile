@@ -35,6 +35,11 @@
         }
     }
 
+    # CT app metrics — unauthenticated, for PRTG/external Prometheus scraping
+    handle /metrics {
+        reverse_proxy web:4080
+    }
+
     # Prometheus — SSO via CT JWT
     @prometheus path /prometheus /prometheus/*
     handle @prometheus {
