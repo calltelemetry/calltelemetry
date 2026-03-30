@@ -70,6 +70,26 @@ groups:
           description: 'High active task count may indicate a resource leak in the Call Telemetry service.'
           generator_url: '/grafana/d/ct-system-resources/system-resources?viewPanel=6&from=now-1h&to=now'
 
+      - alert: BeamMailboxBackup
+        expr: ct_beam_mailbox_max_len > 1000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'BEAM process mailbox backing up (depth {{ $value }})'
+          description: 'A GenServer is not keeping up with its message queue. Check /api/org/.../system/ops/memory for which process.'
+          generator_url: '/grafana/d/ct-system-resources/system-resources?viewPanel=112&from=now-1h&to=now'
+
+      - alert: BeamMemoryGrowthSustained
+        expr: increase(ct_prom_ex_beam_memory_allocated_bytes[15m]) > 104857600
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'BEAM heap grew >100 MB in 15 minutes'
+          description: 'Possible memory leak. Check /api/org/.../system/ops/memory for per-process and ETS detail.'
+          generator_url: '/grafana/d/ct-system-resources/system-resources?from=now-1h&to=now'
+
   - name: oban_health
     rules:
       - alert: ObanRetryableJobs
