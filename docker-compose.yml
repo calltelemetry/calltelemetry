@@ -300,6 +300,7 @@ services:
       - --web.console.templates=/usr/share/prometheus/consoles
       - --web.enable-lifecycle
       - --web.enable-admin-api
+      - --web.enable-remote-write-receiver
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./prometheus/alert_rules.yml:/etc/prometheus/alert_rules.yml:rw
