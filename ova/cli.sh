@@ -2792,6 +2792,31 @@ update() {
       echo "✅ Docker memory limit applied (90% of RAM)"
     fi
 
+    # Ensure swap is at least 8 GB — create/resize /swapfile if needed
+    local REQUIRED_SWAP_GB=8
+    local SWAPFILE="/swapfile"
+    local current_swap_kb current_swap_gb
+    current_swap_kb=$(free | awk '/^Swap:/{print $2}')
+    current_swap_gb=$(( current_swap_kb / 1024 / 1024 ))
+    if [ "$current_swap_gb" -lt "$REQUIRED_SWAP_GB" ]; then
+      echo "Expanding swap to ${REQUIRED_SWAP_GB}GB (current: ${current_swap_gb}GB)..."
+      if swapon --show=NAME --noheadings 2>/dev/null | grep -q "^${SWAPFILE}$"; then
+        sudo swapoff "$SWAPFILE"
+      fi
+      sudo fallocate -l "${REQUIRED_SWAP_GB}G" "$SWAPFILE" 2>/dev/null || \
+        sudo dd if=/dev/zero of="$SWAPFILE" bs=1M count=$(( REQUIRED_SWAP_GB * 1024 )) status=none
+      sudo chmod 600 "$SWAPFILE"
+      sudo mkswap "$SWAPFILE" > /dev/null
+      sudo swapon "$SWAPFILE"
+      if ! grep -q "^${SWAPFILE}" /etc/fstab; then
+        echo "${SWAPFILE} none swap sw 0 0" | sudo tee -a /etc/fstab > /dev/null
+      fi
+      new_swap_gb=$(( $(free | awk '/^Swap:/{print $2}') / 1024 / 1024 ))
+      echo "✅ Swap expanded to ${new_swap_gb}GB"
+    else
+      echo "✅ Swap is ${current_swap_gb}GB (meets ${REQUIRED_SWAP_GB}GB requirement)"
+    fi
+
     if [ $services_ok -eq 0 ]; then
       echo "✅ Update complete! All services are running and ready."
     else
