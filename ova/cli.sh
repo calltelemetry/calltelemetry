@@ -4338,10 +4338,16 @@ app_status() {
   if $DOCKER_COMPOSE_CMD exec -T db pg_isready -U calltelemetry -d calltelemetry_prod >/dev/null 2>&1; then
     echo "✓ Database: accepting connections"
 
-    # Get migration count from DB
+    # Get applied migration count from DB
     migration_count=$($DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -t -c \
       "SELECT COUNT(*) FROM schema_migrations;" 2>/dev/null | tr -d ' ')
-    echo "✓ Migrations in database: $migration_count"
+
+    # Get total expected migrations from release
+    total_migrations=$($DOCKER_COMPOSE_CMD exec -T web sh -c \
+      'ls /app/lib/cdrcisco-*/priv/repo/migrations/*.exs 2>/dev/null | wc -l' 2>/dev/null | tr -d ' ')
+    total_migrations=${total_migrations:-"?"}
+
+    echo "✓ Migrations in database: $migration_count / $total_migrations"
 
     # Get latest migration
     latest=$($DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -t -c \
