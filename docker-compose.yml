@@ -86,15 +86,17 @@ services:
       -c shared_buffers=${PG_SHARED_BUFFERS:-512MB}
       -c effective_cache_size=${PG_EFFECTIVE_CACHE_SIZE:-1536MB}
       -c work_mem=${PG_WORK_MEM:-8MB}
-      -c maintenance_work_mem=${PG_MAINTENANCE_WORK_MEM:-128MB}
-      -c wal_buffers=64MB
+      -c maintenance_work_mem=${PG_MAINTENANCE_WORK_MEM:-256MB}
+      -c wal_buffers=${PG_WAL_BUFFERS:-64MB}
       -c max_wal_size=4GB
       -c checkpoint_completion_target=0.9
       -c random_page_cost=1.1
       -c effective_io_concurrency=200
-      -c autovacuum_max_workers=5
-      -c autovacuum_vacuum_scale_factor=0.05
-      -c autovacuum_analyze_scale_factor=0.02
+      -c max_parallel_workers_per_gather=${PG_PARALLEL_WORKERS:-2}
+      -c max_parallel_workers=${PG_MAX_PARALLEL_WORKERS:-4}
+      -c autovacuum_max_workers=${PG_AUTOVACUUM_WORKERS:-5}
+      -c autovacuum_vacuum_scale_factor=${PG_AUTOVACUUM_VACUUM_SCALE:-0.05}
+      -c autovacuum_analyze_scale_factor=${PG_AUTOVACUUM_ANALYZE_SCALE:-0.02}
       -c autovacuum_vacuum_cost_delay=2
       -c log_min_duration_statement=2000
     expose:
