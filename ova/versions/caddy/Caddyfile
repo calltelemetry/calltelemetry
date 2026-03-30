@@ -39,7 +39,7 @@
         }
     }
 
-    reverse_proxy /* vue-web:80
+    reverse_proxy /* vue-web:8080
 
     # Cache headers - order matters! More specific rules FIRST
     header /assets/* {
