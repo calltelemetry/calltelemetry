@@ -2689,11 +2689,7 @@ update() {
     fix_systemd_service_if_needed
     fix_systemd_compose_files
 
-    # Stop services before resizing swap — swapoff under load risks OOM
-    echo "Stopping services for swap resize..."
-    systemctl stop docker-compose-app.service 2>/dev/null || true
-
-    # Set total swap to 8GB, or 50% of RAM if RAM > 16GB
+    # Check swap compliance: 8GB total, or 50% of RAM if RAM > 16GB
     local SWAPFILE="/swapfile"
     local total_ram_gb target_swap_gb non_file_swap_gb swapfile_target_gb current_swapfile_gb
     total_ram_gb=$(( $(grep MemTotal /proc/meminfo | awk '{print $2}') / 1024 / 1024 ))
@@ -2702,11 +2698,9 @@ update() {
     else
       target_swap_gb=8
     fi
-    # How much swap comes from non-file sources (partitions) — exclude our swapfile
     non_file_swap_gb=$(( $(swapon --show=NAME,SIZE --noheadings --bytes 2>/dev/null | grep -v "^${SWAPFILE}" | awk '{sum+=$2} END{printf "%d", sum/1024/1024/1024}') ))
     swapfile_target_gb=$(( target_swap_gb - non_file_swap_gb ))
     [ "$swapfile_target_gb" -lt 0 ] && swapfile_target_gb=0
-    # Current swapfile size (bytes → GB)
     if [ -f "$SWAPFILE" ]; then
       current_swapfile_gb=$(( $(stat -c%s "$SWAPFILE") / 1024 / 1024 / 1024 ))
     else
@@ -2715,6 +2709,9 @@ update() {
     if [ "$current_swapfile_gb" -eq "$swapfile_target_gb" ]; then
       echo "✅ Swap is $(( $(free | awk '/^Swap:/{print $2}') / 1024 / 1024 ))GB (target: ${target_swap_gb}GB)"
     else
+      # Only stop services when a swap change is actually needed
+      echo "Swap needs resize (current swapfile: ${current_swapfile_gb}GB, target: ${swapfile_target_gb}GB) — stopping services..."
+      systemctl stop docker-compose-app.service 2>/dev/null || true
       local current_total_gb
       current_total_gb=$(( $(free | awk '/^Swap:/{print $2}') / 1024 / 1024 ))
       echo "Resizing swap: ${current_total_gb}GB → ${target_swap_gb}GB total (RAM: ${total_ram_gb}GB, swapfile: ${swapfile_target_gb}GB)..."
@@ -2732,7 +2729,6 @@ update() {
           echo "${SWAPFILE} none swap sw 0 0" | sudo tee -a /etc/fstab > /dev/null
         fi
       else
-        # Partition swap alone meets target — remove swapfile
         sudo rm -f "$SWAPFILE"
         sudo sed -i "\|^${SWAPFILE}|d" /etc/fstab
       fi
