@@ -2785,7 +2785,9 @@ update() {
     if command -v node &>/dev/null && command -v npm &>/dev/null; then
       [ -f /usr/local/bin/ct ] && sudo rm -f /usr/local/bin/ct
       echo "Updating @calltelemetry/cli..."
-      sudo npm install -g @calltelemetry/cli &>/dev/null && echo "✅ ct CLI updated to $(ct --version 2>/dev/null || echo 'unknown')" || echo "⚠️  ct CLI update failed (non-critical)"
+      sudo npm install -g @calltelemetry/cli &>/dev/null && \
+        CT_CLI_VER=$(npm list -g --depth=0 @calltelemetry/cli 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1) && \
+        echo "✅ ct CLI updated to ${CT_CLI_VER:-unknown}" || echo "⚠️  ct CLI update failed (non-critical)"
     fi
 
     # Apply console loglevel fix for existing VMs
