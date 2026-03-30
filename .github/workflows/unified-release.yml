@@ -1,11 +1,12 @@
 name: Unified Release
 run-name: "Unified Release ${{ inputs.version }}"
 
-# Single workflow dispatch that stamps ONE version across all 6 repos.
-# Docker builds are triggered by the release:published events.
-# After all Docker images are confirmed on Docker Hub, this workflow
-# generates OVA version files, packages the release bundle, triggers
-# the appliance build, and publishes the release — all automatically.
+# Single workflow dispatch that stamps ONE version across all 7 repos.
+# Detects which repos have changed since the last release — unchanged repos
+# get their previous Docker image retagged (~10s) instead of rebuilt (~15min).
+# After all Docker images are confirmed on Docker Hub, generates OVA version
+# files, packages the release bundle, triggers the appliance build, and
+# publishes the release — all automatically.
 
 on:
   workflow_dispatch:
@@ -25,6 +26,10 @@ on:
         type: string
       skip_component_releases:
         description: "Skip creating GitHub releases (use existing tags/images)"
+        type: boolean
+        default: false
+      force_rebuild_all:
+        description: "Force rebuild ALL repos even if unchanged"
         type: boolean
         default: false
 
@@ -92,7 +97,6 @@ jobs:
           gh release delete "$VERSION" --repo calltelemetry/calltelemetry --yes 2>/dev/null || true
 
           # Write release notes to a temp file to avoid shell expansion issues
-          # (bare words like "remove" trigger zsh glob errors when passed inline)
           cat > /tmp/release-notes.md << 'NOTES_EOF'
           ${{ steps.notes.outputs.body }}
           NOTES_EOF
@@ -110,19 +114,90 @@ jobs:
           echo "### Draft Release Created: ${{ inputs.version }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Previous version: ${{ steps.prev.outputs.prev_version }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Build completions are collected by \`collect-docker-builds.yml\` via repository_dispatch (zero polling)." >> $GITHUB_STEP_SUMMARY
-          echo "Watch the draft release page for live build status updates." >> $GITHUB_STEP_SUMMARY
 
   # ─────────────────────────────────────────────────────────────────
-  # Job 2: Create GitHub releases in all 6 component repos
+  # Job 2: Detect which repos have changed since last release
+  # Compares each repo's branch HEAD against the previous release tag.
+  # Unchanged repos will be retagged instead of rebuilt.
+  # ─────────────────────────────────────────────────────────────────
+  detect-changes:
+    needs: generate-release-notes
+    runs-on: ubuntu-latest
+    outputs:
+      changed_repos: ${{ steps.detect.outputs.changed_repos }}
+      unchanged_repos: ${{ steps.detect.outputs.unchanged_repos }}
+      prev_version: ${{ steps.detect.outputs.prev_version }}
+    steps:
+      - name: Detect which repos have new commits
+        id: detect
+        env:
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+        run: |
+          VERSION="${{ inputs.version }}"
+          BRANCH="${{ inputs.target_branch }}"
+          PREV="${{ needs.generate-release-notes.outputs.prev_version }}"
+          FORCE="${{ inputs.force_rebuild_all }}"
+
+          echo "prev_version=$PREV" >> "$GITHUB_OUTPUT"
+
+          ALL_REPOS='cisco-cdr ct-quasar jtapi-sidecar ct-media jtapi-operator tracer ct-syslog-ingest'
+
+          if [ "$FORCE" = "true" ] || [ -z "$PREV" ]; then
+            echo "Force rebuild all (force=$FORCE, prev=$PREV)"
+            CHANGED_JSON='["cisco-cdr","ct-quasar","jtapi-sidecar","ct-media","jtapi-operator","tracer","ct-syslog-ingest"]'
+            echo "changed_repos=$CHANGED_JSON" >> "$GITHUB_OUTPUT"
+            echo "unchanged_repos=[]" >> "$GITHUB_OUTPUT"
+
+            echo "### Build Optimization" >> $GITHUB_STEP_SUMMARY
+            echo "**Force rebuild all** — no previous release or force flag set" >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+
+          CHANGED=()
+          UNCHANGED=()
+
+          echo "### Build Optimization" >> $GITHUB_STEP_SUMMARY
+          echo "| Repo | Commits | Action |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|---------|--------|" >> $GITHUB_STEP_SUMMARY
+
+          for repo in $ALL_REPOS; do
+            # Determine target branch (tracer uses master)
+            TARGET="$BRANCH"
+            if [ "$repo" = "tracer" ]; then TARGET="master"; fi
+
+            # Use GitHub compare API to count commits between prev tag and branch HEAD
+            COMMITS=$(gh api "repos/calltelemetry/$repo/compare/${PREV}...${TARGET}" \
+              --jq '.total_commits' 2>/dev/null || echo "999")
+
+            if [ "$COMMITS" = "0" ]; then
+              echo "$repo: UNCHANGED (0 new commits since $PREV)"
+              UNCHANGED+=("\"$repo\"")
+              echo "| $repo | 0 | ♻️ Retag from $PREV |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "$repo: CHANGED ($COMMITS new commits since $PREV)"
+              CHANGED+=("\"$repo\"")
+              echo "| $repo | $COMMITS | 🔨 Full rebuild |" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+
+          CHANGED_JSON="[$(IFS=,; echo "${CHANGED[*]}")]"
+          UNCHANGED_JSON="[$(IFS=,; echo "${UNCHANGED[*]}")]"
+
+          echo "changed_repos=$CHANGED_JSON" >> "$GITHUB_OUTPUT"
+          echo "unchanged_repos=$UNCHANGED_JSON" >> "$GITHUB_OUTPUT"
+
+          SKIP_COUNT=${#UNCHANGED[@]}
+          BUILD_COUNT=${#CHANGED[@]}
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**$BUILD_COUNT repos to build, $SKIP_COUNT repos to retag**" >> $GITHUB_STEP_SUMMARY
+
+  # ─────────────────────────────────────────────────────────────────
+  # Job 3: Create GitHub releases ONLY for changed repos
   # The release:published events trigger Docker builds in each repo.
-  # Build completions are reported back via repository_dispatch to
-  # collect-docker-builds.yml — NO polling needed.
   # ─────────────────────────────────────────────────────────────────
   create-releases:
-    needs: generate-release-notes
-    if: ${{ !inputs.skip_component_releases }}
+    needs: [generate-release-notes, detect-changes]
+    if: ${{ !inputs.skip_component_releases && needs.detect-changes.outputs.changed_repos != '[]' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -143,7 +218,12 @@ jobs:
           - repo: ct-syslog-ingest
             label: ct-syslog-ingest
     steps:
+      - name: Skip if repo unchanged
+        if: ${{ !contains(needs.detect-changes.outputs.changed_repos, matrix.repo) }}
+        run: echo "⏭️ ${{ matrix.repo }} unchanged — skipping release (will retag)"
+
       - name: Create ${{ matrix.label }} release
+        if: ${{ contains(needs.detect-changes.outputs.changed_repos, matrix.repo) }}
         env:
           GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
         run: |
@@ -175,13 +255,63 @@ jobs:
           echo "Created release: calltelemetry/$REPO@$VERSION"
 
   # ─────────────────────────────────────────────────────────────────
-  # Job 3: Wait for Docker images, generate OVA files, package, deploy
-  # Polls Docker Hub until all 5 images are available, then runs the
-  # full OVA pipeline in sequence. No manual intervention needed.
+  # Job 4: Retag unchanged repos — copy previous Docker image manifest
+  # Uses `docker buildx imagetools create` to copy multi-arch manifests
+  # from the previous version tag to the new one (~10 seconds per image).
+  # ─────────────────────────────────────────────────────────────────
+  retag-unchanged:
+    needs: [detect-changes]
+    if: ${{ needs.detect-changes.outputs.unchanged_repos != '[]' && !inputs.skip_component_releases }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - repo: cisco-cdr
+            image: web
+          - repo: ct-quasar
+            image: vue
+          - repo: jtapi-sidecar
+            image: jtapi-sidecar
+          - repo: ct-media
+            image: ct-media
+          - repo: jtapi-operator
+            image: jtapi-operator
+          - repo: tracer
+            image: traceroute
+          - repo: ct-syslog-ingest
+            image: ct-syslog-ingest
+    steps:
+      - name: Retag ${{ matrix.repo }} image
+        if: ${{ contains(needs.detect-changes.outputs.unchanged_repos, matrix.repo) }}
+        run: |
+          VERSION="${{ inputs.version }}"
+          PREV="${{ needs.detect-changes.outputs.prev_version }}"
+          IMAGE="calltelemetry/${{ matrix.image }}"
+
+          echo "♻️ Retagging $IMAGE:$PREV → $IMAGE:$VERSION"
+
+          # Login to Docker Hub
+          echo "${{ secrets.DOCKER_TOKEN }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+
+          # Set up buildx for imagetools
+          docker buildx create --use --name retagger 2>/dev/null || true
+
+          # Copy multi-arch manifest (preserves AMD64 + ARM64 layers)
+          docker buildx imagetools create \
+            --tag "$IMAGE:$VERSION" \
+            "$IMAGE:$PREV"
+
+          echo "✅ Retagged $IMAGE:$PREV → $IMAGE:$VERSION"
+
+  # ─────────────────────────────────────────────────────────────────
+  # Job 5: Wait for Docker images, generate OVA files, package, deploy
+  # Polls Docker Hub until all 6 images are available (both rebuilt
+  # and retagged), then runs the full OVA pipeline.
   # ─────────────────────────────────────────────────────────────────
   finalize:
-    needs: [generate-release-notes, create-releases]
-    if: ${{ !cancelled() }}
+    needs: [generate-release-notes, create-releases, retag-unchanged, detect-changes]
+    if: ${{ !cancelled() && needs.generate-release-notes.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -215,7 +345,7 @@ jobs:
 
             if [ "$ALL_READY" = true ]; then
               echo ""
-              echo "🎉 All 5 Docker images are available!"
+              echo "🎉 All Docker images are available!"
               break
             fi
 
