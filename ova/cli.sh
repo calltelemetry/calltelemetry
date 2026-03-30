@@ -3247,6 +3247,231 @@ list_backups() {
   fi
 }
 
+# ---------------------------------------------------------------------------
+# seed_cmd — generate demo seed data and stream live progress
+# ---------------------------------------------------------------------------
+seed_cmd() {
+  local subcommand="${1:-help}"
+  shift || true
+
+  local release_bin
+  release_bin=$(get_release_binary)
+
+  case "$subcommand" in
+    run)
+      local org_id=1
+      local preset="comprehensive_demo"
+      local curri_count=0
+      local days=90
+
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --org)      org_id="$2";     shift 2 ;;
+          --preset)   preset="$2";     shift 2 ;;
+          --curri)    curri_count="$2"; shift 2 ;;
+          --days)     days="$2";       shift 2 ;;
+          *) echo "Unknown option: $1"; shift ;;
+        esac
+      done
+
+      echo ""
+      echo "╔══════════════════════════════════════════════════════╗"
+      echo "║         CallTelemetry Demo Seed Generator            ║"
+      echo "╚══════════════════════════════════════════════════════╝"
+      echo ""
+      echo "  Org:    $org_id"
+      echo "  Preset: $preset"
+      if [ "$curri_count" -gt 0 ] 2>/dev/null; then
+        echo "  Curri:  $curri_count events (mega loader)"
+      fi
+      echo "  Days:   $days day spread"
+      echo ""
+
+      # Ensure org exists — bootstrap if needed
+      echo "▶ Checking org $org_id..."
+      local org_exists
+      org_exists=$($DOCKER_COMPOSE_CMD exec -T web "$release_bin" rpc \
+        "IO.puts(if Cdrcisco.Repo.get(Cdrcisco.Identity.Org, ${org_id}), do: \"exists\", else: \"missing\")" 2>&1 | tail -1)
+
+      if [ "$org_exists" != "exists" ]; then
+        echo "  Org $org_id not found — bootstrapping demo org..."
+        $DOCKER_COMPOSE_CMD exec -T web "$release_bin" rpc "
+{:ok, user} = Cdrcisco.Identity.create_user_with_org(
+  %{\"email\" => \"demo@calltelemetry.com\", \"password\" => \"demo\",
+    \"password_confirmation\" => \"demo\", \"terms_accepted\" => true},
+  %{name: \"CallTelemetry Demo\", check_new_version_on_login: true}
+)
+org = Cdrcisco.Identity.get_first_org(user)
+{:ok, token, _} = Cdrcisco.Token.trial(\"demo@calltelemetry.com\", \"Demo\", 30)
+{:ok, org} = Cdrcisco.Identity.update_org(org, %{license_token: token})
+Cdrcisco.License.update_license(org)
+IO.puts(\"created org \" <> to_string(org.id))
+" 2>&1 | grep -v "^\s*$"
+      else
+        echo "  ✓ Org $org_id exists"
+      fi
+      echo ""
+
+      # Enqueue preset via Oban (persistent — survives container restart)
+      echo "▶ Enqueueing $preset seed job via Oban..."
+      local job_id
+      job_id=$($DOCKER_COMPOSE_CMD exec -T web "$release_bin" rpc "
+{:ok, job} = Cdrcisco.Seeds.DemoSeedWorker.new(%{
+  \"action\" => \"preset\",
+  \"org_id\" => ${org_id},
+  \"preset_name\" => \"${preset}\",
+  \"overrides\" => %{\"curri_call_events\" => %{\"count\" => ${days} * 10000, \"days\" => ${days}}}
+}) |> Oban.insert()
+IO.puts(to_string(job.id))
+" 2>&1 | tail -1)
+
+      echo "  ✓ Oban job enqueued (id=$job_id)"
+
+      # Also kick off mega curri loader if requested
+      if [ "$curri_count" -gt 0 ] 2>/dev/null; then
+        echo "▶ Launching CurriMegaLoader ($curri_count events)..."
+        $DOCKER_COMPOSE_CMD exec -T web "$release_bin" rpc "
+Task.start(fn ->
+  Cdrcisco.Seeds.CurriMegaLoader.load(${org_id}, %{
+    count: ${curri_count}, days: ${days}, chunk_size: 100_000
+  })
+end)
+IO.puts(\"mega loader started\")
+" 2>&1 | grep -v "^\s*$"
+      fi
+
+      echo ""
+      echo "▶ Streaming progress (Ctrl+C to stop monitoring, seeds continue in background)..."
+      echo "──────────────────────────────────────────────────────────"
+      seed_monitor "$org_id" "$job_id"
+      ;;
+
+    monitor)
+      local org_id="${1:-1}"
+      local job_id="${2:-}"
+      seed_monitor "$org_id" "$job_id"
+      ;;
+
+    status)
+      local org_id="${1:-1}"
+      echo ""
+      echo "=== Seed Status (org $org_id) ==="
+      $DOCKER_COMPOSE_CMD exec -T db psql -U calltelemetry -d calltelemetry_prod -c "
+SELECT
+  (SELECT COUNT(*) FROM curri_events) AS curri_events,
+  (SELECT COUNT(*) FROM reputation_signals) AS reputation_signals,
+  (SELECT SUM(reltuples::bigint) FROM pg_class
+   WHERE relname LIKE 'cdrcalls_%' AND relkind = 'r'
+   AND relnamespace = 'public'::regnamespace) AS cdrcalls,
+  (SELECT SUM(reltuples::bigint) FROM pg_class
+   WHERE relname LIKE 'cmr_records_%' AND relkind = 'r'
+   AND relnamespace = 'public'::regnamespace) AS cmr_records,
+  (SELECT COUNT(*) FROM oban_jobs
+   WHERE state IN ('available','executing','scheduled')
+   AND worker LIKE '%Seed%') AS active_seed_jobs,
+  (SELECT COUNT(*) FROM policies) AS policies,
+  (SELECT COUNT(*) FROM watch_lists) AS watch_lists;
+" 2>&1
+      ;;
+
+    cancel)
+      echo "▶ Cancelling all active seed jobs..."
+      $DOCKER_COMPOSE_CMD exec -T web "$release_bin" rpc "
+import Ecto.Query
+{:ok, n} = Oban.cancel_all_jobs(from j in Oban.Job,
+  where: j.worker == \"Cdrcisco.Seeds.DemoSeedWorker\"
+  and j.state in [\"available\",\"scheduled\",\"executing\"])
+IO.puts(\"Cancelled \" <> to_string(n) <> \" jobs\")
+" 2>&1 | tail -3
+      ;;
+
+    help|*)
+      echo ""
+      echo "Usage: cli.sh seed <subcommand> [options]"
+      echo ""
+      echo "Subcommands:"
+      echo "  run      Generate demo seeds (enqueues Oban job + streams progress)"
+      echo "  monitor  Re-attach to progress stream for an org"
+      echo "  status   Quick DB row counts for all seed tables"
+      echo "  cancel   Cancel all queued seed jobs"
+      echo ""
+      echo "Options for 'run':"
+      echo "  --org <id>        Org ID (default: 1)"
+      echo "  --preset <name>   Preset name (default: comprehensive_demo)"
+      echo "  --curri <count>   Also run CurriMegaLoader with this many events"
+      echo "  --days <n>        Day spread for data (default: 90)"
+      echo ""
+      echo "Examples:"
+      echo "  cli.sh seed run"
+      echo "  cli.sh seed run --curri 10000000"
+      echo "  cli.sh seed run --preset comprehensive_demo --curri 1000000 --days 90"
+      echo "  cli.sh seed status"
+      echo "  cli.sh seed monitor 1"
+      echo ""
+      ;;
+  esac
+}
+
+# Live seed progress monitor — tails logs filtered to seed output + polls DB counts
+seed_monitor() {
+  local org_id="${1:-1}"
+  local job_id="${2:-}"
+  local poll_interval=10
+
+  echo ""
+  echo "  Monitoring org=$org_id  (refreshes every ${poll_interval}s)"
+  echo "  Logs: docker logs calltelemetry-web-1 | grep seed activity"
+  echo ""
+
+  # Background log tail filtered to seed-relevant lines
+  $DOCKER_COMPOSE_CMD logs -f web 2>&1 | grep -v "CurriController\|Keepalive\|Renewal token\|session_controller" \
+    | grep --line-buffered -E "DemoEngine|DemoSeedWorker|CurriMegaLoader|DemoStreamer|chunk=|Seed|seed|DONE|preset|ERROR|error" &
+  local log_pid=$!
+
+  # Foreground periodic DB count table
+  while true; do
+    sleep "$poll_interval"
+    local counts
+    counts=$($DOCKER_COMPOSE_CMD exec -T db psql -U calltelemetry -d calltelemetry_prod -t -A -c "
+SELECT
+  'curri=' || (SELECT COUNT(*) FROM curri_events) ||
+  '  rep=' || (SELECT COUNT(*) FROM reputation_signals) ||
+  '  cdr=' || COALESCE((SELECT SUM(reltuples::bigint) FROM pg_class
+    WHERE relname LIKE 'cdrcalls_%' AND relkind = 'r'
+    AND relnamespace = 'public'::regnamespace)::text, '?') ||
+  '  jobs=' || (SELECT COUNT(*) FROM oban_jobs
+    WHERE state IN ('available','executing','scheduled')
+    AND worker LIKE '%Seed%');
+" 2>/dev/null | tr -d ' ')
+
+    local oban_state=""
+    if [ -n "$job_id" ]; then
+      oban_state=$($DOCKER_COMPOSE_CMD exec -T db psql -U calltelemetry -d calltelemetry_prod -t -A -c \
+        "SELECT state FROM oban_jobs WHERE id = ${job_id};" 2>/dev/null | tr -d ' ')
+      oban_state=" job=$job_id:$oban_state"
+    fi
+
+    echo "  [$(date +%H:%M:%S)]  $counts$oban_state"
+
+    # Stop polling when job completes
+    if [ -n "$job_id" ] && [ "$oban_state" = " job=$job_id:completed" ]; then
+      echo ""
+      echo "  ✅ Seed job $job_id completed!"
+      break
+    fi
+    if [ -n "$job_id" ] && [ "$oban_state" = " job=$job_id:discarded" ]; then
+      echo ""
+      echo "  ❌ Seed job $job_id failed (discarded). Check logs above."
+      break
+    fi
+  done
+
+  kill "$log_pid" 2>/dev/null || true
+  echo ""
+  echo "Final counts:"
+  seed_cmd status "$org_id"
+}
+
 # Consolidated database command
 db_cmd() {
   local action="$1"
@@ -4792,6 +5017,12 @@ case "$1" in
     ;;
   status)
     app_status
+    ;;
+
+  # Seed / demo data commands
+  seed)
+    shift
+    seed_cmd "$@"
     ;;
 
   # Database commands
