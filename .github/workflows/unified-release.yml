@@ -56,13 +56,12 @@ jobs:
           VERSION="${{ inputs.version }}"
           PREV="${{ steps.prev.outputs.prev_version }}"
 
-          # Build public-facing release notes (no commit logs or internal PRs)
+          # Initial draft with build status checklist
+          # This will be replaced with public-facing release notes once builds complete
           NOTES="## Call Telemetry $VERSION"
           NOTES="$NOTES"$'\n\n'
-          NOTES="${NOTES}Release ${VERSION} of CallTelemetry."$'\n\n'
-          NOTES="${NOTES}For upgrade instructions, see [docs.calltelemetry.com](https://docs.calltelemetry.com)."$'\n\n'
 
-          # Build status checklist (updated live by collect-docker-builds.yml)
+          # Build status checklist (replaced with release notes after builds complete)
           NOTES="${NOTES}### Build Status"$'\n'
           NOTES="${NOTES}- [ ] cisco-cdr Docker build"$'\n'
           NOTES="${NOTES}- [ ] ct-quasar Docker build"$'\n'
@@ -71,6 +70,12 @@ jobs:
           NOTES="${NOTES}- [ ] jtapi-operator Docker build"$'\n'
           NOTES="${NOTES}- [ ] tracer Docker build"$'\n'
           NOTES="${NOTES}- [ ] OVA package"$'\n'
+          NOTES="$NOTES"$'\n'
+          NOTES="${NOTES}---"$'\n\n'
+          NOTES="${NOTES}**To upgrade:**"$'\n'
+          NOTES="${NOTES}\`\`\`bash"$'\n'
+          NOTES="${NOTES}sudo curl -fsSL https://get.calltelemetry.com | sudo sh -s -- update ${VERSION}"$'\n'
+          NOTES="${NOTES}\`\`\`"$'\n'
 
           # Write to output using delimiter
           echo "body<<NOTES_DELIM" >> "$GITHUB_OUTPUT"
