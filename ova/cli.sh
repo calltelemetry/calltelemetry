@@ -2792,29 +2792,50 @@ update() {
       echo "✅ Docker memory limit applied (90% of RAM)"
     fi
 
-    # Ensure swap is at least 8 GB — create/resize /swapfile if needed
-    local REQUIRED_SWAP_GB=8
+    # Set total swap to 8GB, or 50% of RAM if RAM > 16GB
     local SWAPFILE="/swapfile"
-    local current_swap_kb current_swap_gb
-    current_swap_kb=$(free | awk '/^Swap:/{print $2}')
-    current_swap_gb=$(( current_swap_kb / 1024 / 1024 ))
-    if [ "$current_swap_gb" -lt "$REQUIRED_SWAP_GB" ]; then
-      echo "Expanding swap to ${REQUIRED_SWAP_GB}GB (current: ${current_swap_gb}GB)..."
+    local total_ram_gb target_swap_gb non_file_swap_gb swapfile_target_gb current_swapfile_gb
+    total_ram_gb=$(( $(grep MemTotal /proc/meminfo | awk '{print $2}') / 1024 / 1024 ))
+    if [ "$total_ram_gb" -gt 16 ]; then
+      target_swap_gb=$(( total_ram_gb / 2 ))
+    else
+      target_swap_gb=8
+    fi
+    # How much swap comes from non-file sources (partitions) — exclude our swapfile
+    non_file_swap_gb=$(( $(swapon --show=NAME,SIZE --noheadings --bytes 2>/dev/null | grep -v "^${SWAPFILE}" | awk '{sum+=$2} END{printf "%d", sum/1024/1024/1024}') ))
+    swapfile_target_gb=$(( target_swap_gb - non_file_swap_gb ))
+    [ "$swapfile_target_gb" -lt 0 ] && swapfile_target_gb=0
+    # Current swapfile size (bytes → GB)
+    if [ -f "$SWAPFILE" ]; then
+      current_swapfile_gb=$(( $(stat -c%s "$SWAPFILE") / 1024 / 1024 / 1024 ))
+    else
+      current_swapfile_gb=0
+    fi
+    if [ "$current_swapfile_gb" -eq "$swapfile_target_gb" ]; then
+      echo "✅ Swap is $(( $(free | awk '/^Swap:/{print $2}') / 1024 / 1024 ))GB (target: ${target_swap_gb}GB)"
+    else
+      local current_total_gb
+      current_total_gb=$(( $(free | awk '/^Swap:/{print $2}') / 1024 / 1024 ))
+      echo "Resizing swap: ${current_total_gb}GB → ${target_swap_gb}GB total (RAM: ${total_ram_gb}GB, swapfile: ${swapfile_target_gb}GB)..."
       if swapon --show=NAME --noheadings 2>/dev/null | grep -q "^${SWAPFILE}$"; then
         sudo swapoff "$SWAPFILE"
       fi
-      sudo fallocate -l "${REQUIRED_SWAP_GB}G" "$SWAPFILE" 2>/dev/null || \
-        sudo dd if=/dev/zero of="$SWAPFILE" bs=1M count=$(( REQUIRED_SWAP_GB * 1024 )) status=none
-      sudo chmod 600 "$SWAPFILE"
-      sudo mkswap "$SWAPFILE" > /dev/null
-      sudo swapon "$SWAPFILE"
-      if ! grep -q "^${SWAPFILE}" /etc/fstab; then
-        echo "${SWAPFILE} none swap sw 0 0" | sudo tee -a /etc/fstab > /dev/null
+      if [ "$swapfile_target_gb" -gt 0 ]; then
+        sudo rm -f "$SWAPFILE"
+        sudo fallocate -l "${swapfile_target_gb}G" "$SWAPFILE" 2>/dev/null || \
+          sudo dd if=/dev/zero of="$SWAPFILE" bs=1M count=$(( swapfile_target_gb * 1024 )) status=none
+        sudo chmod 600 "$SWAPFILE"
+        sudo mkswap "$SWAPFILE" > /dev/null
+        sudo swapon "$SWAPFILE"
+        if ! grep -q "^${SWAPFILE}" /etc/fstab; then
+          echo "${SWAPFILE} none swap sw 0 0" | sudo tee -a /etc/fstab > /dev/null
+        fi
+      else
+        # Partition swap alone meets target — remove swapfile
+        sudo rm -f "$SWAPFILE"
+        sudo sed -i "\|^${SWAPFILE}|d" /etc/fstab
       fi
-      new_swap_gb=$(( $(free | awk '/^Swap:/{print $2}') / 1024 / 1024 ))
-      echo "✅ Swap expanded to ${new_swap_gb}GB"
-    else
-      echo "✅ Swap is ${current_swap_gb}GB (meets ${REQUIRED_SWAP_GB}GB requirement)"
+      echo "✅ Swap set to $(( $(free | awk '/^Swap:/{print $2}') / 1024 / 1024 ))GB"
     fi
 
     if [ $services_ok -eq 0 ]; then
