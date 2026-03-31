@@ -2873,9 +2873,9 @@ update() {
 
     # One-time partition drain migration (0.8.6-rc166+)
     # Drains legacy tables and default partition overflow synchronously.
-    # Sentinel file with timestamp prevents re-running on subsequent upgrades.
-    PARTITION_DRAIN_SENTINEL="/opt/calltelemetry/.partition-drain-complete"
-    if [ ! -f "$PARTITION_DRAIN_SENTINEL" ] && [ "$(printf '%s\n' "0.8.6-rc166" "$version" | sort -V | head -n1)" = "0.8.6-rc166" ]; then
+    # Tracked in ~/.ct/migrations.json (same format as ct-cli) so ct-cli
+    # won't re-run it when it later adds 014_partition_drain.
+    if ! ct_migration_done "014_partition_drain" && [ "$(printf '%s\n' "0.8.6-rc166" "$version" | sort -V | head -n1)" = "0.8.6-rc166" ]; then
       if [ $services_ok -eq 0 ]; then
         echo ""
         echo "=== One-Time Partition Data Migration (0.8.6) ==="
@@ -2884,7 +2884,7 @@ update() {
         echo "Progress will be displayed live below."
         echo ""
         if migration_drain; then
-          echo "{\"completed_at\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\", \"version\": \"$version\"}" > "$PARTITION_DRAIN_SENTINEL"
+          ct_migration_mark "014_partition_drain" "applied"
           echo "[OK] Partition migration complete (will not run again)"
         else
           echo "[WARN] Partition drain did not complete. You can retry with: cli.sh migrate drain"
@@ -4516,6 +4516,55 @@ migration_run() {
     echo "[FAIL] Migration run failed"
     return 1
   fi
+}
+
+# ── ct-cli migration state helpers ──
+# Read/write ~/.ct/migrations.json in the same format ct-cli uses:
+#   { "completed": { "014_partition_drain": { "at": "ISO8601", "result": "applied" } } }
+# This lets ct-cli skip migrations already completed by cli.sh.
+CT_MIGRATIONS_FILE="$HOME/.ct/migrations.json"
+
+# Check if a migration ID is already completed. Returns 0 (true) if done.
+ct_migration_done() {
+  local id="$1"
+  if [ ! -f "$CT_MIGRATIONS_FILE" ]; then
+    return 1
+  fi
+  # Use python3 (available on AlmaLinux) for reliable JSON parsing
+  python3 -c "
+import json, sys
+try:
+    state = json.load(open('$CT_MIGRATIONS_FILE'))
+    sys.exit(0 if '$id' in state.get('completed', {}) else 1)
+except:
+    sys.exit(1)
+" 2>/dev/null
+}
+
+# Mark a migration as completed with timestamp.
+ct_migration_mark() {
+  local id="$1"
+  local result="${2:-applied}"
+  local ts
+  ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+  mkdir -p "$HOME/.ct"
+
+  # Merge into existing state or create new
+  python3 -c "
+import json, os
+path = '$CT_MIGRATIONS_FILE'
+state = {'completed': {}, 'errors': {}}
+if os.path.exists(path):
+    try:
+        state = json.load(open(path))
+    except:
+        pass
+state.setdefault('completed', {})['$id'] = {'at': '$ts', 'result': '$result'}
+with open(path, 'w') as f:
+    json.dump(state, f, indent=2)
+    f.write('\n')
+" 2>/dev/null
 }
 
 # Drain legacy partition tables and default partition overflow.
