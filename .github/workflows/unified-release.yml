@@ -172,11 +172,11 @@ jobs:
             if [ "$COMMITS" = "0" ]; then
               echo "$repo: UNCHANGED (0 new commits since $PREV)"
               UNCHANGED+=("\"$repo\"")
-              echo "| $repo | 0 | ♻️ Retag from $PREV |" >> $GITHUB_STEP_SUMMARY
+              echo "| $repo | 0 | [retag] Retag from $PREV |" >> $GITHUB_STEP_SUMMARY
             else
               echo "$repo: CHANGED ($COMMITS new commits since $PREV)"
               CHANGED+=("\"$repo\"")
-              echo "| $repo | $COMMITS | 🔨 Full rebuild |" >> $GITHUB_STEP_SUMMARY
+              echo "| $repo | $COMMITS | [build] Full rebuild |" >> $GITHUB_STEP_SUMMARY
             fi
           done
 
@@ -201,33 +201,16 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      # Dynamic matrix — ONLY changed repos get releases (and Docker builds)
       matrix:
-        include:
-          - repo: cisco-cdr
-            label: cisco-cdr
-          - repo: ct-quasar
-            label: ct-quasar
-          - repo: jtapi-sidecar
-            label: jtapi-sidecar
-          - repo: ct-media
-            label: ct-media
-          - repo: jtapi-operator
-            label: jtapi-operator
-          - repo: tracer
-            label: tracer
-          - repo: ct-syslog-ingest
-            label: ct-syslog-ingest
+        repo: ${{ fromJson(needs.detect-changes.outputs.changed_repos) }}
     steps:
-      - name: Skip if repo unchanged
-        if: ${{ !contains(needs.detect-changes.outputs.changed_repos, matrix.repo) }}
-        run: echo "⏭️ ${{ matrix.repo }} unchanged — skipping release (will retag)"
-
-      - name: Create ${{ matrix.label }} release
-        if: ${{ contains(needs.detect-changes.outputs.changed_repos, matrix.repo) }}
+      - name: Create ${{ matrix.repo }} release
         env:
           GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
         run: |
           REPO="${{ matrix.repo }}"
+          echo "Building $REPO (changed since last release)"
           VERSION="${{ inputs.version }}"
 
           # ct-media can have a version override
@@ -289,7 +272,7 @@ jobs:
           PREV="${{ needs.detect-changes.outputs.prev_version }}"
           IMAGE="calltelemetry/${{ matrix.image }}"
 
-          echo "♻️ Retagging $IMAGE:$PREV → $IMAGE:$VERSION"
+          echo "[retag] Retagging $IMAGE:$PREV → $IMAGE:$VERSION"
 
           # Login to Docker Hub
           echo "${{ secrets.DOCKERHUB_TOKEN || secrets.DOCKER_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME || secrets.DOCKER_USERNAME }}" --password-stdin
@@ -302,7 +285,7 @@ jobs:
             --tag "$IMAGE:$VERSION" \
             "$IMAGE:$PREV"
 
-          echo "✅ Retagged $IMAGE:$PREV → $IMAGE:$VERSION"
+          echo "[OK] Retagged $IMAGE:$PREV → $IMAGE:$VERSION"
 
   # ─────────────────────────────────────────────────────────────────
   # Job 5: Wait for Docker images, generate OVA files, package, deploy
@@ -336,22 +319,22 @@ jobs:
               IMAGE=$(echo "$entry" | cut -d: -f1)
               TAG=$(echo "$entry" | cut -d: -f2)
               if curl -sf "https://hub.docker.com/v2/repositories/calltelemetry/${IMAGE}/tags/${TAG}/" > /dev/null 2>&1; then
-                echo "  ✅ calltelemetry/${IMAGE}:${TAG}"
+                echo "  [OK] calltelemetry/${IMAGE}:${TAG}"
               else
-                echo "  ⏳ calltelemetry/${IMAGE}:${TAG} — not ready"
+                echo "  [WAIT] calltelemetry/${IMAGE}:${TAG} — not ready"
                 ALL_READY=false
               fi
             done
 
             if [ "$ALL_READY" = true ]; then
               echo ""
-              echo "🎉 All Docker images are available!"
+              echo "All Docker images are available!"
               break
             fi
 
             if [ "$ATTEMPT" -ge "$MAX_ATTEMPTS" ]; then
               echo ""
-              echo "❌ Timeout: Not all images available after ${MAX_ATTEMPTS} minutes"
+              echo "[FAIL] Timeout: Not all images available after ${MAX_ATTEMPTS} minutes"
               exit 1
             fi
 
@@ -392,7 +375,7 @@ jobs:
           # Find the latest existing version file as template
           TEMPLATE=$(ls -1 ova/versions/*.yaml 2>/dev/null | sort -V | tail -1)
           if [ -z "$TEMPLATE" ]; then
-            echo "❌ No version template found in ova/versions/"
+            echo "[FAIL] No version template found in ova/versions/"
             exit 1
           fi
 
@@ -400,9 +383,9 @@ jobs:
           if [ ! -f "ova/versions/${VERSION}.yaml" ]; then
             TEMPLATE_VER=$(basename "$TEMPLATE" .yaml)
             sed "s/${TEMPLATE_VER}/${VERSION}/g" "$TEMPLATE" > "ova/versions/${VERSION}.yaml"
-            echo "✅ Generated ova/versions/${VERSION}.yaml from ${TEMPLATE_VER}"
+            echo "[OK] Generated ova/versions/${VERSION}.yaml from ${TEMPLATE_VER}"
           else
-            echo "✅ ova/versions/${VERSION}.yaml already exists"
+            echo "[OK] ova/versions/${VERSION}.yaml already exists"
           fi
 
           # Generate .env (version environment variables)
@@ -410,7 +393,7 @@ jobs:
           if [ -n "$TEMPLATE_ENV" ] && [ ! -f "ova/versions/${VERSION}.env" ]; then
             TEMPLATE_VER=$(basename "$TEMPLATE_ENV" .env)
             sed "s/${TEMPLATE_VER}/${VERSION}/g" "$TEMPLATE_ENV" > "ova/versions/${VERSION}.env"
-            echo "✅ Generated ova/versions/${VERSION}.env"
+            echo "[OK] Generated ova/versions/${VERSION}.env"
           fi
 
           # Commit and push
@@ -423,7 +406,7 @@ jobs:
             git commit -m "chore: auto-generate version files for ${VERSION}"
             git pull --rebase origin master || git pull --rebase origin main || true
             git push
-            echo "✅ Version files pushed"
+            echo "[OK] Version files pushed"
           fi
 
       - name: Upload version files to release
@@ -439,7 +422,7 @@ jobs:
               gh release upload "$VERSION" "$FILE" \
                 --repo calltelemetry/calltelemetry \
                 --clobber
-              echo "✅ Uploaded ${FILE} to release"
+              echo "[OK] Uploaded ${FILE} to release"
             fi
           done
 
@@ -450,7 +433,7 @@ jobs:
           gh workflow run "Package Release Bundle" \
             --repo calltelemetry/calltelemetry \
             -f version=${{ inputs.version }}
-          echo "✅ Package Release Bundle dispatched"
+          echo "[OK] Package Release Bundle dispatched"
 
       - name: Dispatch Notify OVA Build
         env:
@@ -459,7 +442,7 @@ jobs:
           gh workflow run "Notify OVA Build" \
             --repo calltelemetry/calltelemetry \
             -f version=${{ inputs.version }}
-          echo "✅ Appliance build dispatched (OVA + QCOW2 conversion)"
+          echo "[OK] Appliance build dispatched (OVA + QCOW2 conversion)"
 
       - name: Publish release as prerelease (draft → prerelease)
         env:
@@ -472,5 +455,5 @@ jobs:
             --repo calltelemetry/calltelemetry \
             --draft=false \
             --prerelease
-          echo "✅ Release $VERSION published as prerelease"
+          echo "[OK] Release $VERSION published as prerelease"
           echo "   To promote: gh workflow run promote-release.yml -f version=$VERSION -f channel=latest"
