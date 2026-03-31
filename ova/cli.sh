@@ -341,7 +341,7 @@ apply_postgres_profile() {
       env_set "DB_MEM_LIMIT" "3g"
       env_set "WEB_MEM_LIMIT" "2g"
       env_set "DB_POOL_SIZE" "30"
-      env_set "DB_BACKGROUND_POOL_SIZE" "10"
+      env_set "DB_BACKGROUND_POOL_SIZE" "8"
       env_set "DB_DISCOVERY_POOL_SIZE" "10"
       env_set "DB_OBAN_POOL_SIZE" "10"
       ;;
@@ -362,7 +362,7 @@ apply_postgres_profile() {
       env_set "DB_MEM_LIMIT" "8g"
       env_set "WEB_MEM_LIMIT" "4g"
       env_set "DB_POOL_SIZE" "45"
-      env_set "DB_BACKGROUND_POOL_SIZE" "18"
+      env_set "DB_BACKGROUND_POOL_SIZE" "14"
       env_set "DB_DISCOVERY_POOL_SIZE" "18"
       env_set "DB_OBAN_POOL_SIZE" "14"
       ;;
@@ -383,7 +383,7 @@ apply_postgres_profile() {
       env_set "DB_MEM_LIMIT" "20g"
       env_set "WEB_MEM_LIMIT" "6g"
       env_set "DB_POOL_SIZE" "60"
-      env_set "DB_BACKGROUND_POOL_SIZE" "25"
+      env_set "DB_BACKGROUND_POOL_SIZE" "19"
       env_set "DB_DISCOVERY_POOL_SIZE" "25"
       env_set "DB_OBAN_POOL_SIZE" "20"
       ;;
