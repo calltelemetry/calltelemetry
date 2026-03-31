@@ -292,7 +292,7 @@ jobs:
           echo "♻️ Retagging $IMAGE:$PREV → $IMAGE:$VERSION"
 
           # Login to Docker Hub
-          echo "${{ secrets.DOCKER_TOKEN }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+          echo "${{ secrets.DOCKERHUB_TOKEN || secrets.DOCKER_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME || secrets.DOCKER_USERNAME }}" --password-stdin
 
           # Set up buildx for imagetools
           docker buildx create --use --name retagger 2>/dev/null || true
