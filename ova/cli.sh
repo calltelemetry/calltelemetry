@@ -3104,7 +3104,9 @@ wait_for_services() {
 
       # Count total pending from "[Release]   - VERSION filename" lines
       local log_pending_count
-      log_pending_count=$(printf '%s\n' "$log_tail" | grep -c '\[Release\]   - [0-9]' 2>/dev/null || echo "0")
+      log_pending_count=$(printf '%s\n' "$log_tail" | grep -c '\[Release\]   - [0-9]' 2>/dev/null | head -1 || echo "0")
+      log_pending_count="${log_pending_count//[^0-9]/}"
+      log_pending_count="${log_pending_count:-0}"
       if [ "$log_pending_count" -gt 0 ] && [ -n "$applied_count" ] && [[ "$applied_count" =~ ^[0-9]+$ ]]; then
         # total = currently applied + originally pending (some may have run since boot)
         # But since applied grows as migrations run, total = applied_at_start + pending_at_start
@@ -4508,9 +4510,6 @@ migration_run() {
   if [ $? -eq 0 ]; then
     echo ""
     echo "[OK] Migration run completed successfully"
-    echo ""
-    # Run partition drain after migrations
-    migration_drain
   else
     echo ""
     echo "[FAIL] Migration run failed"
