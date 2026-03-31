@@ -396,7 +396,7 @@
       },
       "targets": [
         {
-          "expr": "max by (upstream) (caddy_reverse_proxy_upstreams_healthy{server=~\"$server\"})",
+          "expr": "max by (upstream) (caddy_reverse_proxy_upstreams_healthy)",
           "legendFormat": "{{upstream}}",
           "refId": "A"
         }
