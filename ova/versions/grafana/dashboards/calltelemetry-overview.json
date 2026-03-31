@@ -73,7 +73,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(ecto_query_duration_microseconds_bucket[5m])) by (le)) / 1e6",
+          "expr": "histogram_quantile(0.95, sum(rate(ct_prom_ex_ecto_repo_query_execution_time_milliseconds_bucket[5m])) by (le)) / 1000",
           "legendFormat": "p95",
           "refId": "A"
         }
@@ -128,7 +128,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(ecto_queries_total[5m]))",
+          "expr": "sum(rate(ct_prom_ex_ecto_repo_query_execution_time_milliseconds_count[5m]))",
           "legendFormat": "QPS",
           "refId": "A"
         }
@@ -295,7 +295,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_ms_bucket{service=\"web\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(ct_prom_ex_phoenix_http_request_duration_milliseconds_bucket[5m])) by (le))",
           "legendFormat": "p95",
           "refId": "A"
         }
@@ -316,7 +316,7 @@
           "custom": {
             "axisCenteredZero": false,
             "axisColorMode": "text",
-            "axisLabel": "Elapsed (ms)",
+            "axisLabel": "Duration (ms)",
             "axisPlacement": "auto",
             "barAlignment": 0,
             "drawStyle": "line",
@@ -378,17 +378,17 @@
       },
       "targets": [
         {
-          "expr": "(rate(remote_control_poller_elapsed_milliseconds_sum[5m]) / rate(remote_control_poller_elapsed_milliseconds_count[5m]))",
-          "legendFormat": "Avg Elapsed",
+          "expr": "histogram_quantile(0.95, sum(rate(ct_prom_ex_oban_job_processing_duration_milliseconds_bucket[5m])) by (le))",
+          "legendFormat": "p95 Duration",
           "refId": "A"
         },
         {
-          "expr": "max(remote_control_poller_watchers)",
-          "legendFormat": "Watchers",
+          "expr": "sum(ct_prom_ex_oban_queue_length_count{state=\"executing\"})",
+          "legendFormat": "Executing",
           "refId": "B"
         }
       ],
-      "title": "Remote Control Poll Interval",
+      "title": "Oban Job Processing",
       "type": "timeseries"
     },
     {
@@ -456,13 +456,13 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(ris_query_success_total[5m]))",
-          "legendFormat": "Success",
+          "expr": "sum(rate(ris_query_duration_milliseconds_count[5m]))",
+          "legendFormat": "RIS Queries",
           "refId": "A"
         },
         {
-          "expr": "sum(rate(ris_query_failure_total[5m]))",
-          "legendFormat": "Failure",
+          "expr": "sum(rate(ris_phone_scrape_count_total[5m]))",
+          "legendFormat": "Phone Scrapes",
           "refId": "B"
         }
       ],
