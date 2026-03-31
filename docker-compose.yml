@@ -105,10 +105,11 @@ services:
       - ./postgres-data:/bitnami/postgresql
     networks:
       - ct
+    mem_limit: ${DB_MEM_LIMIT:-4g}
     deploy:
       resources:
         limits:
-          memory: ${DB_MEM_LIMIT:-2g}
+          memory: ${DB_MEM_LIMIT:-4g}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-calltelemetry} -d $${POSTGRES_DB:-calltelemetry_prod}"]
       interval: 30s
