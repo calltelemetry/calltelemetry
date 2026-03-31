@@ -2871,6 +2871,30 @@ update() {
       echo "[OK] Docker memory limit applied (90% of RAM)"
     fi
 
+    # One-time partition drain migration (0.8.6-rc166+)
+    # Drains legacy tables and default partition overflow synchronously.
+    # Sentinel file prevents re-running on subsequent upgrades.
+    PARTITION_DRAIN_SENTINEL="/opt/calltelemetry/.partition-drain-complete"
+    if [ ! -f "$PARTITION_DRAIN_SENTINEL" ] && [ "$(printf '%s\n' "0.8.6-rc166" "$version" | sort -V | head -n1)" = "0.8.6-rc166" ]; then
+      if [ $services_ok -eq 0 ]; then
+        echo ""
+        echo "=== One-Time Partition Data Migration (0.8.6) ==="
+        echo "Migrating historical data into partitioned tables."
+        echo "This runs once and may take 10-60 minutes for large databases."
+        echo "Progress will be displayed live below."
+        echo ""
+        if migration_drain; then
+          touch "$PARTITION_DRAIN_SENTINEL"
+          echo "[OK] Partition migration complete (will not run again)"
+        else
+          echo "[WARN] Partition drain did not complete. You can retry with: cli.sh migrate drain"
+          echo "       The drain is safe to re-run (idempotent)."
+        fi
+      else
+        echo "[WARN] Skipping partition drain — services not fully ready. Run manually: cli.sh migrate drain"
+      fi
+    fi
+
     if [ $services_ok -eq 0 ]; then
       echo "[OK] Update complete! All services are running and ready."
     else
