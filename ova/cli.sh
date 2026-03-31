@@ -2871,25 +2871,12 @@ update() {
       echo "[OK] Docker memory limit applied (90% of RAM)"
     fi
 
-    # One-time partition drain migration (0.8.6-rc166+)
-    # Drains legacy tables and default partition overflow synchronously.
-    # Uses eval (not rpc) — works even when app health checks haven't passed yet.
-    # Tracked in ~/.ct/migrations.json (same format as ct-cli) so ct-cli
-    # won't re-run it when it later adds 014_partition_drain.
+    # Mark partition drain as complete for ct-cli compatibility.
+    # The actual drain runs automatically in onprem-start.sh (container entrypoint)
+    # BEFORE the app starts — zero lock contention. It's a no-op if nothing to drain.
     if ! ct_migration_done "014_partition_drain" && [ "$(printf '%s\n' "0.8.6-rc166" "$version" | sort -V | head -n1)" = "0.8.6-rc166" ]; then
-      echo ""
-      echo "=== One-Time Partition Data Migration (0.8.6) ==="
-      echo "Migrating historical data into partitioned tables."
-      echo "This runs once and may take 10-60 minutes for large databases."
-      echo "Progress will be displayed live below."
-      echo ""
-      if migration_drain; then
-        ct_migration_mark "014_partition_drain" "applied"
-        echo "[OK] Partition migration complete (will not run again)"
-      else
-        echo "[WARN] Partition drain did not complete. You can retry with: cli.sh migrate drain"
-        echo "       The drain is safe to re-run (idempotent)."
-      fi
+      ct_migration_mark "014_partition_drain" "applied"
+      echo "[OK] Partition data migration handled by container startup (check docker logs for progress)"
     fi
 
     if [ $services_ok -eq 0 ]; then
@@ -4569,31 +4556,37 @@ with open(path, 'w') as f:
 migration_drain() {
   echo "=== Partition Data Migration ==="
   echo "Checking for legacy tables and default partition overflow..."
-  echo "This may take a while for large tables. Progress will be shown live."
   echo ""
-
-  # Check if web container is running (container must exist, app doesn't need to be healthy)
-  web_container=$($DOCKER_COMPOSE_CMD ps -q web 2>/dev/null)
-  if [ -z "$web_container" ]; then
-    echo "Error: Web container not found or not running."
-    return 1
-  fi
+  echo "The application will be stopped during this operation to avoid"
+  echo "lock contention. It will be restarted automatically when complete."
+  echo ""
 
   release_bin=$(get_release_binary)
 
-  # Use eval (not rpc) — starts its own BEAM with just the Repo.
-  # This works even when the app isn't healthy (no web endpoint needed).
-  # Stream output live so user sees batch-by-batch progress.
-  $DOCKER_COMPOSE_CMD exec -T web "$release_bin" eval '
-    Cdrcisco.Release.drain_legacy_partitions()
-  ' 2>&1
+  # Stop the web container — drain needs exclusive DB access.
+  # CREATE TABLE PARTITION OF takes ACCESS EXCLUSIVE on the parent table;
+  # running this while the app serves traffic blocks all queries.
+  echo "Stopping application..."
+  $DOCKER_COMPOSE_CMD stop web 2>/dev/null
 
-  if [ $? -eq 0 ]; then
-    echo ""
-    echo "[OK] Partition drain completed"
+  # Start the container without the app (just the OS) so we can exec into it.
+  # Override the entrypoint to sleep instead of running the app.
+  echo "Starting drain container..."
+  $DOCKER_COMPOSE_CMD run --rm -T --no-deps --entrypoint "" web \
+    "$release_bin" eval 'Cdrcisco.Release.drain_legacy_partitions()' 2>&1
+
+  drain_exit=$?
+
+  # Restart the full stack (entrypoint runs migrations then starts app)
+  echo ""
+  echo "Restarting application..."
+  $DOCKER_COMPOSE_CMD up -d web 2>/dev/null
+
+  if [ $drain_exit -eq 0 ]; then
+    echo "[OK] Partition drain completed — application restarting"
   else
-    echo ""
-    echo "[FAIL] Partition drain failed"
+    echo "[FAIL] Partition drain failed (exit code $drain_exit)"
+    echo "       Application is restarting. Retry with: cli.sh migrate drain"
     return 1
   fi
 }
