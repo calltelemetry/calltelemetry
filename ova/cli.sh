@@ -3062,6 +3062,8 @@ wait_for_services() {
     # Parse "Applied migrations: X/Y (Z%)" - use awk for portability
     local applied_count=$(printf '%s\n' "$migration_raw" | awk '/Applied migrations:/ {split($3, a, "/"); print a[1]}')
     local total_count=$(printf '%s\n' "$migration_raw" | awk '/Applied migrations:/ {split($3, a, "/"); print a[2]}')
+    # Parse "Next pending: VERSION - NAME" for display
+    local next_migration=$(printf '%s\n' "$migration_raw" | awk '/Next pending:/ {sub(/^.*Next pending: /, ""); print; exit}')
 
     # If RPC fails or returns no data, fall back to SQL
     if [ -z "$pending_count" ] || [ "$pending_count" = "error" ] || [ -z "$applied_count" ]; then
@@ -3101,7 +3103,11 @@ wait_for_services() {
         migrations_complete=true
         break
       else
-        printf "\r  Migrations: %s/%s applied, %s pending...    " "$applied_count" "$total_count" "$pending_count"
+        if [ -n "$next_migration" ]; then
+          printf "\r  Migrations: %s/%s applied, %s pending — running: %s    " "$applied_count" "$total_count" "$pending_count" "$next_migration"
+        else
+          printf "\r  Migrations: %s/%s applied, %s pending...    " "$applied_count" "$total_count" "$pending_count"
+        fi
       fi
     elif [ "$pending_count" = "running" ]; then
       printf "\r  Migrations: %s applied, running... (latest: %s)    " "${applied_count:-?}" "${last_migration:-?}"
