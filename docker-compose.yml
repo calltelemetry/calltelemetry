@@ -199,6 +199,8 @@ services:
       - CT_MEDIA_ENDPOINT=${CT_MEDIA_ENDPOINT:-}
       - DOCKER_SOCKET=/var/run/docker.sock
       - NATS_URL=nats://nats:4222
+      - DB_POOL_SIZE=${DB_POOL_SIZE:-15}
+      - DB_CALL_CONTROL_POOL_SIZE=${DB_CALL_CONTROL_POOL_SIZE:-15}
       # OpenTelemetry (enable via: ct otel enable)
       - OTEL_ENABLED=${OTEL_ENABLED:-false}
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}
