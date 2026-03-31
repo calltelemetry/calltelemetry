@@ -79,3 +79,45 @@ scrape_configs:
     static_configs:
       - targets: ['nats-exporter:7777']
     scrape_interval: 30s
+
+  # OpenTelemetry Collector pipeline metrics
+  - job_name: otel-collector
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['otel-collector:8889']
+    scrape_interval: 30s
+
+  # Grafana server metrics
+  - job_name: grafana
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['grafana:3000']
+    scrape_interval: 30s
+
+  # AlertManager metrics (route-prefix=/alertmanager set in docker-compose)
+  - job_name: alertmanager
+    metrics_path: /alertmanager/metrics
+    static_configs:
+      - targets: ['alertmanager:9093']
+    scrape_interval: 30s
+
+  # Loki log aggregation metrics
+  - job_name: loki
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['loki:3100']
+    scrape_interval: 30s
+
+  # Grafana Tempo distributed tracing metrics
+  - job_name: tempo
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['tempo:3200']
+    scrape_interval: 30s
+
+  # Grafana Alloy log collector metrics
+  - job_name: alloy
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['alloy:12345']
+    scrape_interval: 30s
