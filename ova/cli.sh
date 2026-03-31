@@ -2882,10 +2882,8 @@ update() {
     if [ $services_ok -eq 0 ]; then
       echo "[OK] Update complete! All services are running and ready."
     else
-      echo "[WARN] Update complete, but some services may need attention."
-      echo "This is normal during major upgrades with SQL index rebuilds."
-      echo "Monitor progress with: $DOCKER_COMPOSE_CMD logs -f"
-      echo "Check CPU usage with: top (high postgresql CPU is normal during index rebuilds)"
+      echo "[WARN] Update applied, but startup checks failed (see errors above)."
+      echo "  Run 'cli.sh status' to check current state."
     fi
 
   else
@@ -3224,7 +3222,11 @@ wait_for_services() {
     return 0
   else
     echo "[FAIL] Startup failed — $phase_failures phase(s) had errors:$failed_phases"
-    echo "   Run 'cli.sh status' for details or check logs with: $DOCKER_COMPOSE_CMD logs -f"
+    echo ""
+    echo "  Troubleshoot:"
+    echo "    cli.sh status              Service health summary"
+    echo "    cli.sh logs web --tail 50  Recent web logs"
+    echo "    cli.sh logs db --tail 50   Recent database logs"
     return 1
   fi
 }
