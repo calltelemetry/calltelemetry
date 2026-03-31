@@ -3,6 +3,8 @@
 {
     # Bind admin API to all interfaces so Prometheus can scrape :2019/metrics
     admin 0.0.0.0:2019
+    # Enable HTTP request metrics (caddy_http_requests_total, latency histograms, etc.)
+    metrics
 }
 
 # HTTP: proxy CURRI/XCC/phone-portal paths to Phoenix, redirect everything else to HTTPS
