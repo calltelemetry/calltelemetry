@@ -2873,25 +2873,22 @@ update() {
 
     # One-time partition drain migration (0.8.6-rc166+)
     # Drains legacy tables and default partition overflow synchronously.
+    # Uses eval (not rpc) — works even when app health checks haven't passed yet.
     # Tracked in ~/.ct/migrations.json (same format as ct-cli) so ct-cli
     # won't re-run it when it later adds 014_partition_drain.
     if ! ct_migration_done "014_partition_drain" && [ "$(printf '%s\n' "0.8.6-rc166" "$version" | sort -V | head -n1)" = "0.8.6-rc166" ]; then
-      if [ $services_ok -eq 0 ]; then
-        echo ""
-        echo "=== One-Time Partition Data Migration (0.8.6) ==="
-        echo "Migrating historical data into partitioned tables."
-        echo "This runs once and may take 10-60 minutes for large databases."
-        echo "Progress will be displayed live below."
-        echo ""
-        if migration_drain; then
-          ct_migration_mark "014_partition_drain" "applied"
-          echo "[OK] Partition migration complete (will not run again)"
-        else
-          echo "[WARN] Partition drain did not complete. You can retry with: cli.sh migrate drain"
-          echo "       The drain is safe to re-run (idempotent)."
-        fi
+      echo ""
+      echo "=== One-Time Partition Data Migration (0.8.6) ==="
+      echo "Migrating historical data into partitioned tables."
+      echo "This runs once and may take 10-60 minutes for large databases."
+      echo "Progress will be displayed live below."
+      echo ""
+      if migration_drain; then
+        ct_migration_mark "014_partition_drain" "applied"
+        echo "[OK] Partition migration complete (will not run again)"
       else
-        echo "[WARN] Skipping partition drain — services not fully ready. Run manually: cli.sh migrate drain"
+        echo "[WARN] Partition drain did not complete. You can retry with: cli.sh migrate drain"
+        echo "       The drain is safe to re-run (idempotent)."
       fi
     fi
 
@@ -4575,7 +4572,7 @@ migration_drain() {
   echo "This may take a while for large tables. Progress will be shown live."
   echo ""
 
-  # Check if web container is running
+  # Check if web container is running (container must exist, app doesn't need to be healthy)
   web_container=$($DOCKER_COMPOSE_CMD ps -q web 2>/dev/null)
   if [ -z "$web_container" ]; then
     echo "Error: Web container not found or not running."
@@ -4584,18 +4581,11 @@ migration_drain() {
 
   release_bin=$(get_release_binary)
 
-  # Stream output live so user sees batch-by-batch progress
-  $DOCKER_COMPOSE_CMD exec -T web "$release_bin" rpc '
-    try do
-      alias Cdrcisco.DB.SynchronousPartitionDrainEngine
-      SynchronousPartitionDrainEngine.drain_all_legacy_tables()
-      SynchronousPartitionDrainEngine.drain_all_default_partitions()
-      IO.puts("[PartitionDrain] Complete.")
-    rescue
-      e ->
-        IO.puts("[PartitionDrain] ERROR: #{inspect(e)}")
-        System.halt(1)
-    end
+  # Use eval (not rpc) — starts its own BEAM with just the Repo.
+  # This works even when the app isn't healthy (no web endpoint needed).
+  # Stream output live so user sees batch-by-batch progress.
+  $DOCKER_COMPOSE_CMD exec -T web "$release_bin" eval '
+    Cdrcisco.Release.drain_legacy_partitions()
   ' 2>&1
 
   if [ $? -eq 0 ]; then
