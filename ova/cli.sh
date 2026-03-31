@@ -3073,14 +3073,44 @@ wait_for_services() {
       last_migration=$($DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -t -c \
         "SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1;" 2>/dev/null | tr -d ' ')
 
+      # Try to get the total expected migration count and current running migration from logs
+      local log_tail
+      log_tail=$($DOCKER_COMPOSE_CMD logs --tail 100 web 2>&1)
+
+      # Count total pending from "[Release]   - VERSION filename" lines
+      local log_pending_count
+      log_pending_count=$(printf '%s\n' "$log_tail" | grep -c '\[Release\]   - [0-9]' 2>/dev/null || echo "0")
+      if [ "$log_pending_count" -gt 0 ] && [ -n "$applied_count" ] && [[ "$applied_count" =~ ^[0-9]+$ ]]; then
+        # total = currently applied + originally pending (some may have run since boot)
+        # But since applied grows as migrations run, total = applied_at_start + pending_at_start
+        # Best estimate: pending list from logs is the original pending count at boot
+        total_count=$((applied_count + log_pending_count))
+        # Adjust: applied_count already includes migrations that ran since boot
+        # The log pending count was the original list, so total = (applied_count - already_run) + log_pending_count
+        # Simpler: total is stable — use applied_count as floor since it only grows
+        # If applied > total, we miscounted; just use applied
+        if [ "$total_count" -lt "$applied_count" ]; then
+          total_count="$applied_count"
+        fi
+      fi
+
+      # Extract the currently running migration filename from Ecto's "== Running VERSION Name" log
+      local running_migration
+      running_migration=$(printf '%s\n' "$log_tail" | grep '== Running' | tail -1 | sed 's/.*== Running [0-9]* //' | sed 's/\.change\/0.*//' 2>/dev/null || echo "")
+
+      # Also check the last "[Release]   - VERSION filename" entry for the pending list
+      if [ -z "$running_migration" ]; then
+        running_migration=$(printf '%s\n' "$log_tail" | grep '\[Release\]   - ' | tail -1 | sed 's/.*\[Release\]   - [0-9]* //' 2>/dev/null || echo "")
+      fi
+
       # Check logs for migration completion
-      if $DOCKER_COMPOSE_CMD logs --tail 50 web 2>&1 | grep -q "All migrations completed successfully"; then
+      if printf '%s\n' "$log_tail" | grep -q "All migrations completed successfully"; then
         migrations_complete=true
         pending_count=0
-        total_count="$applied_count"
+        total_count="${total_count:-$applied_count}"
       else
         # Check if app is still starting
-        if $DOCKER_COMPOSE_CMD logs --tail 20 web 2>&1 | grep -qE "Running migrations|Pending migrations"; then
+        if printf '%s\n' "$log_tail" | grep -qE "Running migrations|Pending migrations"; then
           pending_count="running"
         else
           pending_count="checking"
@@ -3110,9 +3140,17 @@ wait_for_services() {
         fi
       fi
     elif [ "$pending_count" = "running" ]; then
-      printf "\r  Migrations: %s applied, running... (latest: %s)    " "${applied_count:-?}" "${last_migration:-?}"
+      local display_total="${total_count:-?}"
+      local display_name=""
+      if [ -n "$running_migration" ]; then
+        display_name=" — running: ${running_migration}"
+      elif [ -n "$last_migration" ]; then
+        display_name=" — latest applied: ${last_migration}"
+      fi
+      printf "\r  Migrations: %s/%s applied, running...%s    " "${applied_count:-?}" "$display_total" "$display_name"
     else
-      printf "\r  Migrations: %s applied, waiting for status...    " "${applied_count:-?}"
+      local display_total="${total_count:-?}"
+      printf "\r  Migrations: %s/%s applied, waiting for status...    " "${applied_count:-?}" "$display_total"
     fi
 
     sleep $poll_interval
