@@ -523,10 +523,10 @@ jtapi_cmd() {
       # Clean up legacy state file if present
       rm -f "$JTAPI_STATE_FILE"
       fix_systemd_compose_files
-      echo "✅ JTAPI enabled — restarting services..."
+      echo "[OK] JTAPI enabled — restarting services..."
       echo ""
       if ! restart_service "jtapi enable"; then
-        echo "❌ Service restart failed. JTAPI config was saved but services may not be running."
+        echo "[FAIL] Service restart failed. JTAPI config was saved but services may not be running."
         echo "   Retry with: systemctl restart docker-compose-app.service"
         return 1
       fi
@@ -558,9 +558,9 @@ jtapi_cmd() {
       # Clean up legacy state file if present
       rm -f "$JTAPI_STATE_FILE"
       fix_systemd_compose_files
-      echo "✅ JTAPI disabled — restarting services..."
+      echo "[OK] JTAPI disabled — restarting services..."
       if ! restart_service "jtapi disable"; then
-        echo "❌ Service restart failed. JTAPI config was saved but services may not be running."
+        echo "[FAIL] Service restart failed. JTAPI config was saved but services may not be running."
         echo "   Retry with: systemctl restart docker-compose-app.service"
         return 1
       fi
@@ -583,7 +583,7 @@ jtapi_cmd() {
       if is_jtapi_enabled; then
         echo "✓ JTAPI enabled (COMPOSE_PROFILES includes jtapi)"
       else
-        echo "❌ JTAPI disabled (COMPOSE_PROFILES does not include jtapi)"
+        echo "[FAIL] JTAPI disabled (COMPOSE_PROFILES does not include jtapi)"
       fi
       echo "  COMPOSE_PROFILES=$(env_get COMPOSE_PROFILES)"
       echo "  Compose files: $(get_compose_files)"
@@ -602,9 +602,9 @@ jtapi_cmd() {
 
         if [ -z "$cid" ]; then
           if [ "$svc" = "jtapi-jar-init" ]; then
-            echo "⚠️ $svc: not found (may have been cleaned up after successful run)"
+            echo "[WARN] $svc: not found (may have been cleaned up after successful run)"
           else
-            echo "❌ $svc: not found (not deployed or not in compose files)"
+            echo "[FAIL] $svc: not found (not deployed or not in compose files)"
           fi
         else
           local cstate
@@ -617,14 +617,14 @@ jtapi_cmd() {
             if [ "$cstate" = "exited" ] && [ "$exit_code" = "0" ]; then
               echo "✓ $svc: completed successfully (exit 0)"
             elif [ "$cstate" = "exited" ]; then
-              echo "❌ $svc: failed (exit $exit_code)"
+              echo "[FAIL] $svc: failed (exit $exit_code)"
             else
-              echo "⚠️ $svc: $cstate"
+              echo "[WARN] $svc: $cstate"
             fi
           elif [ "$cstate" = "running" ]; then
             echo "✓ $svc: running"
           else
-            echo "❌ $svc: $cstate (exit $exit_code)"
+            echo "[FAIL] $svc: $cstate (exit $exit_code)"
           fi
         fi
       done
@@ -661,7 +661,7 @@ jtapi_cmd() {
       fi
 
       echo "  NATS KV buckets:"
-      docker run --rm --network "$CT_NETWORK" natsio/nats-box:0.14.5 nats -s nats://nats:4222 kv ls 2>&1 | sed 's/^/    /' || echo "    ❌ Could not list KV buckets"
+      docker run --rm --network "$CT_NETWORK" natsio/nats-box:0.14.5 nats -s nats://nats:4222 kv ls 2>&1 | sed 's/^/    /' || echo "    [FAIL] Could not list KV buckets"
       echo ""
 
       echo "  NATS ObjectStore (jtapi-jars-1):"
@@ -670,7 +670,7 @@ jtapi_cmd() {
       if echo "$objstore_result" | grep -q "jtapi.jar"; then
         echo "    ✓ jtapi.jar found in NATS ObjectStore"
       elif echo "$objstore_result" | grep -qi "not found\|no such\|error"; then
-        echo "    ⚠️ jtapi-jars-1 bucket: $objstore_result"
+        echo "    [WARN] jtapi-jars-1 bucket: $objstore_result"
       else
         echo "    $objstore_result" | sed 's/^/    /'
       fi
@@ -694,12 +694,12 @@ jtapi_cmd() {
         echo "✓ JAR found in Docker volume"
         echo "    $jar_vol_check"
       else
-        echo "❌ JAR not found in Docker volume"
+        echo "[FAIL] JAR not found in Docker volume"
         echo "    $jar_vol_check"
       fi
       echo ""
       echo "  NATS ObjectStore JAR info:"
-      docker run --rm --network "$CT_NETWORK" natsio/nats-box:0.14.5 nats -s nats://nats:4222 object info jtapi-jars-1 jtapi.jar 2>&1 | sed 's/^/    /' || echo "    ❌ Could not query NATS ObjectStore"
+      docker run --rm --network "$CT_NETWORK" natsio/nats-box:0.14.5 nats -s nats://nats:4222 object info jtapi-jars-1 jtapi.jar 2>&1 | sed 's/^/    /' || echo "    [FAIL] Could not query NATS ObjectStore"
       echo ""
 
       # --- 5. Sidecar Health ---
@@ -709,7 +709,7 @@ jtapi_cmd() {
       if echo "$sidecar_health" | grep -qi '"status":"UP"\|"status":"up"'; then
         echo "✓ Sidecar health: $sidecar_health"
       else
-        echo "⚠️ Sidecar health: $sidecar_health"
+        echo "[WARN] Sidecar health: $sidecar_health"
       fi
       echo ""
       echo "  Last 20 lines of sidecar logs:"
@@ -723,11 +723,11 @@ jtapi_cmd() {
       if [ $? -eq 0 ]; then
         echo "✓ SeaweedFS is healthy"
       else
-        echo "❌ SeaweedFS health check failed: $seaweedfs_health"
+        echo "[FAIL] SeaweedFS health check failed: $seaweedfs_health"
       fi
       echo ""
       echo "  SeaweedFS buckets:"
-      $DOCKER_COMPOSE_CMD $(get_compose_files) exec -T seaweedfs curl -sf http://localhost:9333/cluster/healthz 2>&1 | sed 's/^/    /' || echo "    ⚠️ Could not check SeaweedFS cluster status"
+      $DOCKER_COMPOSE_CMD $(get_compose_files) exec -T seaweedfs curl -sf http://localhost:9333/cluster/healthz 2>&1 | sed 's/^/    /' || echo "    [WARN] Could not check SeaweedFS cluster status"
       echo ""
 
       # --- 7. ct-media Health ---
@@ -737,7 +737,7 @@ jtapi_cmd() {
       if [ "$media_state" = "running" ]; then
         echo "✓ ct-media is running"
       else
-        echo "❌ ct-media state: ${media_state:-not found}"
+        echo "[FAIL] ct-media state: ${media_state:-not found}"
       fi
       echo ""
       echo "  Last 10 lines of ct-media logs:"
@@ -747,7 +747,7 @@ jtapi_cmd() {
       # --- 8. Web Service JTAPI Config ---
       echo "--- Web Service JTAPI Config ---"
       echo "  Environment variables:"
-      $DOCKER_COMPOSE_CMD $(get_compose_files) exec -T web env 2>/dev/null | grep -E 'JTAPI|S3_|CT_MEDIA|NATS_URL' | sort | sed 's/^/    /' || echo "    ❌ Could not read web container env"
+      $DOCKER_COMPOSE_CMD $(get_compose_files) exec -T web env 2>/dev/null | grep -E 'JTAPI|S3_|CT_MEDIA|NATS_URL' | sort | sed 's/^/    /' || echo "    [FAIL] Could not read web container env"
       echo ""
 
       # --- 9. CallManager CTI Credentials Check ---
@@ -773,7 +773,7 @@ jtapi_cmd() {
             IO.puts("  Status: #{server.status || "unknown"}")
           end)
         end
-      ' 2>&1 | sed 's/^/  /' || echo "  ❌ Could not query JTAPI server configuration (web container may not be running)"
+      ' 2>&1 | sed 's/^/  /' || echo "  [FAIL] Could not query JTAPI server configuration (web container may not be running)"
       echo ""
 
       # --- 10. JTAPI Runtime Diagnostics (from web logs) ---
@@ -966,7 +966,7 @@ ensure_grafana_permissions() {
     elif sudo chmod -R a+rX "$dir" 2>/dev/null; then
       echo "Grafana directory permissions relaxed for $dir (world-readable fallback)."
     else
-      echo "⚠️  Unable to adjust permissions for $dir automatically."
+      echo "[WARN] Unable to adjust permissions for $dir automatically."
       echo "   Please run: sudo chown -R 472:472 '$dir' && sudo chmod -R u+rwX,go+rX '$dir'"
     fi
   done
@@ -1203,12 +1203,12 @@ restart_service() {
 
   if [ "$restart_exit" -eq 0 ]; then
     echo ""
-    echo "✅ Docker Compose service restarted successfully."
+    echo "[OK] Docker Compose service restarted successfully."
     return 0
   fi
 
   # First attempt failed — capture diagnostics
-  echo "⚠️  Service restart failed (exit code: $restart_exit). Gathering diagnostics..."
+  echo "[WARN] Service restart failed (exit code: $restart_exit). Gathering diagnostics..."
   echo ""
 
   # Show recent journal entries for context
@@ -1219,7 +1219,7 @@ restart_service() {
 
   # Check if the service file itself is valid
   if ! systemctl cat "$service" >/dev/null 2>&1; then
-    echo "❌ Service unit file is invalid or missing."
+    echo "[FAIL] Service unit file is invalid or missing."
     echo "   Check: /etc/systemd/system/$service"
     return 1
   fi
@@ -1229,13 +1229,13 @@ restart_service() {
   systemctl daemon-reload 2>/dev/null
 
   if systemctl restart "$service" 2>/dev/null; then
-    echo "✅ Service restarted on retry."
+    echo "[OK] Service restarted on retry."
     return 0
   fi
 
   # Second attempt also failed
   echo ""
-  echo "❌ Service restart failed after retry."
+  echo "[FAIL] Service restart failed after retry."
   echo "   Status: $(systemctl is-active "$service" 2>/dev/null || echo 'unknown')"
   echo "   Debug:  journalctl -u $service --no-pager -n 50"
   if [ -n "$context" ]; then
@@ -1601,7 +1601,7 @@ network_cmd() {
 
     fix)
       nm_heal_connections
-      echo "✅ NM connection profiles checked."
+      echo "[OK] NM connection profiles checked."
       ;;
 
     *)
@@ -1853,10 +1853,10 @@ check_image_availability() {
   done
 
   if [ "$all_available" = true ]; then
-    echo "✅ All images are available"
+    echo "[OK] All images are available"
     return 0
   else
-    echo "❌ Some images are not available:"
+    echo "[FAIL] Some images are not available:"
     echo -e "$unavailable_images"
     return 1
   fi
@@ -1876,7 +1876,7 @@ download_bundle() {
   if command -v wget >/dev/null 2>&1; then
     if ! wget -q --show-progress "$bundle_url" -O "$bundle_name" 2>&1; then
       echo ""
-      echo "❌ Failed to download bundle from GCS"
+      echo "[FAIL] Failed to download bundle from GCS"
       echo "URL: $bundle_url"
       echo ""
       echo "Possible causes:"
@@ -1890,7 +1890,7 @@ download_bundle() {
     fi
   elif command -v curl >/dev/null 2>&1; then
     if ! curl -fL --progress-bar "$bundle_url" -o "$bundle_name"; then
-      echo "❌ Failed to download bundle from GCS"
+      echo "[FAIL] Failed to download bundle from GCS"
       rm -f "$bundle_name"
       return 1
     fi
@@ -1899,14 +1899,14 @@ download_bundle() {
     return 1
   fi
 
-  echo "✅ Bundle downloaded"
+  echo "[OK] Bundle downloaded"
 
   # Extract bundle
   echo "Extracting config files..."
   rm -rf "$extract_dir"
   mkdir -p "$extract_dir"
   if ! tar -xzf "$bundle_name" -C "$extract_dir" --strip-components=1; then
-    echo "❌ Failed to extract bundle"
+    echo "[FAIL] Failed to extract bundle"
     rm -f "$bundle_name"
     rm -rf "$extract_dir"
     return 1
@@ -1918,9 +1918,9 @@ download_bundle() {
   # docker-compose.yml -> temp file for validation
   if [ -f "$extract_dir/docker-compose.yml" ]; then
     mv "$extract_dir/docker-compose.yml" "$TEMP_FILE"
-    echo "  ✅ docker-compose.yml"
+    echo "  [OK] docker-compose.yml"
   else
-    echo "❌ Bundle missing docker-compose.yml"
+    echo "[FAIL] Bundle missing docker-compose.yml"
     rm -f "$bundle_name"
     rm -rf "$extract_dir"
     return 1
@@ -1937,17 +1937,17 @@ download_bundle() {
           env_set "$key" "$val"
         fi
       done
-      echo "  ✅ .env (version pins merged)"
+      echo "  [OK] .env (version pins merged)"
     else
       cp "$extract_dir/.env" "$ENV_FILE"
-      echo "  ✅ .env (created from bundle)"
+      echo "  [OK] .env (created from bundle)"
     fi
   fi
 
   # .env.example -> always overwrite template
   if [ -f "$extract_dir/.env.example" ]; then
     cp "$extract_dir/.env.example" ./.env.example
-    echo "  ✅ .env.example"
+    echo "  [OK] .env.example"
   fi
 
   # cli.sh -> update current script
@@ -1955,9 +1955,9 @@ download_bundle() {
     if ! diff -q "$extract_dir/cli.sh" "$CURRENT_SCRIPT_PATH" >/dev/null 2>&1; then
       cp "$extract_dir/cli.sh" "$CURRENT_SCRIPT_PATH"
       chmod +x "$CURRENT_SCRIPT_PATH"
-      echo "  ✅ cli.sh (updated)"
+      echo "  [OK] cli.sh (updated)"
     else
-      echo "  ✅ cli.sh (no changes)"
+      echo "  [OK] cli.sh (no changes)"
     fi
   fi
 
@@ -1966,9 +1966,9 @@ download_bundle() {
     mkdir -p prometheus
     rm -f prometheus/prometheus.yml 2>/dev/null
     if mv -f "$extract_dir/prometheus/prometheus.yml" prometheus/; then
-      echo "  ✅ prometheus/prometheus.yml"
+      echo "  [OK] prometheus/prometheus.yml"
     else
-      echo "  ⚠️  prometheus/prometheus.yml (failed to move — check permissions)"
+      echo "  [WARN] prometheus/prometheus.yml (failed to move — check permissions)"
     fi
   fi
 
@@ -1979,9 +1979,9 @@ download_bundle() {
     [ -d "alertmanager/alertmanager.yml" ] && rm -rf "alertmanager/alertmanager.yml"
     rm -f alertmanager/alertmanager.yml 2>/dev/null
     if mv -f "$extract_dir/alertmanager/alertmanager.yml" alertmanager/; then
-      echo "  ✅ alertmanager/alertmanager.yml"
+      echo "  [OK] alertmanager/alertmanager.yml"
     else
-      echo "  ⚠️  alertmanager/alertmanager.yml (failed to move — check permissions)"
+      echo "  [WARN] alertmanager/alertmanager.yml (failed to move — check permissions)"
     fi
   fi
 
@@ -1991,12 +1991,12 @@ download_bundle() {
 
     # Copy dashboards
     if [ -d "$extract_dir/grafana/dashboards" ]; then
-      cp -r "$extract_dir/grafana/dashboards/"* grafana/dashboards/ 2>/dev/null && echo "  ✅ grafana/dashboards"
+      cp -r "$extract_dir/grafana/dashboards/"* grafana/dashboards/ 2>/dev/null && echo "  [OK] grafana/dashboards"
     fi
 
     # Copy provisioning
     if [ -d "$extract_dir/grafana/provisioning" ]; then
-      cp -r "$extract_dir/grafana/provisioning/"* grafana/provisioning/ 2>/dev/null && echo "  ✅ grafana/provisioning"
+      cp -r "$extract_dir/grafana/provisioning/"* grafana/provisioning/ 2>/dev/null && echo "  [OK] grafana/provisioning"
     fi
 
     sanitize_grafana_assets grafana/dashboards grafana/provisioning
@@ -2006,9 +2006,9 @@ download_bundle() {
   if [ -f "$extract_dir/nats.conf" ]; then
     rm -f ./nats.conf 2>/dev/null
     if cp "$extract_dir/nats.conf" ./nats.conf; then
-      echo "  ✅ nats.conf"
+      echo "  [OK] nats.conf"
     else
-      echo "  ⚠️  nats.conf (failed to copy — check permissions)"
+      echo "  [WARN] nats.conf (failed to copy — check permissions)"
     fi
   fi
 
@@ -2018,13 +2018,13 @@ download_bundle() {
       if ! diff -q "$extract_dir/Caddyfile" "./Caddyfile" >/dev/null 2>&1; then
         rm -f ./Caddyfile 2>/dev/null
         cp "$extract_dir/Caddyfile" ./Caddyfile
-        echo "  ✅ Caddyfile (updated)"
+        echo "  [OK] Caddyfile (updated)"
       else
-        echo "  ✅ Caddyfile (no changes)"
+        echo "  [OK] Caddyfile (no changes)"
       fi
     else
       cp "$extract_dir/Caddyfile" ./Caddyfile
-      echo "  ✅ Caddyfile (installed)"
+      echo "  [OK] Caddyfile (installed)"
     fi
   fi
 
@@ -2032,9 +2032,9 @@ download_bundle() {
   if [ -f "$extract_dir/seaweedfs-s3.json" ]; then
     rm -rf ./seaweedfs-s3.json 2>/dev/null
     if cp "$extract_dir/seaweedfs-s3.json" ./seaweedfs-s3.json; then
-      echo "  ✅ seaweedfs-s3.json"
+      echo "  [OK] seaweedfs-s3.json"
     else
-      echo "  ⚠️  seaweedfs-s3.json (failed to copy — check permissions)"
+      echo "  [WARN] seaweedfs-s3.json (failed to copy — check permissions)"
     fi
   fi
 
@@ -2044,45 +2044,45 @@ download_bundle() {
     # Docker may have created config.yaml as a directory — remove it first
     if [ -d "./otel-collector/otel-collector-config.yaml" ]; then
       rm -rf "./otel-collector/otel-collector-config.yaml"
-      echo "  ✅ otel-collector-config.yaml (removed Docker-created directory)"
+      echo "  [OK] otel-collector-config.yaml (removed Docker-created directory)"
     fi
     if cp "$extract_dir/otel-collector/otel-collector-config.yaml" ./otel-collector/otel-collector-config.yaml; then
-      echo "  ✅ otel-collector-config.yaml"
+      echo "  [OK] otel-collector-config.yaml"
     else
-      echo "  ⚠️  otel-collector-config.yaml (failed to copy — check permissions)"
+      echo "  [WARN] otel-collector-config.yaml (failed to copy — check permissions)"
     fi
   fi
 
   # Tempo config
   if [ -f "$extract_dir/tempo/tempo.yaml" ]; then
     mkdir -p ./tempo
-    [ -d "./tempo/tempo.yaml" ] && rm -rf "./tempo/tempo.yaml" && echo "  ✅ tempo/tempo.yaml (removed Docker-created directory)"
+    [ -d "./tempo/tempo.yaml" ] && rm -rf "./tempo/tempo.yaml" && echo "  [OK] tempo/tempo.yaml (removed Docker-created directory)"
     if cp "$extract_dir/tempo/tempo.yaml" ./tempo/tempo.yaml; then
-      echo "  ✅ tempo/tempo.yaml"
+      echo "  [OK] tempo/tempo.yaml"
     else
-      echo "  ⚠️  tempo/tempo.yaml (failed to copy — check permissions)"
+      echo "  [WARN] tempo/tempo.yaml (failed to copy — check permissions)"
     fi
   fi
 
   # Loki config
   if [ -f "$extract_dir/loki/loki.yaml" ]; then
     mkdir -p ./loki
-    [ -d "./loki/loki.yaml" ] && rm -rf "./loki/loki.yaml" && echo "  ✅ loki/loki.yaml (removed Docker-created directory)"
+    [ -d "./loki/loki.yaml" ] && rm -rf "./loki/loki.yaml" && echo "  [OK] loki/loki.yaml (removed Docker-created directory)"
     if cp "$extract_dir/loki/loki.yaml" ./loki/loki.yaml; then
-      echo "  ✅ loki/loki.yaml"
+      echo "  [OK] loki/loki.yaml"
     else
-      echo "  ⚠️  loki/loki.yaml (failed to copy — check permissions)"
+      echo "  [WARN] loki/loki.yaml (failed to copy — check permissions)"
     fi
   fi
 
   # Alloy config
   if [ -f "$extract_dir/alloy/config.alloy" ]; then
     mkdir -p ./alloy
-    [ -d "./alloy/config.alloy" ] && rm -rf "./alloy/config.alloy" && echo "  ✅ alloy/config.alloy (removed Docker-created directory)"
+    [ -d "./alloy/config.alloy" ] && rm -rf "./alloy/config.alloy" && echo "  [OK] alloy/config.alloy (removed Docker-created directory)"
     if cp "$extract_dir/alloy/config.alloy" ./alloy/config.alloy; then
-      echo "  ✅ alloy/config.alloy"
+      echo "  [OK] alloy/config.alloy"
     else
-      echo "  ⚠️  alloy/config.alloy (failed to copy — check permissions)"
+      echo "  [WARN] alloy/config.alloy (failed to copy — check permissions)"
     fi
   fi
 
@@ -2090,7 +2090,7 @@ download_bundle() {
   rm -f "$bundle_name"
   rm -rf "$extract_dir"
 
-  echo "✅ All config files extracted"
+  echo "[OK] All config files extracted"
   return 0
 }
 
@@ -2130,7 +2130,7 @@ download_prometheus_config() {
     mv "$tmp_file" "$dest_path"
     echo "Prometheus configuration downloaded to $dest_path."
   else
-    echo "⚠️  Failed to download Prometheus configuration from $PROMETHEUS_CONFIG_URL"
+    echo "[WARN] Failed to download Prometheus configuration from $PROMETHEUS_CONFIG_URL"
     rm -f "$tmp_file"
     return 1
   fi
@@ -2189,7 +2189,7 @@ download_grafana_assets() {
       mv "$tmp_file" "$dest_path"
       echo "Grafana asset synced: $dest_path"
     else
-      echo "⚠️  Failed to download Grafana asset: ${asset}"
+      echo "[WARN] Failed to download Grafana asset: ${asset}"
       rm -f "$tmp_file"
     fi
   done
@@ -2337,7 +2337,7 @@ ipv6_toggle() {
       echo ""
       fix_systemd_service_if_needed
       if ! restart_service "ipv6 enable"; then
-        echo "❌ Service restart failed after IPv6 enable."
+        echo "[FAIL] Service restart failed after IPv6 enable."
         return 1
       fi
       echo ""
@@ -2349,7 +2349,7 @@ ipv6_toggle() {
       echo ""
       fix_systemd_service_if_needed
       if ! restart_service "ipv6 disable"; then
-        echo "❌ Service restart failed after IPv6 disable."
+        echo "[FAIL] Service restart failed after IPv6 disable."
         return 1
       fi
       echo ""
@@ -2447,7 +2447,7 @@ update() {
     echo "Fetching latest stable version..."
     version=$(curl -sfL "${GCS_BASE_URL}/latest-stable.txt" 2>/dev/null)
     if [ -z "$version" ]; then
-      echo "❌ Failed to fetch latest stable version"
+      echo "[FAIL] Failed to fetch latest stable version"
       echo ""
       echo "No stable release available yet."
       echo "Use 'cli.sh update --latest' for pre-release, or specify a version manually."
@@ -2458,7 +2458,7 @@ update() {
     echo "Fetching latest version (including pre-releases)..."
     version=$(curl -sfL "${GCS_BASE_URL}/latest.txt" 2>/dev/null)
     if [ -z "$version" ]; then
-      echo "❌ Failed to fetch latest version"
+      echo "[FAIL] Failed to fetch latest version"
       echo ""
       echo "Specify a version manually: cli.sh update <version>"
       return 1
@@ -2478,17 +2478,17 @@ update() {
       echo "Checking RAM requirements for version $version..."
       if ! check_ram; then
         echo ""
-        echo "❌ ERROR: Insufficient RAM for version 0.8.4 and higher"
+        echo "[FAIL] ERROR: Insufficient RAM for version 0.8.4 and higher"
         echo "   Version 0.8.4+ requires 8GB RAM (minimum 7GB detected)"
         echo ""
         echo "To proceed anyway, use: $0 update $version --force-upgrade"
         echo "WARNING: Proceeding with insufficient RAM may cause performance issues or failures"
         return 1
       fi
-      echo "✅ RAM requirement met (8GB recommended for optimal performance)"
+      echo "[OK] RAM requirement met (8GB recommended for optimal performance)"
       echo ""
     else
-      echo "⚠️  WARNING: Skipping RAM check (--force-upgrade flag used)"
+      echo "[WARN] WARNING: Skipping RAM check (--force-upgrade flag used)"
       echo "   Version 0.8.4+ requires 8GB RAM - proceeding with insufficient RAM may cause issues"
       echo ""
     fi
@@ -2503,7 +2503,7 @@ update() {
       available_percent=$(df -h / | awk 'NR==2 {print $5}' | sed 's/%//')
       free_percent=$((100 - ${available_percent%\%}))
       echo ""
-      echo "❌ ERROR: Insufficient disk space for upgrade"
+      echo "[FAIL] ERROR: Insufficient disk space for upgrade"
       echo "   Available: ${free_percent}% free"
       echo "   Required: 10% free minimum"
       echo ""
@@ -2511,17 +2511,17 @@ update() {
       echo "WARNING: Proceeding with low disk space may cause upgrade failures"
       return 1
     fi
-    echo "✅ Sufficient disk space available"
+    echo "[OK] Sufficient disk space available"
     echo ""
   else
-    echo "⚠️  WARNING: Skipping disk space check (--force-upgrade flag used)"
+    echo "[WARN] WARNING: Skipping disk space check (--force-upgrade flag used)"
     echo ""
   fi
 
   # Check for CentOS Stream 8 and display warning
   if [ -f /etc/os-release ]; then
     if grep -qi "centos.*stream.*8\|CentOS.*Stream.*8\|CENTOS.*STREAM.*8" /etc/os-release; then
-      echo "⚠️  WARNING: This appliance is running CentOS 8 Stream, and the OS has reached end of life in the Red Hat ecosystem. Please download a new appliance from calltelemetry.com, and copy the postgres and certificate folder over to the new appliance. If you continue, older Docker versions may not work with new builds in 0.8.4 releases. Sleeping for 5 seconds. Press CTRL-C to cancel."
+      echo "[WARN] WARNING: This appliance is running CentOS 8 Stream, and the OS has reached end of life in the Red Hat ecosystem. Please download a new appliance from calltelemetry.com, and copy the postgres and certificate folder over to the new appliance. If you continue, older Docker versions may not work with new builds in 0.8.4 releases. Sleeping for 5 seconds. Press CTRL-C to cancel."
       sleep 5
     fi
   fi
@@ -2531,9 +2531,9 @@ update() {
   docker_version=$(docker --version 2>/dev/null | grep -o '[0-9]\+\.[0-9]\+' | head -1 | cut -d. -f1)
 
   if [ -z "$docker_version" ]; then
-    echo "⚠️  WARNING: Docker not found or not responding"
+    echo "[WARN] WARNING: Docker not found or not responding"
   elif [ "$docker_version" -lt 26 ]; then
-    echo "⚠️  WARNING: Docker version $docker_version detected - Docker 26+ is required"
+    echo "[WARN] WARNING: Docker version $docker_version detected - Docker 26+ is required"
     echo "Docker is outdated, updating Docker packages..."
     echo "Running Docker package updates..."
     sudo dnf update -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
@@ -2545,12 +2545,12 @@ update() {
     updated_docker_version=$(docker --version 2>/dev/null | grep -o '[0-9]\+\.[0-9]\+' | head -1 | cut -d. -f1)
 
     if [ -z "$updated_docker_version" ]; then
-      echo "❌ ERROR: Docker update failed - Docker is not responding"
+      echo "[FAIL] ERROR: Docker update failed - Docker is not responding"
       echo "   Docker 26+ is required to continue"
       echo "   Please manually update Docker and try again"
       return 1
     elif [ "$updated_docker_version" -lt 26 ]; then
-      echo "❌ ERROR: Docker update failed - Docker is still on version $updated_docker_version"
+      echo "[FAIL] ERROR: Docker update failed - Docker is still on version $updated_docker_version"
       echo "   Docker 26+ is required to continue"
       echo "   Current version: $updated_docker_version"
       echo "   Required version: 26 or higher"
@@ -2559,11 +2559,11 @@ update() {
       echo "   You may need to check your repository configuration or available packages"
       return 1
     else
-      echo "✅ Docker successfully updated to version $updated_docker_version"
+      echo "[OK] Docker successfully updated to version $updated_docker_version"
       echo ""
     fi
   else
-    echo "✅ Docker version $docker_version is supported"
+    echo "[OK] Docker version $docker_version is supported"
   fi
 
   timestamp=$(date "+%Y-%m-%d-%H-%M-%S")
@@ -2577,7 +2577,7 @@ update() {
   # Download config bundle from GCS (includes docker-compose, prometheus, grafana, cli.sh)
   echo ""
   if ! download_bundle "$version"; then
-    echo "❌ Failed to download config bundle"
+    echo "[FAIL] Failed to download config bundle"
     echo ""
     echo "Check available versions at: https://github.com/calltelemetry/calltelemetry/releases"
     return 1
@@ -2588,7 +2588,7 @@ update() {
   if [ "$force_upgrade" = false ]; then
     if ! check_image_availability "$TEMP_FILE"; then
       echo ""
-      echo "❌ Cannot proceed with upgrade - some images are not available"
+      echo "[FAIL] Cannot proceed with upgrade - some images are not available"
       echo "Please ensure all images are built and pushed to the registry"
       echo ""
       echo "To proceed anyway, use: $0 update $version --force-upgrade"
@@ -2597,7 +2597,7 @@ update() {
       return 1
     fi
   else
-    echo "⚠️  WARNING: Skipping image availability check (--force-upgrade flag used)"
+    echo "[WARN] WARNING: Skipping image availability check (--force-upgrade flag used)"
     echo ""
   fi
 
@@ -2625,7 +2625,7 @@ update() {
       if docker pull "$img"; then
         pulled=$((pulled + 1))
       else
-        echo "  ❌ Failed to pull $img"
+        echo "  [FAIL] Failed to pull $img"
         rm -f "$TEMP_FILE"
         return 1
       fi
@@ -2642,14 +2642,14 @@ update() {
           skipped=$((skipped + 1))
         else
           echo "  ↓ $img (pulling...)"
-          docker pull "$img" || echo "  ⚠️  $img not available yet"
+          docker pull "$img" || echo "  [WARN] $img not available yet"
           pulled=$((pulled + 1))
         fi
       fi
     done
   fi
 
-  echo "✅ Images ready ($pulled pulled, $skipped already present)"
+  echo "[OK] Images ready ($pulled pulled, $skipped already present)"
 
   # Extract and display the image versions
   echo ""
@@ -2659,7 +2659,7 @@ update() {
   done
 
   echo ""
-  echo "⚠️  You are about to upgrade from $current_version to $version"
+  echo "[WARN] You are about to upgrade from $current_version to $version"
   echo "This will:"
   echo "  - Stop all services"
   echo "  - Update container images"
@@ -2736,7 +2736,7 @@ update() {
       current_swapfile_gb=0
     fi
     if [ "$current_swapfile_gb" -eq "$swapfile_target_gb" ]; then
-      echo "✅ Swap is $(( $(free | awk '/^Swap:/{print $2}') / 1024 / 1024 ))GB (target: ${target_swap_gb}GB)"
+      echo "[OK] Swap is $(( $(free | awk '/^Swap:/{print $2}') / 1024 / 1024 ))GB (target: ${target_swap_gb}GB)"
     else
       # Only stop services when a swap change is actually needed
       echo "Swap needs resize (current swapfile: ${current_swapfile_gb}GB, target: ${swapfile_target_gb}GB) — stopping services..."
@@ -2761,12 +2761,12 @@ update() {
         sudo rm -f "$SWAPFILE"
         sudo sed -i "\|^${SWAPFILE}|d" /etc/fstab
       fi
-      echo "✅ Swap set to $(( $(free | awk '/^Swap:/{print $2}') / 1024 / 1024 ))GB"
+      echo "[OK] Swap set to $(( $(free | awk '/^Swap:/{print $2}') / 1024 / 1024 ))GB"
     fi
 
     if ! restart_service "upgrade"; then
       echo ""
-      echo "❌ Update FAILED — Docker Compose service could not be restarted."
+      echo "[FAIL] Update FAILED — Docker Compose service could not be restarted."
       echo "   The new docker-compose.yml is in place but services are not running."
       echo "   To retry:  systemctl restart docker-compose-app.service"
       echo "   To revert: cli.sh rollback"
@@ -2791,7 +2791,7 @@ update() {
     CURRENT_NODE_MAJOR=$(node --version 2>/dev/null | sed 's/v\([0-9]*\).*/\1/' || echo "0")
 
     if [ "$CURRENT_NODE_MAJOR" -ge "$REQUIRED_NODE_MAJOR" ] 2>/dev/null; then
-      echo "✅ Node.js $(node --version) (meets requirement)"
+      echo "[OK] Node.js $(node --version) (meets requirement)"
     else
       echo "Migrating Node.js to v${REQUIRED_NODE_MAJOR} (current: v${CURRENT_NODE_MAJOR:-none})..."
       # Remove old Node packages
@@ -2804,9 +2804,9 @@ update() {
       NEW_NODE=$(node --version 2>/dev/null || echo "none")
       NEW_MAJOR=$(echo "$NEW_NODE" | sed 's/v\([0-9]*\).*/\1/' || echo "0")
       if [ "$NEW_MAJOR" -ge "$REQUIRED_NODE_MAJOR" ] 2>/dev/null; then
-        echo "✅ Node.js ${NEW_NODE} installed"
+        echo "[OK] Node.js ${NEW_NODE} installed"
       else
-        echo "⚠️  Node.js migration failed (got ${NEW_NODE}, need v${REQUIRED_NODE_MAJOR}+) — ct CLI may not work"
+        echo "[WARN] Node.js migration failed (got ${NEW_NODE}, need v${REQUIRED_NODE_MAJOR}+) — ct CLI may not work"
       fi
     fi
 
@@ -2816,7 +2816,7 @@ update() {
       echo "Updating @calltelemetry/cli..."
       sudo npm install -g @calltelemetry/cli &>/dev/null && \
         CT_CLI_VER=$(npm list -g --depth=0 @calltelemetry/cli 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1) && \
-        echo "✅ ct CLI updated to ${CT_CLI_VER:-unknown}" || echo "⚠️  ct CLI update failed (non-critical)"
+        echo "[OK] ct CLI updated to ${CT_CLI_VER:-unknown}" || echo "[WARN] ct CLI update failed (non-critical)"
     fi
 
     # Apply console loglevel fix for existing VMs
@@ -2826,7 +2826,7 @@ update() {
       echo "Applying console loglevel fix (suppresses nft_compat/ip_set warnings)..."
       echo "kernel.printk = 3 4 1 3" | sudo tee /etc/sysctl.d/99-console-loglevel.conf > /dev/null
       sudo sysctl -p /etc/sysctl.d/99-console-loglevel.conf > /dev/null
-      echo "✅ Console loglevel fix applied"
+      echo "[OK] Console loglevel fix applied"
     fi
 
     # Migrate legacy ifcfg network configs to NetworkManager keyfile format
@@ -2836,7 +2836,7 @@ update() {
       ifcfg_count=$(nmcli -t -f FILENAME connection show 2>/dev/null | grep -c 'ifcfg' || true)
       if [ "${ifcfg_count:-0}" -gt 0 ]; then
         echo "Migrating $ifcfg_count legacy ifcfg network config(s) to keyfile format..."
-        sudo nmcli connection migrate &>/dev/null && echo "✅ Network configs migrated to keyfile" || echo "⚠️  nmcli migrate failed (non-critical)"
+        sudo nmcli connection migrate &>/dev/null && echo "[OK] Network configs migrated to keyfile" || echo "[WARN] nmcli migrate failed (non-critical)"
       fi
     fi
 
@@ -2846,14 +2846,14 @@ update() {
       local gf_pw
       gf_pw=$(openssl rand -hex 16)
       env_set "GRAFANA_PASSWORD" "$gf_pw"
-      echo "✅ Generated GRAFANA_PASSWORD"
+      echo "[OK] Generated GRAFANA_PASSWORD"
 
       # Remove stale GRAFANA_TOKEN (replaced by GRAFANA_PASSWORD)
       env_remove "GRAFANA_TOKEN"
 
       # Reset Grafana admin password for existing volumes
       if $DOCKER_COMPOSE_CMD exec -T grafana grafana-cli admin reset-admin-password "$gf_pw" &>/dev/null; then
-        echo "✅ Grafana admin password synced"
+        echo "[OK] Grafana admin password synced"
       else
         echo "  ℹ️  Grafana container not running yet — password will apply on next start"
       fi
@@ -2867,13 +2867,13 @@ update() {
       sudo mkdir -p "$DOCKER_DROPIN_DIR"
       printf '[Service]\nMemoryMax=90%%\n' | sudo tee "$DOCKER_DROPIN_FILE" > /dev/null
       sudo systemctl daemon-reload
-      echo "✅ Docker memory limit applied (90% of RAM)"
+      echo "[OK] Docker memory limit applied (90% of RAM)"
     fi
 
     if [ $services_ok -eq 0 ]; then
-      echo "✅ Update complete! All services are running and ready."
+      echo "[OK] Update complete! All services are running and ready."
     else
-      echo "⚠️  Update complete, but some services may need attention."
+      echo "[WARN] Update complete, but some services may need attention."
       echo "This is normal during major upgrades with SQL index rebuilds."
       echo "Monitor progress with: $DOCKER_COMPOSE_CMD logs -f"
       echo "Check CPU usage with: top (high postgresql CPU is normal during index rebuilds)"
@@ -2896,7 +2896,7 @@ rollback() {
     echo "Rolled back to the previous docker-compose configuration from $BACKUP_FILE."
     fix_systemd_service_if_needed
     if ! restart_service "rollback"; then
-      echo "❌ Service restart failed after rollback."
+      echo "[FAIL] Service restart failed after rollback."
       echo "   The rollback configuration is in place but services may not be running."
       echo "   Retry with: systemctl restart docker-compose-app.service"
       return 1
@@ -2950,9 +2950,9 @@ compact_system() {
 
   echo "Compacting PostgreSQL database (this may take several minutes)..."
   if sudo $DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db psql -d calltelemetry_prod -U calltelemetry -c 'VACUUM FULL;'; then
-    echo "✅ Database vacuum completed successfully."
+    echo "[OK] Database vacuum completed successfully."
   else
-    echo "❌ Database vacuum failed."
+    echo "[FAIL] Database vacuum failed."
     return 1
   fi
 
@@ -2994,7 +2994,7 @@ wait_for_services() {
         if [ "$status" = "running" ]; then
           status_line="$status_line ✓$service"
         else
-          status_line="$status_line ⏳$service"
+          status_line="$status_line [WAIT]$service"
           all_running=false
         fi
       else
@@ -3018,8 +3018,8 @@ wait_for_services() {
 
   if [ "$containers_ok" != true ]; then
     echo ""
-    echo "  ❌ Container startup timed out after 120s"
-    echo "  Not running:%s" "$(echo "$status_line" | grep -oE '(✗|⏳)[^ ]+' | tr '\n' ' ')"
+    echo "  [FAIL] Container startup timed out after 120s"
+    echo "  Not running:%s" "$(echo "$status_line" | grep -oE '(✗|[WAIT])[^ ]+' | tr '\n' ' ')"
     phase_failures=$((phase_failures + 1))
     failed_phases="$failed_phases containers"
   fi
@@ -3042,7 +3042,7 @@ wait_for_services() {
 
   if [ "$db_ok" != true ]; then
     echo ""
-    echo "  ❌ Database connection timed out after 120s"
+    echo "  [FAIL] Database connection timed out after 120s"
     phase_failures=$((phase_failures + 1))
     failed_phases="$failed_phases database"
   fi
@@ -3115,7 +3115,7 @@ wait_for_services() {
 
   if [ "$migrations_complete" != true ]; then
     echo ""
-    echo "  ❌ Migration status unclear after ${max_wait}s"
+    echo "  [FAIL] Migration status unclear after ${max_wait}s"
     echo "  Check logs: $DOCKER_COMPOSE_CMD logs -f web"
     phase_failures=$((phase_failures + 1))
     failed_phases="$failed_phases migrations"
@@ -3138,7 +3138,7 @@ wait_for_services() {
   if [ "$web_healthy" = true ]; then
     echo "  ✓ Web application healthy"
   else
-    echo "  ❌ Web health check failed after 20s"
+    echo "  [FAIL] Web health check failed after 20s"
     phase_failures=$((phase_failures + 1))
     failed_phases="$failed_phases health-check"
   fi
@@ -3147,7 +3147,7 @@ wait_for_services() {
   local scheduler_errors=$($DOCKER_COMPOSE_CMD logs --tail 100 web 2>&1 | grep -c "not started: invalid task function" 2>/dev/null | tail -1 || echo "0")
   scheduler_errors=${scheduler_errors:-0}
   if [ "$scheduler_errors" -gt 0 ] 2>/dev/null; then
-    echo "  ⚠️  $scheduler_errors scheduler jobs failed (non-fatal)"
+    echo "  [WARN] $scheduler_errors scheduler jobs failed (non-fatal)"
   fi
 
   # RPC check
@@ -3155,7 +3155,7 @@ wait_for_services() {
   if [[ "$rpc_ok" == *"ok"* ]]; then
     echo "  ✓ Application RPC responding"
   else
-    echo "  ❌ Application RPC not responding"
+    echo "  [FAIL] Application RPC not responding"
     phase_failures=$((phase_failures + 1))
     failed_phases="$failed_phases rpc"
   fi
@@ -3165,10 +3165,10 @@ wait_for_services() {
   echo ""
 
   if [ $phase_failures -eq 0 ]; then
-    echo "✅ Startup complete!"
+    echo "[OK] Startup complete!"
     return 0
   else
-    echo "❌ Startup failed — $phase_failures phase(s) had errors:$failed_phases"
+    echo "[FAIL] Startup failed — $phase_failures phase(s) had errors:$failed_phases"
     echo "   Run 'cli.sh status' for details or check logs with: $DOCKER_COMPOSE_CMD logs -f"
     return 1
   fi
@@ -3487,12 +3487,12 @@ SELECT
     # Stop polling when job completes
     if [ -n "$job_id" ] && [ "$oban_state" = " job=$job_id:completed" ]; then
       echo ""
-      echo "  ✅ Seed job $job_id completed!"
+      echo "  [OK] Seed job $job_id completed!"
       break
     fi
     if [ -n "$job_id" ] && [ "$oban_state" = " job=$job_id:discarded" ]; then
       echo ""
-      echo "  ❌ Seed job $job_id failed (discarded). Check logs above."
+      echo "  [FAIL] Seed job $job_id failed (discarded). Check logs above."
       break
     fi
   done
@@ -3692,7 +3692,7 @@ check_service_ports() {
   local container
   container=$($DOCKER_COMPOSE_CMD ps -q "$service" 2>/dev/null)
   if [ -z "$container" ]; then
-    echo "    ⚠️  $service ports: container not found"
+    echo "    [WARN] $service ports: container not found"
     return 0
   fi
 
@@ -3719,7 +3719,7 @@ check_service_ports() {
         service_ok=false
       fi
     else
-      echo "    ⚠️  $service:$port not published to host; skipping port probe"
+      echo "    [WARN] $service:$port not published to host; skipping port probe"
     fi
   done
 
@@ -3733,7 +3733,7 @@ report_service_health() {
   local container
   container=$($DOCKER_COMPOSE_CMD ps -q "$service" 2>/dev/null)
   if [ -z "$container" ]; then
-    echo "    ⚠️  $service: container not found"
+    echo "    [WARN] $service: container not found"
     return 0
   fi
 
@@ -3746,11 +3746,11 @@ report_service_health() {
       return 0
       ;;
     starting)
-      echo "    ⏳ $service healthcheck: starting"
+      echo "    $service healthcheck: starting"
       return 1
       ;;
     unhealthy)
-      echo "    ⚠️  $service healthcheck: unhealthy"
+      echo "    [WARN] $service healthcheck: unhealthy"
       docker inspect --format '{{range .State.Health.Log}}{{println .Output}}{{end}}' "$container" 2>/dev/null | tail -n 3 | sed 's/^/      /'
       return 1
       ;;
@@ -3764,7 +3764,7 @@ report_service_health() {
       fi
       ;;
     *)
-      echo "    ⚠️  $service healthcheck: $health"
+      echo "    [WARN] $service healthcheck: $health"
       return 1
       ;;
   esac
@@ -3795,7 +3795,7 @@ show_web_logs() {
   pending_migrations=$(printf '%s\n' "$logs" | awk '/Pending migrations \(will run now\):/ {pending=1; next} pending && /^  - / {gsub(/^  - /, ""); print} pending && !/^  - / {pending=0}' || true)
 
   if [ -n "$pending_migrations" ]; then
-    echo "📋 Pending migrations detected from logs:"
+    echo "Pending migrations detected from logs:"
     while IFS= read -r line; do
       [ -n "$line" ] && printf '  • %s\n' "$line"
     done <<< "$pending_migrations"
@@ -3807,7 +3807,7 @@ show_web_logs() {
   local scheduler_warnings
   scheduler_warnings=$(printf '%s\n' "$logs" | grep "not started: invalid task function" | wc -l)
   if [ "$scheduler_warnings" -gt 0 ]; then
-    echo "⚠️  Note: $scheduler_warnings scheduler jobs have invalid task functions (non-fatal)"
+    echo "[WARN] Note: $scheduler_warnings scheduler jobs have invalid task functions (non-fatal)"
     echo ""
   fi
 
@@ -4074,7 +4074,7 @@ EOF
       echo "Last updated: $timestamp (report: $report_file)"
     else
       echo ""
-      echo "✅ Migration status check completed"
+      echo "[OK] Migration status check completed"
       echo "Report saved to: $report_file"
     fi
 
@@ -4359,7 +4359,7 @@ sql_purge_table() {
 
   echo "$delete_result"
   echo ""
-  echo "✅ Purge completed in ${duration} seconds"
+  echo "[OK] Purge completed in ${duration} seconds"
   echo ""
 
   # Show updated table size
@@ -4375,7 +4375,7 @@ FROM $table_name;
 "
 
   echo ""
-  echo "💡 Tip: Run 'VACUUM FULL $table_name' to reclaim disk space"
+  echo "Tip: Run 'VACUUM FULL $table_name' to reclaim disk space"
   echo "   Use: $DOCKER_COMPOSE_CMD exec -T db psql -U calltelemetry -d calltelemetry_prod -c 'VACUUM FULL $table_name;'"
 }
 
@@ -4441,10 +4441,10 @@ migration_run() {
   
   if [ $? -eq 0 ]; then
     echo ""
-    echo "✅ Migration run completed successfully"
+    echo "[OK] Migration run completed successfully"
   else
     echo ""
-    echo "❌ Migration run failed"
+    echo "[FAIL] Migration run failed"
     return 1
   fi
 }
@@ -4512,10 +4512,10 @@ migration_rollback() {
   
   if [ $? -eq 0 ]; then
     echo ""
-    echo "✅ Migration rollback completed successfully"
+    echo "[OK] Migration rollback completed successfully"
   else
     echo ""
-    echo "❌ Migration rollback failed"
+    echo "[FAIL] Migration rollback failed"
     return 1
   fi
 }
@@ -4579,13 +4579,13 @@ app_status() {
   # Check if web container is running
   web_container=$($DOCKER_COMPOSE_CMD $(get_compose_files) ps -q web 2>/dev/null)
   if [ -z "$web_container" ]; then
-    echo "❌ Web container not running"
+    echo "[FAIL] Web container not running"
     return 1
   fi
 
   container_status=$(docker inspect --format='{{.State.Status}}' "$web_container" 2>/dev/null)
   if [ "$container_status" != "running" ]; then
-    echo "❌ Web container status: $container_status"
+    echo "[FAIL] Web container status: $container_status"
     return 1
   fi
 
@@ -4610,7 +4610,7 @@ app_status() {
       "SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1;" 2>/dev/null | tr -d ' ')
     echo "✓ Latest migration: $latest"
   else
-    echo "❌ Database: not accepting connections"
+    echo "[FAIL] Database: not accepting connections"
   fi
   echo ""
 
@@ -4643,7 +4643,7 @@ app_status() {
       end
     ' 2>&1
   else
-    echo "❌ RPC connection: failed"
+    echo "[FAIL] RPC connection: failed"
     echo "   Application may still be starting up"
     echo "   Error: $rpc_test"
   fi
@@ -4696,7 +4696,7 @@ app_status() {
   if echo "$recent_logs" | grep -q "All migrations completed successfully"; then
     echo "✓ Migrations: completed successfully"
   elif echo "$recent_logs" | grep -q "Pending migrations"; then
-    echo "⏳ Migrations: still running"
+    echo "Migrations: still running"
   else
     echo "? Migrations: status unknown from logs"
   fi
@@ -4704,7 +4704,7 @@ app_status() {
   # Check for scheduler errors
   scheduler_errors=$(echo "$recent_logs" | grep "not started: invalid task function" | wc -l)
   if [ "$scheduler_errors" -gt 0 ]; then
-    echo "⚠️  Scheduler: $scheduler_errors jobs failed to start (invalid task function)"
+    echo "[WARN] Scheduler: $scheduler_errors jobs failed to start (invalid task function)"
     echo "   This may indicate version mismatch or missing modules"
     echo "$recent_logs" | grep "not started: invalid task function" | head -5 | sed 's/^/   /'
   else
@@ -4757,7 +4757,7 @@ logging_toggle() {
       echo ""
       fix_systemd_service_if_needed
       if ! restart_service "logging $level"; then
-        echo "❌ Service restart failed after logging level change."
+        echo "[FAIL] Service restart failed after logging level change."
         return 1
       fi
       echo ""
@@ -4948,7 +4948,7 @@ certs_status() {
         if openssl x509 -in "$cert_file" -noout -checkend 2592000 >/dev/null 2>&1; then
           echo "  Status:     ✓ Valid"
         else
-          echo "  Status:     ⚠️  Expiring soon (within 30 days)"
+          echo "  Status:     [WARN] Expiring soon (within 30 days)"
         fi
       else
         echo "  Status:     ✗ EXPIRED"
@@ -5300,7 +5300,7 @@ case "$1" in
             read -p "Would you like to delete the backup file? (yes/no): " delete_backup
             if [[ "$delete_backup" =~ ^[Yy] ]]; then
               rm -f "$backup_file"
-              echo "✅ Backup file deleted."
+              echo "[OK] Backup file deleted."
             else
               echo "Backup preserved at: $backup_file"
             fi
@@ -5399,7 +5399,7 @@ case "$1" in
       if command -v wget >/dev/null 2>&1; then
         if ! wget -q --show-progress "$bundle_url" -O "$config_bundle" 2>&1; then
           echo ""
-          echo "❌ ERROR: Failed to download config bundle for version $version"
+          echo "[FAIL] ERROR: Failed to download config bundle for version $version"
           echo "URL: $bundle_url"
           echo ""
           echo "Make sure this version exists. Check:"
@@ -5410,7 +5410,7 @@ case "$1" in
       elif command -v curl >/dev/null 2>&1; then
         if ! curl -fL --progress-bar "$bundle_url" -o "$config_bundle"; then
           echo ""
-          echo "❌ ERROR: Failed to download config bundle for version $version"
+          echo "[FAIL] ERROR: Failed to download config bundle for version $version"
           rm -f "$config_bundle"
           return 1
         fi
@@ -5418,7 +5418,7 @@ case "$1" in
         echo "Error: Neither wget nor curl is available"
         return 1
       fi
-      echo "✅ Config bundle downloaded"
+      echo "[OK] Config bundle downloaded"
       echo ""
 
       # Step 2: Extract config bundle
@@ -5428,7 +5428,7 @@ case "$1" in
       tar -xzf "$config_bundle" -C "$bundle_dir" --strip-components=1
       sanitize_metadata_artifacts "$bundle_dir"
       rm -f "$config_bundle"
-      echo "✅ Config bundle extracted"
+      echo "[OK] Config bundle extracted"
       echo ""
 
       # Step 3: Extract image list and pull images
@@ -5436,7 +5436,7 @@ case "$1" in
       cd "$bundle_dir" || return 1
 
       if [ ! -f "docker-compose.yml" ]; then
-        echo "❌ ERROR: docker-compose.yml not found in bundle"
+        echo "[FAIL] ERROR: docker-compose.yml not found in bundle"
         cd "$start_dir"
         rm -rf "$bundle_dir"
         return 1
@@ -5457,14 +5457,14 @@ case "$1" in
         image_count=$((image_count + 1))
         echo "[$image_count/$total_images] Pulling: $img"
         if ! docker pull "$img"; then
-          echo "⚠️  Warning: Failed to pull $img"
+          echo "[WARN] Warning: Failed to pull $img"
           pull_failed=true
         fi
       done
 
       if [ "$pull_failed" = true ]; then
         echo ""
-        echo "⚠️  Warning: Some images failed to pull. Bundle may be incomplete."
+        echo "[WARN] Warning: Some images failed to pull. Bundle may be incomplete."
       fi
 
       # Step 4: Save Docker images to tar
@@ -5472,9 +5472,9 @@ case "$1" in
       echo "Step 4: Saving Docker images to images.tar..."
       # shellcheck disable=SC2086
       if docker save $images -o images.tar; then
-        echo "✅ Images saved: $(du -h images.tar | cut -f1)"
+        echo "[OK] Images saved: $(du -h images.tar | cut -f1)"
       else
-        echo "❌ ERROR: Failed to save Docker images"
+        echo "[FAIL] ERROR: Failed to save Docker images"
         cd "$start_dir"
         rm -rf "$bundle_dir"
         return 1
@@ -5613,7 +5613,7 @@ case "$1" in
       fix_systemd_service_if_needed
       fix_systemd_compose_files
       if ! restart_service "offline apply"; then
-        echo "❌ Service restart failed after offline bundle apply."
+        echo "[FAIL] Service restart failed after offline bundle apply."
         echo "   Images are loaded but services may not be running."
         echo "   Retry with: systemctl restart docker-compose-app.service"
         return 1
@@ -5681,7 +5681,7 @@ case "$1" in
       if command -v wget >/dev/null 2>&1; then
         if ! wget -q --show-progress "$bundle_url" -O "$bundle_file" 2>&1; then
           echo ""
-          echo "❌ ERROR: Failed to download bundle for version $version"
+          echo "[FAIL] ERROR: Failed to download bundle for version $version"
           echo ""
           echo "The version may not exist or network error occurred."
           echo "Check available versions at: https://github.com/calltelemetry/calltelemetry/releases"
@@ -5691,7 +5691,7 @@ case "$1" in
       elif command -v curl >/dev/null 2>&1; then
         if ! curl -fL --progress-bar "$bundle_url" -o "$bundle_file"; then
           echo ""
-          echo "❌ ERROR: Failed to download bundle for version $version"
+          echo "[FAIL] ERROR: Failed to download bundle for version $version"
           echo ""
           echo "The version may not exist or network error occurred."
           rm -f "$bundle_file"
@@ -5715,9 +5715,9 @@ case "$1" in
       if [ -f "$checksum_file" ]; then
         if command -v sha256sum >/dev/null 2>&1; then
           if sha256sum -c "$checksum_file" >/dev/null 2>&1; then
-            echo "✅ Checksum verified"
+            echo "[OK] Checksum verified"
           else
-            echo "⚠️  Checksum mismatch - file may be corrupted"
+            echo "[WARN] Checksum mismatch - file may be corrupted"
           fi
         else
           echo "ℹ️  sha256sum not available, skipping verification"
@@ -6342,7 +6342,7 @@ end
                   echo "    $CERT_ISSUER"
                   if echo "$CERT_ISSUER" | grep -qi "cisco\|umbrella\|zscaler\|palo alto\|fortinet\|fortigate\|bluecoat\|symantec\|mcafee\|websense"; then
                     echo ""
-                    echo "  ⚠️  Corporate proxy detected! The firewall is doing SSL inspection."
+                    echo "  [WARN] Corporate proxy detected! The firewall is doing SSL inspection."
                     echo "  Solutions:"
                     echo "    1. Add the corporate CA certificate to /etc/pki/ca-trust/source/anchors/"
                     echo "       then run: sudo update-ca-trust"
