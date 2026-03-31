@@ -335,7 +335,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (code) (rate(caddy_http_requests_total{server=~\"$server\", handler=~\"$handler\"}[5m]))",
+          "expr": "sum by (code) (rate(caddy_http_request_duration_seconds_count{server=~\"$server\", handler=~\"$handler\"}[5m]))",
           "legendFormat": "{{code}}",
           "refId": "A"
         }
