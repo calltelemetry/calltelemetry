@@ -1637,7 +1637,8 @@ show_help() {
   echo
   echo "Migration Commands:"
   echo "  migrate             Show migration status (default)"
-  echo "  migrate run         Run pending migrations"
+  echo "  migrate run         Run pending migrations + partition drain"
+  echo "  migrate drain       Run partition drain only (idempotent, safe to re-run)"
   echo "  migrate rollback [n] Rollback n migrations (default: 1)"
   echo "  migrate history     Show last 10 migrations from database"
   echo "  migrate watch       Watch migration progress continuously"
@@ -4426,7 +4427,7 @@ FROM $table_name;
 # Function to run pending migrations using Elixir release
 migration_run() {
   echo "Running pending database migrations..."
-  
+
   # Check if web container is running and application is ready
   web_container=$($DOCKER_COMPOSE_CMD ps -q web 2>/dev/null)
   if [ -z "$web_container" ]; then
@@ -4452,17 +4453,17 @@ migration_run() {
   fi
 
   echo "Using release binary: $release_bin"
-  
-  # Execute migrations
+
+  # Execute migrations — stream output live (no variable capture)
   echo "Executing migrations..."
-  migration_output=$($DOCKER_COMPOSE_CMD exec -T web "$release_bin" rpc '
+  $DOCKER_COMPOSE_CMD exec -T web "$release_bin" rpc '
     IO.puts("=== Running Migrations ===")
-    
+
     try do
       result = Ecto.Migrator.run(Cdrcisco.Repo, :up, all: true)
-      
+
       case result do
-        [] -> 
+        [] ->
           IO.puts("No pending migrations to run.")
         migrations ->
           IO.puts("Successfully ran #{length(migrations)} migrations:")
@@ -4470,25 +4471,67 @@ migration_run() {
             IO.puts("  #{status} #{version} #{name}")
           end
       end
-      
+
       IO.puts("")
       IO.puts("Migration run completed successfully!")
     rescue
-      e -> 
+      e ->
         IO.puts("Error running migrations: #{inspect(e)}")
         System.halt(1)
     end
-  ' 2>&1)
+  ' 2>&1
 
-  # Display output
-  echo "$migration_output"
-  
   if [ $? -eq 0 ]; then
     echo ""
     echo "[OK] Migration run completed successfully"
+    echo ""
+    # Run partition drain after migrations
+    migration_drain
   else
     echo ""
     echo "[FAIL] Migration run failed"
+    return 1
+  fi
+}
+
+# Drain legacy partition tables and default partition overflow.
+# Runs synchronously — may take a while for large tables (progress is streamed).
+# Safe to run multiple times (idempotent).
+migration_drain() {
+  echo "=== Partition Data Migration ==="
+  echo "Checking for legacy tables and default partition overflow..."
+  echo "This may take a while for large tables. Progress will be shown live."
+  echo ""
+
+  # Check if web container is running
+  web_container=$($DOCKER_COMPOSE_CMD ps -q web 2>/dev/null)
+  if [ -z "$web_container" ]; then
+    echo "Error: Web container not found or not running."
+    return 1
+  fi
+
+  release_bin=$(get_release_binary)
+
+  # Stream output live so user sees batch-by-batch progress
+  $DOCKER_COMPOSE_CMD exec -T web "$release_bin" rpc '
+    try do
+      alias Cdrcisco.DB.SynchronousPartitionDrainEngine
+      SynchronousPartitionDrainEngine.drain_all_legacy_tables()
+      SynchronousPartitionDrainEngine.drain_all_default_partitions()
+      IO.puts("[PartitionDrain] Complete.")
+    rescue
+      e ->
+        IO.puts("[PartitionDrain] ERROR: #{inspect(e)}")
+        System.halt(1)
+    end
+  ' 2>&1
+
+  if [ $? -eq 0 ]; then
+    echo ""
+    echo "[OK] Partition drain completed"
+  else
+    echo ""
+    echo "[FAIL] Partition drain failed"
     return 1
   fi
 }
@@ -4573,6 +4616,9 @@ migrate_cmd() {
     run)
       migration_run
       ;;
+    drain)
+      migration_drain
+      ;;
     rollback)
       migration_rollback "${1:-1}"
       ;;
@@ -4592,7 +4638,8 @@ migrate_cmd() {
       echo ""
       echo "Commands:"
       echo "  status            Show migration status (default)"
-      echo "  run               Run pending migrations"
+      echo "  run               Run pending migrations + partition drain"
+      echo "  drain             Run partition drain only (idempotent)"
       echo "  rollback [n]      Rollback n migrations (default: 1)"
       echo "  history           Show last 10 migrations from database"
       echo "  watch             Watch migration progress continuously"
