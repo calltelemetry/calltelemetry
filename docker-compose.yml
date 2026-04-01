@@ -651,11 +651,12 @@ services:
       -master.volumeSizeLimitMB=100
       -master.defaultReplication=000
       -metricsPort=9325
+      -volume.max=2
     restart: unless-stopped
     cpus: 0.5
     environment:
       - GOMAXPROCS=1
-      - GOGC=200
+      - GOMEMLIMIT=256MiB
     expose:
       - "8333"   # S3 API
       - "8888"   # Filer
