@@ -365,6 +365,10 @@ services:
       # Empty whitelist = trust all sources (Grafana only reachable via Caddy on internal network)
       - GF_AUTH_PROXY_WHITELIST=
       - GF_AUTH_DISABLE_LOGIN_FORM=true
+      # Disable phone-home telemetry — prevents DNS timeout storm to stats.grafana.org
+      - GF_ANALYTICS_REPORTING_ENABLED=false
+      - GF_ANALYTICS_CHECK_FOR_UPDATES=false
+      - GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES=false
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
