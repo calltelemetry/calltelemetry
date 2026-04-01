@@ -27,7 +27,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Determine version
         id: version
@@ -336,13 +336,13 @@ jobs:
 
       - name: Authenticate to Google Cloud
         if: env.GCS_BUCKET != ''
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:
           credentials_json: ${{ secrets.GCS_SERVICE_ACCOUNT_KEY }}
 
       - name: Set up Cloud SDK
         if: env.GCS_BUCKET != ''
-        uses: google-github-actions/setup-gcloud@v2
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
       - name: Upload to Google Cloud Storage
         if: env.GCS_BUCKET != ''
@@ -398,7 +398,7 @@ jobs:
           echo "✅ Uploaded to GitHub release: $VERSION"
 
       - name: Upload bundle as workflow artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ env.BUNDLE_NAME }}-${{ steps.version.outputs.version }}
           path: |
