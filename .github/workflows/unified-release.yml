@@ -31,7 +31,7 @@ on:
       force_rebuild_all:
         description: "Force rebuild ALL repos even if unchanged"
         type: boolean
-        default: false
+        default: true
 
 jobs:
   # ─────────────────────────────────────────────────────────────────
