@@ -2657,6 +2657,12 @@ update() {
 
   echo "[OK] Images ready ($pulled pulled, $skipped already present)"
 
+  # Pull any remaining images not covered above (e.g. calltelemetry/postgres,
+  # infrastructure images with non-versioned tags). Uses the new compose file
+  # so it pulls the correct versions for the upgrade target.
+  echo "Pulling remaining infrastructure images..."
+  $DOCKER_COMPOSE_CMD -f "$TEMP_FILE" pull --quiet 2>/dev/null || true
+
   # Extract and display the image versions
   echo ""
   echo "Image versions to be deployed:"
