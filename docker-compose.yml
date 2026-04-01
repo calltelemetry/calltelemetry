@@ -99,8 +99,9 @@ services:
       -c autovacuum_analyze_scale_factor=${PG_AUTOVACUUM_ANALYZE_SCALE:-0.02}
       -c autovacuum_vacuum_cost_delay=2
       -c log_min_duration_statement=2000
-      -c shared_preload_libraries=pg_stat_statements
+      -c shared_preload_libraries='timescaledb,pg_stat_statements'
       -c pg_stat_statements.track=all
+      -c pg_stat_statements.max=10000
     expose:
       - "5432"
     volumes:
