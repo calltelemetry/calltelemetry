@@ -1626,6 +1626,9 @@ show_help() {
   echo "                      Options: --force-upgrade, --no-cleanup, --ipv6"
   echo "  rollback            Roll back to previous docker-compose configuration"
   echo "  reset               Stop application, remove data, and restart"
+  echo "  restart             Restart all services (docker compose down/up)"
+  echo "  stop                Stop all services"
+  echo "  start               Start all services"
   echo
   echo "Database Commands:"
   echo "  db                  Show database status (default)"
@@ -6596,6 +6599,23 @@ end
         echo "Run 'cli.sh diag' for available commands."
         ;;
     esac
+    ;;
+
+  # Service lifecycle commands
+  restart)
+    echo "Restarting Call Telemetry services..."
+    restart_service "cli restart"
+    ;;
+  stop)
+    echo "Stopping Call Telemetry services..."
+    systemctl stop docker-compose-app.service
+    echo "[OK] Services stopped."
+    ;;
+  start)
+    echo "Starting Call Telemetry services..."
+    ensure_bind_mount_files
+    systemctl start docker-compose-app.service
+    echo "[OK] Services started."
     ;;
 
   # Advanced commands
