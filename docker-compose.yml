@@ -92,7 +92,7 @@ services:
       -c checkpoint_completion_target=0.9
       -c random_page_cost=1.1
       -c effective_io_concurrency=200
-      -c max_parallel_workers_per_gather=${PG_PARALLEL_WORKERS:-2}
+      -c max_parallel_workers_per_gather=${PG_PARALLEL_WORKERS:-1}
       -c max_parallel_workers=${PG_MAX_PARALLEL_WORKERS:-4}
       -c autovacuum_max_workers=${PG_AUTOVACUUM_WORKERS:-5}
       -c autovacuum_vacuum_scale_factor=${PG_AUTOVACUUM_VACUUM_SCALE:-0.05}
