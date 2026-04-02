@@ -227,9 +227,9 @@ services:
     logging:
       driver: "json-file"
       options:
-        max-size: "100m"
-        max-file: "7" # Keeps 7 days of logs
-        compress: "true" # Compresses rotated files
+        max-size: "10m"
+        max-file: "5"
+        compress: "true"
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://127.0.0.1:4080/healthz || exit 1"]
       interval: 30s
