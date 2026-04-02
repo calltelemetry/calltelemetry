@@ -112,6 +112,9 @@ services:
     deploy:
       resources:
         limits:
+          # Hard cgroup quota for the DB container. Docker may still report 100% of quota
+          # in container metrics, but host usage will not exceed DB_CPU_LIMIT logical CPUs.
+          cpus: '${DB_CPU_LIMIT:-6.0}'
           memory: ${DB_MEM_LIMIT:-4g}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-calltelemetry} -d $${POSTGRES_DB:-calltelemetry_prod}"]
