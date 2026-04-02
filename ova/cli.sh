@@ -3072,8 +3072,17 @@ wait_for_services() {
   wait_time=0
   local last_migration=""
   local migrations_complete=false
+  local stable_total_count=""
+  local release_total_count=""
 
   while [ $wait_time -lt $max_wait ]; do
+    if [ -z "$release_total_count" ]; then
+      release_total_count=$(get_release_migration_count "$release_bin")
+      if ! [[ "$release_total_count" =~ ^[0-9]+$ ]] || [ "$release_total_count" -le 0 ]; then
+        release_total_count=""
+      fi
+    fi
+
     # Try RPC first for accurate count
     local migration_raw=$(run_migration_status_rpc "$release_bin" 2>/dev/null)
     local pending_count=$(printf '%s\n' "$migration_raw" | awk -F= '/::pending_count=/{print $2; exit}')
@@ -3084,6 +3093,10 @@ wait_for_services() {
     # Parse "Next pending: VERSION - NAME" for display
     local next_migration=$(printf '%s\n' "$migration_raw" | awk '/Next pending:/ {sub(/^.*Next pending: /, ""); print; exit}')
 
+    if [[ "$total_count" =~ ^[0-9]+$ ]]; then
+      stable_total_count="$total_count"
+    fi
+
     # If RPC fails or returns no data, fall back to SQL
     if [ -z "$pending_count" ] || [ "$pending_count" = "error" ] || [ -z "$applied_count" ]; then
       # Get counts from database directly
@@ -3092,28 +3105,15 @@ wait_for_services() {
       last_migration=$($DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -t -c \
         "SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1;" 2>/dev/null | tr -d ' ')
 
-      # Try to get the total expected migration count and current running migration from logs
-      local log_tail
-      log_tail=$($DOCKER_COMPOSE_CMD logs --tail 100 web 2>&1)
-
-      # Count total pending from "[Release]   - VERSION filename" lines
-      local log_pending_count
-      log_pending_count=$(printf '%s\n' "$log_tail" | grep -c '\[Release\]   - [0-9]' 2>/dev/null | head -1 || echo "0")
-      log_pending_count="${log_pending_count//[^0-9]/}"
-      log_pending_count="${log_pending_count:-0}"
-      if [ "$log_pending_count" -gt 0 ] && [ -n "$applied_count" ] && [[ "$applied_count" =~ ^[0-9]+$ ]]; then
-        # total = currently applied + originally pending (some may have run since boot)
-        # But since applied grows as migrations run, total = applied_at_start + pending_at_start
-        # Best estimate: pending list from logs is the original pending count at boot
-        total_count=$((applied_count + log_pending_count))
-        # Adjust: applied_count already includes migrations that ran since boot
-        # The log pending count was the original list, so total = (applied_count - already_run) + log_pending_count
-        # Simpler: total is stable — use applied_count as floor since it only grows
-        # If applied > total, we miscounted; just use applied
-        if [ "$total_count" -lt "$applied_count" ]; then
-          total_count="$applied_count"
-        fi
+      if [ -n "$stable_total_count" ]; then
+        total_count="$stable_total_count"
+      elif [ -n "$release_total_count" ]; then
+        total_count="$release_total_count"
       fi
+
+      # Try to get the current running migration from logs
+      local log_tail
+      log_tail=$($DOCKER_COMPOSE_CMD logs --tail 100 web 2>&1 | normalize_container_log_lines)
 
       # Extract the currently running migration filename from Ecto's "== Running VERSION Name" log
       local running_migration
@@ -3123,12 +3123,13 @@ wait_for_services() {
       if [ -z "$running_migration" ]; then
         running_migration=$(printf '%s\n' "$log_tail" | grep '\[Release\]   - ' | tail -1 | sed 's/.*\[Release\]   - [0-9]* //' 2>/dev/null || echo "")
       fi
+      running_migration=$(printf '%s' "$running_migration" | tr -d '\r' | sed 's/[[:space:]]*$//')
 
       # Check logs for migration completion
       if printf '%s\n' "$log_tail" | grep -q "All migrations completed successfully"; then
         migrations_complete=true
         pending_count=0
-        total_count="${total_count:-$applied_count}"
+        total_count="${stable_total_count:-${release_total_count:-$applied_count}}"
       else
         # Check if app is still starting
         if printf '%s\n' "$log_tail" | grep -qE "Running migrations|Pending migrations"; then
@@ -3142,6 +3143,17 @@ wait_for_services() {
     # Calculate total if we have applied and pending
     if [ -z "$total_count" ] && [[ "$pending_count" =~ ^[0-9]+$ ]] && [[ "$applied_count" =~ ^[0-9]+$ ]]; then
       total_count=$((applied_count + pending_count))
+    fi
+
+    if [[ "$total_count" =~ ^[0-9]+$ ]]; then
+      if [[ "$applied_count" =~ ^[0-9]+$ ]] && [ "$total_count" -lt "$applied_count" ]; then
+        total_count="$applied_count"
+      fi
+      stable_total_count="$total_count"
+    elif [ -n "$stable_total_count" ]; then
+      total_count="$stable_total_count"
+    elif [ -n "$release_total_count" ]; then
+      total_count="$release_total_count"
     fi
 
     # Display status
@@ -3655,6 +3667,23 @@ db_cmd() {
 # Function to get the release binary path
 get_release_binary() {
   echo "/home/app/onprem/bin/onprem"
+}
+
+normalize_container_log_lines() {
+  sed -n 's/^.*"message":"\([^"]*\)".*$/\1/p; t; p'
+}
+
+get_release_migration_count() {
+  local release_bin="${1:-$(get_release_binary)}"
+  local release_root="${release_bin%/bin/*}"
+
+  $DOCKER_COMPOSE_CMD exec -T web sh -lc "
+    count=\$(find \"$release_root/lib\" -path '*/priv/repo/migrations/*.exs' -type f 2>/dev/null | wc -l)
+    if [ \"\${count:-0}\" -eq 0 ]; then
+      count=\$(find /app/lib -path '*/priv/repo/migrations/*.exs' -type f 2>/dev/null | wc -l)
+    fi
+    printf '%s' \"\$count\"
+  " 2>/dev/null | tr -d '[:space:]'
 }
 
 print_sql_migration_snapshot() {
@@ -4759,8 +4788,7 @@ app_status() {
       "SELECT COUNT(*) FROM schema_migrations;" 2>/dev/null | tr -d ' ')
 
     # Get total expected migrations from release
-    total_migrations=$($DOCKER_COMPOSE_CMD exec -T web sh -c \
-      'ls /app/lib/cdrcisco-*/priv/repo/migrations/*.exs 2>/dev/null | wc -l' 2>/dev/null | tr -d ' ')
+    total_migrations=$(get_release_migration_count "$release_bin")
     total_migrations=${total_migrations:-"?"}
 
     echo "✓ Migrations in database: $migration_count / $total_migrations"
