@@ -402,7 +402,7 @@ apply_postgres_profile() {
   echo "  wal_buffers:           $(env_get PG_WAL_BUFFERS)"
   echo "  parallel_workers:      $(env_get PG_PARALLEL_WORKERS)/$(env_get PG_MAX_PARALLEL_WORKERS)"
   echo "  autovacuum_workers:    $(env_get PG_AUTOVACUUM_WORKERS)"
-  echo "  db_cpu_limit:          $(env_get DB_CPU_LIMIT || echo '6.0 (default)')"
+  echo "  db_cpu_limit:          $(env_get DB_CPU_LIMIT || echo '2.0 (default)')"
   echo "  max_connections:       $(env_get PG_MAX_CONNECTIONS)"
   echo "  db_mem_limit:          $(env_get DB_MEM_LIMIT)"
   echo "  web_mem_limit:         $(env_get WEB_MEM_LIMIT)"
@@ -5303,7 +5303,7 @@ case "$1" in
             echo "  wal_buffers:           $(env_get PG_WAL_BUFFERS || echo '64MB (default)')"
             echo "  parallel_workers:      $(env_get PG_PARALLEL_WORKERS || echo '2 (default)')/$(env_get PG_MAX_PARALLEL_WORKERS || echo '4 (default)')"
             echo "  autovacuum_workers:    $(env_get PG_AUTOVACUUM_WORKERS || echo '5 (default)')"
-            echo "  db_cpu_limit:          $(env_get DB_CPU_LIMIT || echo '6.0 (default)')"
+            echo "  db_cpu_limit:          $(env_get DB_CPU_LIMIT || echo '2.0 (default)')"
             echo "  db_mem_limit:          $(env_get DB_MEM_LIMIT || echo '2g (default — WARNING: too low for medium/large)')"
             echo "  web_mem_limit:         $(env_get WEB_MEM_LIMIT || echo '4g (default)')"
             ;;
