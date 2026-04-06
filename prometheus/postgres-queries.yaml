@@ -1,0 +1,431 @@
+# Custom postgres_exporter queries for CallTelemetry
+# Tailored to: MV refresh pile-ups, pool exhaustion, partition locks, slow CUBE/CMR queries
+# Requires pg_stat_statements and track_io_timing = on in postgresql.conf
+
+# ─── TOP SLOW QUERIES (pg_stat_statements) ────────────────────────────────────
+pg_stat_statements_top:
+  query: |
+    SELECT
+      queryid::text,
+      -- Truncate and normalize the query for labeling
+      LEFT(
+        regexp_replace(
+          regexp_replace(query, '\s+', ' ', 'g'),
+          '\$\d+', '?', 'g'
+        ), 120
+      ) AS query_preview,
+      calls,
+      ROUND(total_exec_time::numeric, 2) AS total_exec_ms,
+      ROUND(mean_exec_time::numeric, 2) AS mean_exec_ms,
+      ROUND(stddev_exec_time::numeric, 2) AS stddev_exec_ms,
+      ROUND((total_exec_time / NULLIF(SUM(total_exec_time) OVER (), 0) * 100)::numeric, 2) AS pct_total_time,
+      rows,
+      shared_blks_hit,
+      shared_blks_read,
+      ROUND((shared_blks_hit::numeric / NULLIF(shared_blks_hit + shared_blks_read, 0) * 100)::numeric, 2) AS cache_hit_pct,
+      shared_blks_dirtied,
+      temp_blks_read,
+      temp_blks_written,
+      ROUND(blk_read_time::numeric, 2) AS blk_read_time_ms,
+      ROUND(blk_write_time::numeric, 2) AS blk_write_time_ms
+    FROM pg_stat_statements
+    WHERE
+      query NOT LIKE '%pg_stat%'
+      AND query NOT LIKE '%pg_catalog%'
+      AND calls > 5
+    ORDER BY total_exec_time DESC
+    LIMIT 50
+  metrics:
+    - queryid:
+        usage: LABEL
+        description: "Query ID"
+    - query_preview:
+        usage: LABEL
+        description: "Normalized query preview"
+    - calls:
+        usage: COUNTER
+        description: "Total executions"
+    - total_exec_ms:
+        usage: GAUGE
+        description: "Total execution time (ms)"
+    - mean_exec_ms:
+        usage: GAUGE
+        description: "Mean execution time (ms)"
+    - stddev_exec_ms:
+        usage: GAUGE
+        description: "Stddev of execution time (ms)"
+    - pct_total_time:
+        usage: GAUGE
+        description: "% of total query time"
+    - rows:
+        usage: GAUGE
+        description: "Rows returned/affected"
+    - cache_hit_pct:
+        usage: GAUGE
+        description: "Buffer cache hit % for this query"
+    - temp_blks_read:
+        usage: GAUGE
+        description: "Temp blocks read (indicates hash/sort spills)"
+    - temp_blks_written:
+        usage: GAUGE
+        description: "Temp blocks written (indicates hash/sort spills)"
+    - blk_read_time_ms:
+        usage: GAUGE
+        description: "Time spent reading blocks (ms) - needs track_io_timing=on"
+    - blk_write_time_ms:
+        usage: GAUGE
+        description: "Time spent writing blocks (ms) - needs track_io_timing=on"
+
+# ─── ACTIVE CONNECTIONS BY STATE ──────────────────────────────────────────────
+pg_connection_states:
+  query: |
+    SELECT
+      state,
+      wait_event_type,
+      wait_event,
+      COUNT(*) AS count,
+      MAX(EXTRACT(EPOCH FROM (now() - state_change)))::int AS max_age_seconds
+    FROM pg_stat_activity
+    WHERE pid <> pg_backend_pid()
+      AND datname = current_database()
+    GROUP BY state, wait_event_type, wait_event
+    ORDER BY count DESC
+  metrics:
+    - state:
+        usage: LABEL
+        description: "Connection state (active, idle, idle in transaction, etc.)"
+    - wait_event_type:
+        usage: LABEL
+        description: "Wait event category"
+    - wait_event:
+        usage: LABEL
+        description: "Specific wait event"
+    - count:
+        usage: GAUGE
+        description: "Number of connections in this state"
+    - max_age_seconds:
+        usage: GAUGE
+        description: "Age of oldest connection in this state (seconds)"
+
+# ─── LONG RUNNING QUERIES ─────────────────────────────────────────────────────
+pg_long_running_queries:
+  query: |
+    SELECT COUNT(*) AS count
+    FROM pg_stat_activity
+    WHERE state = 'active'
+      AND pid <> pg_backend_pid()
+      AND query NOT LIKE '%pg_stat_activity%'
+      AND EXTRACT(EPOCH FROM (now() - query_start)) > 30
+  metrics:
+    - count:
+        usage: GAUGE
+        description: "Number of queries running longer than 30 seconds"
+
+# ─── BLOCKED QUERIES ──────────────────────────────────────────────────────────
+pg_blocked_queries:
+  query: |
+    SELECT COUNT(*) AS count
+    FROM pg_stat_activity
+    WHERE cardinality(pg_blocking_pids(pid)) > 0
+  metrics:
+    - count:
+        usage: GAUGE
+        description: "Number of queries currently blocked by locks"
+
+# ─── IDLE IN TRANSACTION ──────────────────────────────────────────────────────
+pg_idle_in_transaction_connections:
+  query: |
+    SELECT COUNT(*) AS count
+    FROM pg_stat_activity
+    WHERE state = 'idle in transaction'
+      AND EXTRACT(EPOCH FROM (now() - state_change)) > 60
+  metrics:
+    - count:
+        usage: GAUGE
+        description: "Idle-in-transaction connections older than 60s (eats pool slots)"
+
+# ─── LOCK CONTENTION ──────────────────────────────────────────────────────────
+pg_lock_waits:
+  query: |
+    SELECT
+      locktype,
+      mode,
+      granted,
+      COUNT(*) AS count
+    FROM pg_locks
+    WHERE pid <> pg_backend_pid()
+    GROUP BY locktype, mode, granted
+    ORDER BY count DESC
+  metrics:
+    - locktype:
+        usage: LABEL
+        description: "Type of lock (relation, tuple, page, etc.)"
+    - mode:
+        usage: LABEL
+        description: "Lock mode"
+    - granted:
+        usage: LABEL
+        description: "Whether lock is held (true) or waiting (false)"
+    - count:
+        usage: GAUGE
+        description: "Number of locks of this type/mode/status"
+
+# ─── TABLE BLOAT (TOP 20 TABLES) ──────────────────────────────────────────────
+pg_table_bloat:
+  query: |
+    SELECT
+      schemaname,
+      tablename,
+      pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) AS total_size,
+      pg_total_relation_size(schemaname||'.'||tablename) AS total_bytes,
+      n_dead_tup,
+      n_live_tup,
+      CASE WHEN n_live_tup > 0
+        THEN ROUND((n_dead_tup::numeric / n_live_tup * 100)::numeric, 2)
+        ELSE 0
+      END AS dead_pct,
+      last_vacuum,
+      last_autovacuum,
+      last_analyze,
+      last_autoanalyze,
+      EXTRACT(EPOCH FROM (now() - last_autovacuum))::int AS secs_since_autovacuum
+    FROM pg_stat_user_tables
+    WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
+    ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC
+    LIMIT 30
+  metrics:
+    - schemaname:
+        usage: LABEL
+        description: "Schema name"
+    - tablename:
+        usage: LABEL
+        description: "Table name"
+    - total_bytes:
+        usage: GAUGE
+        description: "Total table size including indexes (bytes)"
+    - n_dead_tup:
+        usage: GAUGE
+        description: "Dead tuples (indicates need for VACUUM)"
+    - n_live_tup:
+        usage: GAUGE
+        description: "Live tuples"
+    - dead_pct:
+        usage: GAUGE
+        description: "Dead tuple percentage"
+    - secs_since_autovacuum:
+        usage: GAUGE
+        description: "Seconds since last autovacuum ran"
+
+# ─── INDEX USAGE (UNUSED INDEXES) ─────────────────────────────────────────────
+pg_index_usage:
+  query: |
+    SELECT
+      schemaname,
+      tablename,
+      indexname,
+      idx_scan,
+      idx_tup_read,
+      idx_tup_fetch,
+      pg_relation_size(indexrelid) AS index_bytes,
+      CASE idx_scan WHEN 0 THEN 'UNUSED' ELSE 'used' END AS usage_status
+    FROM pg_stat_user_indexes
+    JOIN pg_index USING (indexrelid)
+    WHERE NOT indisprimary
+      AND NOT indisunique
+      AND schemaname NOT IN ('pg_catalog', 'information_schema')
+    ORDER BY idx_scan ASC, pg_relation_size(indexrelid) DESC
+    LIMIT 50
+  metrics:
+    - schemaname:
+        usage: LABEL
+        description: "Schema name"
+    - tablename:
+        usage: LABEL
+        description: "Table name"
+    - indexname:
+        usage: LABEL
+        description: "Index name"
+    - usage_status:
+        usage: LABEL
+        description: "UNUSED or used"
+    - idx_scan:
+        usage: GAUGE
+        description: "Number of index scans"
+    - idx_tup_read:
+        usage: GAUGE
+        description: "Tuples read via index"
+    - index_bytes:
+        usage: GAUGE
+        description: "Index size in bytes"
+
+# ─── CACHE HIT RATIO ──────────────────────────────────────────────────────────
+pg_cache_hit_ratio:
+  query: |
+    SELECT
+      SUM(blks_hit)::float / NULLIF(SUM(blks_hit) + SUM(blks_read), 0) AS ratio
+    FROM pg_stat_database
+    WHERE datname = current_database()
+  metrics:
+    - ratio:
+        usage: GAUGE
+        description: "Buffer cache hit ratio (target: > 0.99)"
+
+# ─── MATERIALIZED VIEW FRESHNESS ──────────────────────────────────────────────
+pg_materialized_views:
+  query: |
+    SELECT
+      schemaname,
+      matviewname,
+      CASE ispopulated WHEN true THEN 1 ELSE 0 END AS is_populated,
+      pg_size_pretty(pg_relation_size(schemaname||'.'||matviewname)) AS size,
+      pg_relation_size(schemaname||'.'||matviewname) AS size_bytes
+    FROM pg_matviews
+    WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
+    ORDER BY pg_relation_size(schemaname||'.'||matviewname) DESC
+  metrics:
+    - schemaname:
+        usage: LABEL
+        description: "Schema"
+    - matviewname:
+        usage: LABEL
+        description: "Materialized view name"
+    - is_populated:
+        usage: GAUGE
+        description: "1 if populated, 0 if needs REFRESH"
+    - size_bytes:
+        usage: GAUGE
+        description: "MV size in bytes"
+
+# ─── MV LAST REFRESH (from pg_stat_user_tables) ───────────────────────────────
+pg_mv_last_refresh_age_seconds:
+  query: |
+    SELECT
+      COALESCE(
+        MAX(EXTRACT(EPOCH FROM (now() - last_analyze))),
+        86400
+      )::int AS age_seconds
+    FROM pg_stat_user_tables
+    WHERE relname LIKE 'mv_%'
+       OR relname LIKE '%_mv'
+       OR relname LIKE '%_materialized%'
+  metrics:
+    - age_seconds:
+        usage: GAUGE
+        description: "Seconds since oldest materialized view was last analyzed"
+
+# ─── OBAN QUEUE DEPTHS ────────────────────────────────────────────────────────
+pg_oban_queue_depth:
+  query: |
+    SELECT
+      queue,
+      state,
+      COUNT(*) AS count,
+      MAX(EXTRACT(EPOCH FROM (now() - inserted_at)))::int AS max_wait_seconds
+    FROM oban_jobs
+    WHERE state IN ('available', 'executing', 'scheduled', 'retryable', 'discarded')
+    GROUP BY queue, state
+    ORDER BY count DESC
+  metrics:
+    - queue:
+        usage: LABEL
+        description: "Oban queue name"
+    - state:
+        usage: LABEL
+        description: "Job state"
+    - count:
+        usage: GAUGE
+        description: "Number of jobs in this queue/state"
+    - max_wait_seconds:
+        usage: GAUGE
+        description: "Age of oldest job in this queue/state (seconds)"
+
+# ─── PARTITION TABLE SIZES ────────────────────────────────────────────────────
+pg_partition_stats:
+  query: |
+    SELECT
+      parent.relname AS parent_table,
+      COUNT(child.relname) AS partition_count,
+      SUM(pg_total_relation_size(child.oid)) AS total_bytes,
+      MAX(pg_total_relation_size(child.oid)) AS max_partition_bytes,
+      MIN(pg_total_relation_size(child.oid)) AS min_partition_bytes
+    FROM pg_inherits
+    JOIN pg_class parent ON pg_inherits.inhparent = parent.oid
+    JOIN pg_class child ON pg_inherits.inhrelid = child.oid
+    JOIN pg_namespace n ON parent.relnamespace = n.oid
+    WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+    GROUP BY parent.relname
+    ORDER BY total_bytes DESC
+    LIMIT 20
+  metrics:
+    - parent_table:
+        usage: LABEL
+        description: "Partitioned table name"
+    - partition_count:
+        usage: GAUGE
+        description: "Number of partitions"
+    - total_bytes:
+        usage: GAUGE
+        description: "Total size across all partitions (bytes)"
+    - max_partition_bytes:
+        usage: GAUGE
+        description: "Largest single partition (bytes)"
+
+# ─── REPLICATION LAG ──────────────────────────────────────────────────────────
+pg_replication_lag_bytes:
+  query: |
+    SELECT
+      COALESCE(
+        MAX(pg_wal_lsn_diff(pg_current_wal_lsn(), sent_lsn)),
+        0
+      ) AS lag_bytes
+    FROM pg_stat_replication
+  metrics:
+    - lag_bytes:
+        usage: GAUGE
+        description: "Max replication lag in bytes (0 if no replicas)"
+
+# ─── DATABASE SIZE ────────────────────────────────────────────────────────────
+pg_database_size_bytes:
+  query: |
+    SELECT
+      datname,
+      pg_database_size(datname) AS size_bytes
+    FROM pg_database
+    WHERE datistemplate = false
+  metrics:
+    - datname:
+        usage: LABEL
+        description: "Database name"
+    - size_bytes:
+        usage: GAUGE
+        description: "Database size in bytes"
+
+# ─── WAL GENERATION RATE ──────────────────────────────────────────────────────
+pg_wal_stats:
+  query: |
+    SELECT
+      wal_records,
+      wal_fpi,
+      wal_bytes,
+      wal_buffers_full,
+      wal_write,
+      wal_sync,
+      ROUND(wal_write_time::numeric, 2) AS wal_write_time_ms,
+      ROUND(wal_sync_time::numeric, 2) AS wal_sync_time_ms
+    FROM pg_stat_wal
+  metrics:
+    - wal_records:
+        usage: COUNTER
+        description: "Total WAL records generated"
+    - wal_bytes:
+        usage: COUNTER
+        description: "Total WAL bytes generated"
+    - wal_buffers_full:
+        usage: COUNTER
+        description: "Times WAL data was written because WAL buffers were full"
+    - wal_write_time_ms:
+        usage: GAUGE
+        description: "Time spent writing WAL (ms)"
+    - wal_sync_time_ms:
+        usage: GAUGE
+        description: "Time spent syncing WAL (ms)"

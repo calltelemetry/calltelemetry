@@ -99,7 +99,9 @@ services:
       -c autovacuum_vacuum_scale_factor=${PG_AUTOVACUUM_VACUUM_SCALE:-0.05}
       -c autovacuum_analyze_scale_factor=${PG_AUTOVACUUM_ANALYZE_SCALE:-0.02}
       -c autovacuum_vacuum_cost_delay=2
-      -c log_min_duration_statement=2000
+      -c log_min_duration_statement=1000
+      -c track_io_timing=on
+      -c track_functions=all
       -c shared_preload_libraries='timescaledb,pg_stat_statements'
       -c timescaledb.max_background_workers=${TS_MAX_BACKGROUND_WORKERS:-8}
       -c timescaledb.bgw_scheduler_restart_time=${TS_BGW_SCHEDULER_RESTART_TIME:-60000}
@@ -154,10 +156,14 @@ services:
     environment:
       DATA_SOURCE_NAME: "postgresql://${POSTGRES_USER:-calltelemetry}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-calltelemetry_prod}?sslmode=disable"
       PG_EXPORTER_AUTO_DISCOVER_DATABASES: "false"
+      PG_EXPORTER_EXTEND_QUERY_PATH: /etc/postgres_exporter/queries.yaml
+    volumes:
+      - ./prometheus/postgres-queries.yaml:/etc/postgres_exporter/queries.yaml:ro
     ports:
       - "9187:9187"
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     restart: unless-stopped
     logging:
       driver: "json-file"
@@ -166,6 +172,12 @@ services:
         max-file: "3"
     networks:
       - ct
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:9187/metrics"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
 
   web:
     image: "calltelemetry/web:${WEB_VERSION}"
