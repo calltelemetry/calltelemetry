@@ -107,6 +107,9 @@ services:
       -c timescaledb.bgw_scheduler_restart_time=${TS_BGW_SCHEDULER_RESTART_TIME:-60000}
       -c pg_stat_statements.track=all
       -c pg_stat_statements.max=10000
+      -c bgwriter_lru_maxpages=200
+      -c bgwriter_delay=100
+      -c wal_compression=on
     expose:
       - "5432"
     volumes:
