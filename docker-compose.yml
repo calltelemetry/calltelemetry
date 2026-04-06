@@ -215,7 +215,8 @@ services:
       - ERL_FLAGS=+A 64 +zdbbl 8192 +sbwt none +sbwtdcpu none +sbwtdio none
       - ERL_FULLSWEEP_AFTER=1000
       - PROM_EX_UPLOAD_DASHBOARDS=${PROM_EX_UPLOAD_DASHBOARDS:-true}
-      - GRAFANA_HOST=${GRAFANA_HOST_INTERNAL:-http://grafana:3000/grafana}
+      - GRAFANA_HOST=${GRAFANA_HOST_INTERNAL:-http://grafana:3000}
+      - GRAFANA_TOKEN=${GRAFANA_TOKEN:-secret-token}
       - GRAFANA_PASSWORD=${GRAFANA_PASSWORD}
       # JTAPI / phone control (populated by ct-cli or cli.sh when JTAPI is enabled)
       - JTAPI_MODE=${JTAPI_MODE:-disabled}
