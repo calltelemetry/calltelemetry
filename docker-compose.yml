@@ -3,6 +3,7 @@ services:
     image: caddy:2-alpine
     init: true
     restart: unless-stopped
+    mem_limit: 128m
     ports:
       - "80:80"
       - "443:443"
@@ -69,7 +70,7 @@ services:
     image: "calltelemetry/postgres:14"
     user: root
     restart: "always"
-    shm_size: "${PG_SHM_SIZE:-1gb}"
+    shm_size: "${PG_SHM_SIZE:-512mb}"
     logging:
       driver: "json-file"
       options:
@@ -83,12 +84,12 @@ services:
     command: >
       postgres
       -c max_connections=${PG_MAX_CONNECTIONS:-300}
-      -c shared_buffers=${PG_SHARED_BUFFERS:-512MB}
-      -c effective_cache_size=${PG_EFFECTIVE_CACHE_SIZE:-1536MB}
-      -c work_mem=${PG_WORK_MEM:-8MB}
-      -c maintenance_work_mem=${PG_MAINTENANCE_WORK_MEM:-256MB}
-      -c wal_buffers=${PG_WAL_BUFFERS:-64MB}
-      -c max_wal_size=4GB
+      -c shared_buffers=${PG_SHARED_BUFFERS:-384MB}
+      -c effective_cache_size=${PG_EFFECTIVE_CACHE_SIZE:-1024MB}
+      -c work_mem=${PG_WORK_MEM:-4MB}
+      -c maintenance_work_mem=${PG_MAINTENANCE_WORK_MEM:-128MB}
+      -c wal_buffers=${PG_WAL_BUFFERS:-32MB}
+      -c max_wal_size=2GB
       -c checkpoint_completion_target=0.9
       -c random_page_cost=1.1
       -c effective_io_concurrency=200
@@ -100,6 +101,8 @@ services:
       -c autovacuum_vacuum_cost_delay=2
       -c log_min_duration_statement=2000
       -c shared_preload_libraries='timescaledb,pg_stat_statements'
+      -c timescaledb.max_background_workers=${TS_MAX_BACKGROUND_WORKERS:-8}
+      -c timescaledb.bgw_scheduler_restart_time=${TS_BGW_SCHEDULER_RESTART_TIME:-60000}
       -c pg_stat_statements.track=all
       -c pg_stat_statements.max=10000
     expose:
@@ -108,14 +111,14 @@ services:
       - ./postgres-data:/bitnami/postgresql
     networks:
       - ct
-    mem_limit: ${DB_MEM_LIMIT:-4g}
+    mem_limit: ${DB_MEM_LIMIT:-3g}
     deploy:
       resources:
         limits:
           # Hard cgroup quota for the DB container. Docker may still report 100% of quota
           # in container metrics, but host usage will not exceed DB_CPU_LIMIT logical CPUs.
           cpus: '${DB_CPU_LIMIT:-2.0}'
-          memory: ${DB_MEM_LIMIT:-4g}
+          memory: ${DB_MEM_LIMIT:-3g}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-calltelemetry} -d $${POSTGRES_DB:-calltelemetry_prod}"]
       interval: 30s
@@ -127,6 +130,7 @@ services:
   node-exporter:
     image: prom/node-exporter:v1.8.2
     restart: unless-stopped
+    mem_limit: 128m
     pid: host
     logging:
       driver: "json-file"
@@ -146,8 +150,10 @@ services:
 
   postgres-exporter:
     image: prometheuscommunity/postgres-exporter:v0.15.0
+    mem_limit: 256m
     environment:
       DATA_SOURCE_NAME: "postgresql://${POSTGRES_USER:-calltelemetry}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-calltelemetry_prod}?sslmode=disable"
+      PG_EXPORTER_AUTO_DISCOVER_DATABASES: "false"
     ports:
       - "9187:9187"
     depends_on:
@@ -267,6 +273,7 @@ services:
   nats-exporter:
     image: "natsio/prometheus-nats-exporter:0.19.1"
     restart: "always"
+    mem_limit: 128m
     logging:
       driver: "json-file"
       options:
@@ -297,6 +304,7 @@ services:
     image: prom/prometheus:v2.52.0
     restart: "always"
     user: root
+    mem_limit: 512m
     logging:
       driver: "json-file"
       options:
@@ -324,6 +332,7 @@ services:
   alertmanager:
     image: prom/alertmanager:v0.28.1
     restart: "always"
+    mem_limit: 128m
     logging:
       driver: "json-file"
       options:
@@ -346,6 +355,7 @@ services:
     image: grafana/grafana:12.2.1
     restart: "always"
     user: "472"
+    mem_limit: 256m
     depends_on:
       - prometheus
     logging:
@@ -472,6 +482,7 @@ services:
     # Core service — observability pipeline for traces and metrics
     image: otel/opentelemetry-collector-contrib:0.96.0
     restart: unless-stopped
+    mem_limit: 256m
     command: ["--config=/etc/otelcol/config.yaml"]
     volumes:
       - ./otel-collector/otel-collector-config.yaml:/etc/otelcol/config.yaml:ro
@@ -497,6 +508,7 @@ services:
     # Core service — distributed tracing backend, queryable via Grafana
     image: grafana/tempo:2.6.1
     restart: unless-stopped
+    mem_limit: 256m
     command: ["-config.file=/etc/tempo/tempo.yaml"]
     volumes:
       - ./tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
