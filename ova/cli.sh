@@ -860,6 +860,262 @@ jtapi_cmd() {
   esac
 }
 
+# ─── profile_up / profile_down helpers ───────────────────────────────────────
+
+# profile_up <service> [service...]
+#   Starts the given services using the current COMPOSE_PROFILES from .env.
+#   Non-blocking: returns once containers are started (not necessarily healthy).
+profile_up() {
+  local compose_file
+  compose_file=$(get_compose_files)
+  $DOCKER_COMPOSE_CMD $compose_file up -d "$@" 2>&1 | grep -v "^time=" || true
+}
+
+# profile_down <container> [container...]
+#   Stops and removes the named containers directly.
+#   Bypasses docker compose --remove-orphans which doesn't evict profile-gated containers.
+profile_down() {
+  local containers=("$@")
+  local running=()
+  for c in "${containers[@]}"; do
+    if docker inspect "$c" >/dev/null 2>&1; then
+      running+=("$c")
+    fi
+  done
+  if [ ${#running[@]} -eq 0 ]; then
+    return 0
+  fi
+  docker stop "${running[@]}" >/dev/null 2>&1 || true
+  docker rm   "${running[@]}" >/dev/null 2>&1 || true
+}
+
+# ─── ~/.ct/preferences.json helpers ──────────────────────────────────────────
+# Compatible with the @calltelemetry/cli (ct) preferences format.
+# Uses python3 for reliable JSON read/write without requiring jq.
+CT_PREFS_FILE="${HOME}/.ct/preferences.json"
+
+# Read a boolean key from preferences.json; echoes "true" or "false".
+prefs_get() {
+  local key="$1"
+  python3 -c "
+import json, sys
+try:
+    with open('${CT_PREFS_FILE}') as f:
+        p = json.load(f)
+    v = p.get('${key}')
+    print('true' if v else 'false')
+except Exception:
+    print('none')
+" 2>/dev/null || echo "none"
+}
+
+# Write a boolean key to preferences.json (creates dir/file if needed).
+prefs_set() {
+  local key="$1" value="$2"   # value: "true" | "false"
+  python3 - << INNER_EOF 2>/dev/null
+import json, os
+d = os.path.expanduser("~/.ct")
+f = os.path.join(d, "preferences.json")
+os.makedirs(d, exist_ok=True)
+try:
+    with open(f) as fh:
+        prefs = json.load(fh)
+except Exception:
+    prefs = {}
+prefs["${key}"] = ("${value}" == "true")
+with open(f, "w") as fh:
+    json.dump(prefs, fh, indent=2)
+    fh.write("\n")
+INNER_EOF
+}
+
+# ─── Storage (SeaweedFS) commands ─────────────────────────────────────────────
+
+is_storage_enabled() {
+  local profiles
+  profiles=$(env_get "COMPOSE_PROFILES")
+  echo "$profiles" | grep -q "storage"
+}
+
+sync_prefs_to_env_storage() {
+  local pref_val
+  pref_val=$(prefs_get "storage")
+
+  case "$pref_val" in
+    true)
+      local profiles
+      profiles=$(env_get "COMPOSE_PROFILES")
+      if ! echo "$profiles" | grep -q "storage"; then
+        if [ -n "$profiles" ]; then
+          env_set "COMPOSE_PROFILES" "${profiles},storage"
+        else
+          env_set "COMPOSE_PROFILES" "storage"
+        fi
+      fi
+      ;;
+    false)
+      local profiles new_profiles
+      profiles=$(env_get "COMPOSE_PROFILES")
+      new_profiles=$(echo "$profiles" | sed 's/,*storage,*//' | sed 's/^,//' | sed 's/,$//')
+      if [ "$profiles" != "$new_profiles" ]; then
+        env_set "COMPOSE_PROFILES" "$new_profiles"
+      fi
+      ;;
+    *)
+      # Key absent in prefs — do not override .env
+      ;;
+  esac
+}
+
+storage_cmd() {
+  local subcmd="${1:-status}"
+  shift 2>/dev/null || true
+
+  case "$subcmd" in
+    enable)
+      local profiles
+      profiles=$(env_get "COMPOSE_PROFILES")
+      if ! echo "$profiles" | grep -q "storage"; then
+        if [ -n "$profiles" ]; then
+          env_set "COMPOSE_PROFILES" "${profiles},storage"
+        else
+          env_set "COMPOSE_PROFILES" "storage"
+        fi
+      fi
+      env_set "S3_ENABLED" "true"
+      env_set "S3_ENDPOINT" "http://seaweedfs:8333"
+      prefs_set "storage" "true"
+      fix_systemd_compose_files
+      echo "✅ Storage (SeaweedFS) enabled — starting services..."
+      profile_up seaweedfs
+      echo "Storage services started."
+      ;;
+    disable)
+      local profiles new_profiles
+      profiles=$(env_get "COMPOSE_PROFILES")
+      new_profiles=$(echo "$profiles" | sed 's/,*storage,*//' | sed 's/^,//' | sed 's/,$//')
+      env_set "COMPOSE_PROFILES" "$new_profiles"
+      env_set "S3_ENABLED" "false"
+      prefs_set "storage" "false"
+      fix_systemd_compose_files
+      echo "✅ Storage (SeaweedFS) disabled — stopping services..."
+      profile_down calltelemetry-seaweedfs-1
+      echo "SeaweedFS stopped."
+      ;;
+    status)
+      if is_storage_enabled; then
+        echo "Storage: enabled"
+        $DOCKER_COMPOSE_CMD $(get_compose_files) ps seaweedfs 2>/dev/null || true
+      else
+        echo "Storage: disabled"
+      fi
+      ;;
+    *)
+      echo "Usage: $0 storage {enable|disable|status}"
+      echo ""
+      echo "Commands:"
+      echo "  enable   Start SeaweedFS S3-compatible object store"
+      echo "  disable  Stop SeaweedFS"
+      echo "  status   Show storage status"
+      ;;
+  esac
+}
+
+# ─── Otel (observability) stack commands ─────────────────────────────────────
+
+is_otel_enabled() {
+  local profiles
+  profiles=$(env_get "COMPOSE_PROFILES")
+  echo "$profiles" | grep -q "otel"
+}
+
+sync_prefs_to_env_otel() {
+  local pref_val
+  pref_val=$(prefs_get "otel")
+
+  case "$pref_val" in
+    true)
+      local profiles
+      profiles=$(env_get "COMPOSE_PROFILES")
+      if ! echo "$profiles" | grep -q "otel"; then
+        if [ -n "$profiles" ]; then
+          env_set "COMPOSE_PROFILES" "${profiles},otel"
+        else
+          env_set "COMPOSE_PROFILES" "otel"
+        fi
+      fi
+      ;;
+    false)
+      local profiles new_profiles
+      profiles=$(env_get "COMPOSE_PROFILES")
+      new_profiles=$(echo "$profiles" | sed 's/,*otel,*//' | sed 's/^,//' | sed 's/,$//')
+      if [ "$profiles" != "$new_profiles" ]; then
+        env_set "COMPOSE_PROFILES" "$new_profiles"
+      fi
+      ;;
+    *)
+      # Key absent in prefs — do not override .env
+      ;;
+  esac
+}
+
+otel_cmd() {
+  local subcmd="${1:-status}"
+  shift 2>/dev/null || true
+
+  case "$subcmd" in
+    enable)
+      local profiles
+      profiles=$(env_get "COMPOSE_PROFILES")
+      if ! echo "$profiles" | grep -q "otel"; then
+        if [ -n "$profiles" ]; then
+          env_set "COMPOSE_PROFILES" "${profiles},otel"
+        else
+          env_set "COMPOSE_PROFILES" "otel"
+        fi
+      fi
+      env_set "PROM_EX_UPLOAD_DASHBOARDS" "true"
+      prefs_set "otel" "true"
+      fix_systemd_compose_files
+      echo "✅ Otel stack enabled — starting services..."
+      profile_up prometheus grafana loki alloy tempo otel-collector node-exporter nats-exporter postgres-exporter alertmanager
+      echo "Prometheus, Grafana, Loki, Alloy, Tempo, and exporters started."
+      ;;
+    disable)
+      local profiles new_profiles
+      profiles=$(env_get "COMPOSE_PROFILES")
+      new_profiles=$(echo "$profiles" | sed 's/,*otel,*//' | sed 's/^,//' | sed 's/,$//')
+      env_set "COMPOSE_PROFILES" "$new_profiles"
+      env_set "PROM_EX_UPLOAD_DASHBOARDS" "false"
+      prefs_set "otel" "false"
+      fix_systemd_compose_files
+      echo "✅ Otel stack disabled — stopping services..."
+      profile_down \
+        calltelemetry-prometheus-1 calltelemetry-grafana-1 calltelemetry-loki-1 \
+        calltelemetry-alloy-1 calltelemetry-tempo-1 calltelemetry-otel-collector-1 \
+        calltelemetry-node-exporter-1 calltelemetry-nats-exporter-1 \
+        calltelemetry-postgres-exporter-1 calltelemetry-alertmanager-1
+      echo "Otel services stopped."
+      ;;
+    status)
+      if is_otel_enabled; then
+        echo "Otel: enabled"
+        $DOCKER_COMPOSE_CMD $(get_compose_files) ps prometheus grafana loki alloy tempo otel-collector node-exporter nats-exporter postgres-exporter alertmanager 2>/dev/null || true
+      else
+        echo "Otel: disabled"
+      fi
+      ;;
+    *)
+      echo "Usage: $0 otel {enable|disable|status}"
+      echo ""
+      echo "Commands:"
+      echo "  enable   Start Prometheus, Grafana, Loki, Alloy, Tempo, otel-collector, and exporters"
+      echo "  disable  Stop the full otel stack (~900 MiB freed)"
+      echo "  status   Show otel stack status"
+      ;;
+  esac
+}
+
 ensure_bind_mount_files() {
   # Ensure files that Docker bind-mounts exist as FILES (not directories).
   # Docker auto-creates missing bind-mount paths as directories, which
@@ -1666,6 +1922,12 @@ show_help() {
   echo "  jtapi enable        Enable JTAPI sidecar, ct-media, and SeaweedFS services"
   echo "  jtapi disable       Disable JTAPI services"
   echo "  jtapi troubleshoot  Run comprehensive JTAPI diagnostics"
+  echo "  storage             Show SeaweedFS storage status"
+  echo "  storage enable      Start SeaweedFS S3-compatible object store"
+  echo "  storage disable     Stop SeaweedFS"
+  echo "  otel                Show observability stack status"
+  echo "  otel enable         Start Prometheus, Grafana, Loki, Alloy, Tempo, and exporters"
+  echo "  otel disable        Stop otel stack (~900 MiB freed)"
   echo
   echo "Maintenance Commands:"
   echo "  selfupdate          Update CLI script to latest version"
@@ -5215,6 +5477,9 @@ certs_cmd() {
 
 # Auto-migrate legacy .jtapi-enabled to .env on any CLI invocation
 migrate_jtapi_state
+# Sync preferences.json → COMPOSE_PROFILES for optional stacks
+sync_prefs_to_env_storage
+sync_prefs_to_env_otel
 
 # Main script logic
 case "$1" in
@@ -5513,6 +5778,14 @@ case "$1" in
 
   jtapi)
     jtapi_cmd "$2"
+    ;;
+
+  storage)
+    storage_cmd "$2"
+    ;;
+
+  otel)
+    otel_cmd "$2"
     ;;
 
   # Maintenance commands
