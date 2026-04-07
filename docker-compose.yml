@@ -157,12 +157,18 @@ services:
       - ct
 
   postgres-exporter:
-    image: prometheuscommunity/postgres-exporter:v0.15.0
+    image: prometheuscommunity/postgres-exporter:v0.18.1
     mem_limit: 256m
     environment:
-      DATA_SOURCE_NAME: "postgresql://${POSTGRES_USER:-calltelemetry}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-calltelemetry_prod}?sslmode=disable"
+      DATA_SOURCE_NAME: "postgresql://${POSTGRES_USER:-calltelemetry}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-calltelemetry_prod}?sslmode=disable&application_name=postgres_exporter"
       PG_EXPORTER_AUTO_DISCOVER_DATABASES: "false"
-      PG_EXPORTER_EXTEND_QUERY_PATH: /etc/postgres_exporter/queries.yaml
+      PG_EXPORTER_COLLECTION_TIMEOUT: "5s"
+    command:
+      - --disable-settings-metrics
+      - --no-collector.stat_user_tables
+      - --no-collector.statio_user_tables
+      - --no-collector.statio_user_indexes
+      - --extend.query-path=/etc/postgres_exporter/queries.yaml
     volumes:
       - ./prometheus/postgres-queries.yaml:/etc/postgres_exporter/queries.yaml:ro
     ports:

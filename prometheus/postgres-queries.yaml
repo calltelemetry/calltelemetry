@@ -77,6 +77,17 @@ pg_stat_statements_top:
         description: "Time spent writing blocks (ms) - needs track_io_timing=on"
 
 # ─── ACTIVE CONNECTIONS BY STATE ──────────────────────────────────────────────
+pg_connection_limits:
+  query: |
+    SELECT setting::bigint AS max_connections
+    FROM pg_settings
+    WHERE name = 'max_connections'
+  metrics:
+    - max_connections:
+        usage: GAUGE
+        description: "Configured max_connections"
+
+# ─── ACTIVE CONNECTIONS BY STATE ──────────────────────────────────────────────
 pg_connection_states:
   query: |
     SELECT

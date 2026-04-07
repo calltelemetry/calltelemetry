@@ -32,7 +32,18 @@ scrape_configs:
   - job_name: postgresql
     static_configs:
       - targets: ["postgres-exporter:9187"]
-    scrape_interval: 15s
+    scrape_interval: 60s
+    scrape_timeout: 10s
+    metric_relabel_configs:
+      # Defense in depth: if exporter defaults regress, keep high-cardinality
+      # per-relation metrics out of the appliance TSDB.
+      - source_labels: [__name__]
+        regex: 'pg_(stat|statio)_user_(tables|indexes)_.*'
+        action: drop
+      # Drop static PostgreSQL config flags — never change, not useful as time-series
+      - source_labels: [__name__]
+        regex: 'pg_settings_.*'
+        action: drop
 
   # Caddy reverse proxy gateway metrics
   - job_name: caddy
