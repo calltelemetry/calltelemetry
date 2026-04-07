@@ -112,6 +112,7 @@ services:
       -c wal_compression=on
       -c deadlock_timeout=500ms
       -c log_lock_waits=on
+      -c jit=off
     expose:
       - "5432"
     volumes:
