@@ -3421,8 +3421,9 @@ wait_for_services() {
     # Display status
     if [[ "$pending_count" =~ ^[0-9]+$ ]]; then
       if [ "$pending_count" -eq 0 ]; then
-        # Use applied_count as total if total is missing
-        local display_total="${total_count:-$applied_count}"
+        # When Ecto reports 0 pending, applied_count IS the total — don't
+        # let the file-count (release_total_count) create a false X/Y mismatch.
+        local display_total="$applied_count"
         echo ""
         echo "  ✓ Migrations complete ($applied_count/$display_total)"
         migrations_complete=true
