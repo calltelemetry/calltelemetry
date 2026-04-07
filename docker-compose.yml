@@ -681,7 +681,9 @@ services:
         condition: service_healthy
 
   seaweedfs:
-    # Core service — used by config audit snapshots, as-built reports, and JTAPI audio
+    # Optional storage service — S3-compatible object store for syslog snapshots, config audits,
+    # as-built reports, and JTAPI audio. Controlled via COMPOSE_PROFILES=storage.
+    profiles: ["storage"]
     image: chrislusf/seaweedfs:4.13
     pull_policy: if_not_present
     init: true
