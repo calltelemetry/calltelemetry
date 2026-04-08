@@ -294,6 +294,39 @@ get_current_postgres_image() {
   fi
 }
 
+POSTGRES_COMPAT_SCRIPT="postgres-bitnami-convert.sh"
+
+# Repair missing PostgreSQL config files in existing data dirs created by older
+# appliance/database image combinations. Only missing files are restored.
+repair_postgres_compat() {
+  local repair_script="${INSTALL_DIR}/${POSTGRES_COMPAT_SCRIPT}"
+  local pg_data="${INSTALL_DIR}/${POSTGRES_DATA_DIR}/data"
+  local image="${1:-$(get_current_postgres_image)}"
+  shift || true
+
+  if [ ! -f "${pg_data}/PG_VERSION" ]; then
+    return 0
+  fi
+
+  if [ -f "${pg_data}/postgresql.conf" ] && [ -f "${pg_data}/pg_hba.conf" ] && [ -f "${pg_data}/pg_ident.conf" ]; then
+    return 0
+  fi
+
+  if [ ! -f "$repair_script" ]; then
+    echo "[WARN] PostgreSQL compatibility repair script not found: $repair_script"
+    return 0
+  fi
+
+  echo "Repairing missing PostgreSQL config files in ${pg_data}..."
+  if bash "$repair_script" --image "$image" --data-dir "$pg_data" "$@"; then
+    return 0
+  fi
+
+  echo "[FAIL] PostgreSQL compatibility repair failed."
+  echo "   Run manually: ${repair_script} --image ${image} --data-dir ${pg_data}"
+  return 1
+}
+
 # JTAPI feature state — now driven by COMPOSE_PROFILES in .env
 JTAPI_STATE_FILE=".jtapi-enabled"
 ENV_FILE="${INSTALL_DIR}/.env"
@@ -2287,6 +2320,17 @@ download_bundle() {
     fi
   fi
 
+  # postgres-bitnami-convert.sh -> install/update compatibility repair helper
+  if [ -f "$extract_dir/${POSTGRES_COMPAT_SCRIPT}" ]; then
+    if ! diff -q "$extract_dir/${POSTGRES_COMPAT_SCRIPT}" "./${POSTGRES_COMPAT_SCRIPT}" >/dev/null 2>&1; then
+      cp "$extract_dir/${POSTGRES_COMPAT_SCRIPT}" "./${POSTGRES_COMPAT_SCRIPT}"
+      chmod +x "./${POSTGRES_COMPAT_SCRIPT}"
+      echo "  [OK] ${POSTGRES_COMPAT_SCRIPT} (updated)"
+    else
+      echo "  [OK] ${POSTGRES_COMPAT_SCRIPT} (no changes)"
+    fi
+  fi
+
   # prometheus/prometheus.yml
   if [ -f "$extract_dir/prometheus/prometheus.yml" ]; then
     mkdir -p prometheus
@@ -3062,6 +3106,12 @@ update() {
         rm -f "$POSTGRES_OVERRIDE_FILE"
         echo "[OK] Removed — PG settings now driven by .env (cli.sh postgres profile)"
       fi
+    fi
+
+    if ! repair_postgres_compat "$(get_current_postgres_image)"; then
+      rm -f "$caddyfile_tmp"
+      rm -f "${INSTALL_DIR}/.ssh/authorized_keys"
+      return 1
     fi
 
     # Check swap compliance: 8GB total, or 50% of RAM if RAM > 16GB
@@ -5650,6 +5700,7 @@ case "$1" in
         echo "Usage:"
         echo "  cli.sh postgres set <version>              Set version for next update"
         echo "  cli.sh postgres upgrade <version>          Upgrade to new major version"
+        echo "  cli.sh postgres convert-bitnami [--dry-run] Repair missing config files in postgres-data/data"
         echo "  cli.sh postgres profile <small|medium|large|show>  Set memory sizing profile"
         ;;
       profile)
@@ -5871,9 +5922,13 @@ case "$1" in
           echo "Backup preserved at: $backup_file"
         fi
         ;;
+      convert-bitnami)
+        shift 2
+        repair_postgres_compat "$(get_current_postgres_image)" "$@"
+        ;;
       *)
         echo "Unknown postgres command: $2"
-        echo "Usage: cli.sh postgres [status|set <version>|upgrade <version>|profile <small|medium|large|show>]"
+        echo "Usage: cli.sh postgres [status|set <version>|upgrade <version>|convert-bitnami [--dry-run]|profile <small|medium|large|show>]"
         exit 1
         ;;
     esac
