@@ -320,30 +320,68 @@ env_set() {
   fi
 }
 
+# Set a key in .env only if it is not already set (no-clobber)
+env_set_default() {
+  local key="$1" value="$2"
+  if [ -z "$(env_get "$key")" ]; then
+    env_set "$key" "$value"
+  fi
+}
+
+# Ensure baseline PG/pool settings exist in .env during upgrades.
+# Uses env_set_default so existing customer overrides are preserved.
+# Values match the "small" profile — safe for 4-8GB appliances.
+ensure_postgres_defaults() {
+  echo "Ensuring PostgreSQL defaults..."
+  env_set_default "PG_PROFILE" "small"
+  env_set_default "PG_SHM_SIZE" "4gb"
+  env_set_default "PG_SHARED_BUFFERS" "1GB"
+  env_set_default "PG_EFFECTIVE_CACHE_SIZE" "3GB"
+  env_set_default "PG_WORK_MEM" "32MB"
+  env_set_default "PG_MAINTENANCE_WORK_MEM" "256MB"
+  env_set_default "PG_WAL_BUFFERS" "128MB"
+  env_set_default "PG_PARALLEL_WORKERS" "2"
+  env_set_default "PG_MAX_PARALLEL_WORKERS" "4"
+  env_set_default "PG_AUTOVACUUM_WORKERS" "4"
+  env_set_default "PG_AUTOVACUUM_VACUUM_SCALE" "0.01"
+  env_set_default "PG_AUTOVACUUM_ANALYZE_SCALE" "0.005"
+  env_set_default "PG_MAX_CONNECTIONS" "305"
+  env_set_default "DB_MEM_LIMIT" "4g"
+  env_set_default "WEB_MEM_LIMIT" "3g"
+  env_set_default "DB_CPU_LIMIT" "2.0"
+  env_set_default "DB_POOL_SIZE" "60"
+  env_set_default "DB_BACKGROUND_POOL_SIZE" "10"
+  env_set_default "DB_DISCOVERY_POOL_SIZE" "25"
+  env_set_default "DB_OBAN_POOL_SIZE" "20"
+  echo "[OK] PostgreSQL defaults applied (existing values preserved)"
+}
+
 # Apply a PostgreSQL memory sizing profile (small/medium/large)
 apply_postgres_profile() {
   local profile="$1"
   case "$profile" in
     small)
+      # Production-tuned from OVA field experience (2026-04)
       env_set "PG_PROFILE" "small"
-      env_set "PG_SHM_SIZE" "1gb"
-      env_set "PG_SHARED_BUFFERS" "512MB"
-      env_set "PG_EFFECTIVE_CACHE_SIZE" "1536MB"
-      env_set "PG_WORK_MEM" "8MB"
+      env_set "PG_SHM_SIZE" "4gb"
+      env_set "PG_SHARED_BUFFERS" "1GB"
+      env_set "PG_EFFECTIVE_CACHE_SIZE" "3GB"
+      env_set "PG_WORK_MEM" "32MB"
       env_set "PG_MAINTENANCE_WORK_MEM" "256MB"
-      env_set "PG_WAL_BUFFERS" "64MB"
-      env_set "PG_PARALLEL_WORKERS" "1"
-      env_set "PG_MAX_PARALLEL_WORKERS" "2"
-      env_set "PG_AUTOVACUUM_WORKERS" "2"
-      env_set "PG_AUTOVACUUM_VACUUM_SCALE" "0.05"
-      env_set "PG_AUTOVACUUM_ANALYZE_SCALE" "0.02"
-      env_set "PG_MAX_CONNECTIONS" "105"
-      env_set "DB_MEM_LIMIT" "3g"
-      env_set "WEB_MEM_LIMIT" "2g"
-      env_set "DB_POOL_SIZE" "30"
-      env_set "DB_BACKGROUND_POOL_SIZE" "5"
-      env_set "DB_DISCOVERY_POOL_SIZE" "10"
-      env_set "DB_OBAN_POOL_SIZE" "10"
+      env_set "PG_WAL_BUFFERS" "128MB"
+      env_set "PG_PARALLEL_WORKERS" "2"
+      env_set "PG_MAX_PARALLEL_WORKERS" "4"
+      env_set "PG_AUTOVACUUM_WORKERS" "4"
+      env_set "PG_AUTOVACUUM_VACUUM_SCALE" "0.01"
+      env_set "PG_AUTOVACUUM_ANALYZE_SCALE" "0.005"
+      env_set "PG_MAX_CONNECTIONS" "305"
+      env_set "DB_MEM_LIMIT" "4g"
+      env_set "WEB_MEM_LIMIT" "3g"
+      env_set "DB_CPU_LIMIT" "2.0"
+      env_set "DB_POOL_SIZE" "60"
+      env_set "DB_BACKGROUND_POOL_SIZE" "10"
+      env_set "DB_DISCOVERY_POOL_SIZE" "25"
+      env_set "DB_OBAN_POOL_SIZE" "20"
       ;;
     medium)
       # 8GB RAM target — DB gets 3g, web gets 2.5g, ~2.5g for OS/containers
@@ -3011,6 +3049,9 @@ update() {
 
     fix_systemd_service_if_needed
     fix_systemd_compose_files
+
+    # Ensure PG/pool .env defaults exist (no-clobber — preserves customer overrides)
+    ensure_postgres_defaults
 
     # Check swap compliance: 8GB total, or 50% of RAM if RAM > 16GB
     local SWAPFILE="/swapfile"
