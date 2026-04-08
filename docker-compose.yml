@@ -490,7 +490,7 @@ services:
       nats:
         condition: service_started
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:5514/readyz"]
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/127.0.0.1/5514'"]
       interval: 30s
       timeout: 5s
       retries: 3
