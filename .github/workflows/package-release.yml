@@ -314,6 +314,11 @@ jobs:
             exit 1
           fi
 
+          if grep -q 'calltelemetry/ct-media:' "$BUNDLE_DIR/docker-compose.yml"; then
+            echo "❌ ERROR: Bundled docker-compose.yml still references legacy calltelemetry/ct-media"
+            exit 1
+          fi
+
           if ! grep -q '^TRACEROUTE_VERSION=' "$BUNDLE_DIR/.env"; then
             echo "❌ ERROR: Bundled .env does not contain TRACEROUTE_VERSION"
             exit 1
@@ -321,6 +326,11 @@ jobs:
 
           if ! grep -q '^CT_MEDIA_VERSION=' "$BUNDLE_DIR/.env"; then
             echo "❌ ERROR: Bundled .env does not contain CT_MEDIA_VERSION"
+            exit 1
+          fi
+
+          if grep -q '^CT_MEDIA_VERSION=.*-rc' "$BUNDLE_DIR/.env"; then
+            echo "❌ ERROR: Bundled .env contains a legacy unified CT_MEDIA_VERSION instead of a ct-media-go semver tag"
             exit 1
           fi
 

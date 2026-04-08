@@ -296,6 +296,70 @@ get_current_postgres_image() {
 
 POSTGRES_COMPAT_SCRIPT="postgres-bitnami-convert.sh"
 
+resolve_latest_ct_media_go_version() {
+  local hub_api="https://hub.docker.com/v2/repositories/calltelemetry/ct-media-go/tags?page_size=100"
+  local tags=""
+
+  if command -v curl >/dev/null 2>&1; then
+    tags=$(curl -fsSL "$hub_api" 2>/dev/null | grep -o '"name":"[^"]*"' | sed 's/"name":"\([^"]*\)"/\1/')
+  elif command -v wget >/dev/null 2>&1; then
+    tags=$(wget -qO- "$hub_api" 2>/dev/null | grep -o '"name":"[^"]*"' | sed 's/"name":"\([^"]*\)"/\1/')
+  fi
+
+  local tag
+  tag=$(printf '%s\n' "$tags" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+  if echo "$tag" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+    echo "$tag"
+    return 0
+  fi
+
+  return 1
+}
+
+normalize_ct_media_bundle() {
+  local appliance_version="$1"
+  local current_media_version
+  current_media_version="$(env_get "CT_MEDIA_VERSION")"
+
+  local legacy_image=false
+  if grep -q 'calltelemetry/ct-media:' "$TEMP_FILE" 2>/dev/null; then
+    legacy_image=true
+  fi
+
+  local legacy_version=false
+  if [ -z "$current_media_version" ] || echo "$current_media_version" | grep -q -- '-rc'; then
+    legacy_version=true
+  fi
+
+  if [ "$legacy_image" = false ] && [ "$legacy_version" = false ]; then
+    return 0
+  fi
+
+  local replacement_version=""
+  if ! replacement_version="$(resolve_latest_ct_media_go_version)"; then
+    echo "[FAIL] Legacy ct-media bundle detected, but failed to resolve the latest ct-media-go release."
+    echo "   Please set CT_MEDIA_VERSION manually to a valid ct-media-go semver release and retry."
+    return 1
+  fi
+
+  echo "Normalizing legacy media bundle references to ct-media-go:${replacement_version}..."
+  env_set "CT_MEDIA_VERSION" "$replacement_version"
+
+  if grep -q 'calltelemetry/ct-media:' "$TEMP_FILE" 2>/dev/null; then
+    sed -i -E "s|calltelemetry/ct-media:[^\"[:space:]]*|calltelemetry/ct-media-go:${replacement_version}|g" "$TEMP_FILE"
+  fi
+
+  if grep -q 'calltelemetry/ct-media-go:' "$TEMP_FILE" 2>/dev/null; then
+    sed -i -E "s|calltelemetry/ct-media-go:[^\"[:space:]]*|calltelemetry/ct-media-go:${replacement_version}|g" "$TEMP_FILE"
+  fi
+
+  if grep -q 'calltelemetry/ct-media-go:\${CT_MEDIA_VERSION' "$TEMP_FILE" 2>/dev/null; then
+    :
+  fi
+
+  echo "[OK] Legacy media references upgraded for appliance ${appliance_version}"
+}
+
 # Repair missing PostgreSQL config files in existing data dirs created by older
 # appliance/database image combinations. Only missing files are restored.
 repair_postgres_compat() {
@@ -2299,6 +2363,12 @@ download_bundle() {
       cp "$extract_dir/.env" "$ENV_FILE"
       echo "  [OK] .env (created from bundle)"
     fi
+  fi
+
+  if ! normalize_ct_media_bundle "$version"; then
+    rm -f "$bundle_name"
+    rm -rf "$extract_dir"
+    return 1
   fi
 
   # .env.example -> always overwrite template
