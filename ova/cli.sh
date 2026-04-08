@@ -3059,6 +3059,24 @@ update() {
       fi
     fi
 
+    # Remove TimescaleDB references — the extension is no longer shipped in our
+    # postgres images. If present in docker-compose.yml or postgresql.conf, PG
+    # crashes on startup with "could not access file timescaledb".
+    if grep -q "timescaledb" "$ORIGINAL_FILE" 2>/dev/null; then
+      echo "Removing TimescaleDB references from docker-compose.yml..."
+      sed -i "s/shared_preload_libraries='timescaledb,pg_stat_statements'/shared_preload_libraries='pg_stat_statements'/" "$ORIGINAL_FILE"
+      sed -i "s/shared_preload_libraries='timescaledb'/shared_preload_libraries=''/" "$ORIGINAL_FILE"
+      sed -i '/-c timescaledb\./d' "$ORIGINAL_FILE"
+      echo "[OK] TimescaleDB references removed from compose"
+    fi
+    local pg_conf="${INSTALL_DIR}/postgres-data/data/postgresql.conf"
+    if [ -f "$pg_conf" ] && grep -q "timescaledb" "$pg_conf" 2>/dev/null; then
+      echo "Removing TimescaleDB from postgresql.conf..."
+      sudo sed -i "s/shared_preload_libraries = 'timescaledb,pg_stat_statements'/shared_preload_libraries = 'pg_stat_statements'/" "$pg_conf"
+      sudo sed -i "s/shared_preload_libraries = 'timescaledb'/shared_preload_libraries = ''/" "$pg_conf"
+      echo "[OK] TimescaleDB references removed from postgresql.conf"
+    fi
+
     # Check swap compliance: 8GB total, or 50% of RAM if RAM > 16GB
     local SWAPFILE="/swapfile"
     local total_ram_gb target_swap_gb non_file_swap_gb swapfile_target_gb current_swapfile_gb
