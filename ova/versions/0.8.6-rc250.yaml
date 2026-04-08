@@ -1,0 +1,129 @@
+version: "3.8"
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - ./certs:/certs:ro
+    networks:
+      - ct
+
+  vue-web:
+    image: "calltelemetry/vue:0.8.6-rc250"
+    restart: "always"
+    expose:
+      - "80"
+    networks:
+      - ct
+
+  traceroute:
+    image: "calltelemetry/traceroute-go:1.2.1"
+    user: root
+    expose:
+      - "4100"
+    networks:
+      - ct
+
+  ct-syslog-ingest:
+    image: "calltelemetry/ct-syslog-ingest-go:1.0.1"
+    restart: unless-stopped
+    ports:
+      - "514:514/udp"
+      - "514:514/tcp"
+    expose:
+      - "5514"
+    environment:
+      - LOKI_URL=http://loki:3100/loki/api/v1/push
+      - NATS_URL=nats://nats:4222
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_SERVICE_NAME=ct-syslog-ingest
+      - LOG_FORMAT=json
+      - UDP_PORT=514
+      - TCP_PORT=514
+      - HEALTH_PORT=5514
+    depends_on:
+      - nats
+    networks:
+      - ct
+
+  db:
+    image: "calltelemetry/postgres:14"
+    user: root
+    restart: "always"
+    environment:
+      - POSTGRES_USER=calltelemetry
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=calltelemetry_prod
+      - PGDATA=/bitnami/postgresql/data
+    expose:
+      - "5432"
+    volumes:
+      - ./postgres-data:/bitnami/postgresql
+    networks:
+      - ct
+
+  web:
+    image: "calltelemetry/web:0.8.6-rc250"
+    restart: "always"
+    user: root
+    expose:
+      - 4000
+      - 4080
+    ports:
+      - "80:4080"
+      - "22:3022"
+    environment:
+      - DB_USER=calltelemetry
+      - DB_PASSWORD=postgres
+      - DB_HOSTNAME=db
+      - DB_NAME=calltelemetry_prod
+      - DB_PORT=5432
+      - EXTERNAL_IP=$DEFAULT_IPV4
+      - LOGGING_LEVEL=warning
+      - ADMIN_NODE=TRUE
+      - WORKER_NODE=TRUE
+      - CERT_KEY=/home/app/cert/appliance_key.pem
+      - CERT_PUBLIC=/home/app/cert/appliance.crt
+      # can be HACKNEY, IBROWSE, MINT, GUN or HTTPC.
+      - HTTP_ADAPTER=HACKNEY
+      - LOG_PATH=/var/log
+      - ERL_CRASH_DUMP=/tmp/crash-dumps/erl_crash.dump
+      - ERL_CRASH_DUMP_NICE=1
+    tmpfs:
+      - /var/log:rw,mode=0555,size=5000m
+    networks:
+      - ct
+    volumes:
+      - ./certs:/home/app/cert:rw
+      - ./crash-dumps:/tmp/crash-dumps:rw
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "7" # Keeps 7 days of logs
+        compress: "true" # Compresses rotated files
+
+  nats:
+    image: "nats:2.11"
+    command: "-c /etc/nats/nats.conf"
+    volumes:
+      - ./nats.conf:/etc/nats/nats.conf
+    expose:
+      - "4222"
+    networks:
+      - ct
+
+networks:
+  ct:
+    # enable_ipv6: true
+
+volumes:
+  certs:
+    driver: local
+  crash-dumps:
+    driver: local
+  traefik-logs:
+    driver: local
