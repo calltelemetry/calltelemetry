@@ -448,7 +448,10 @@ apply_postgres_profile() {
   echo "  db_pool (discovery):   $(env_get DB_DISCOVERY_POOL_SIZE)"
   echo "  db_pool (oban):        $(env_get DB_OBAN_POOL_SIZE)"
   echo ""
-  echo "Restart required to apply: cli.sh restart"
+  echo "Restarting services to apply new profile..."
+  $DOCKER_COMPOSE_CMD down db 2>/dev/null
+  $DOCKER_COMPOSE_CMD up -d 2>/dev/null
+  echo "[OK] Services restarted with $profile profile"
 }
 
 # Remove a key from .env
