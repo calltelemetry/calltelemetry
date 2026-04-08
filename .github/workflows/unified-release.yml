@@ -3,7 +3,8 @@ run-name: "Unified Release ${{ inputs.version }}"
 
 # Single workflow dispatch that stamps one appliance version across the
 # releasable component repos while pinning independently versioned images such
-# as ct-traceroute-go and ct-syslog-ingest-go into the appliance bundle.
+# as ct-media-go, ct-traceroute-go, and ct-syslog-ingest-go into the appliance
+# bundle from their own semver release streams.
 
 on:
   workflow_dispatch:
@@ -278,8 +279,8 @@ jobs:
 
   # ─────────────────────────────────────────────────────────────────
   # Job 5: Wait for Docker images, generate OVA files, package, deploy
-  # Polls Docker Hub until all 6 images are available (both rebuilt
-  # and retagged), then runs the full OVA pipeline.
+  # Polls Docker Hub until the unified-release images plus semver-managed
+  # dependency images are available, then runs the full OVA pipeline.
   # ─────────────────────────────────────────────────────────────────
   finalize:
     needs: [generate-release-notes, create-releases, retag-unchanged, detect-changes]
@@ -364,7 +365,7 @@ jobs:
           MAX_ATTEMPTS=30  # 30 minutes max
           ATTEMPT=0
 
-          echo "Waiting for all Docker images to be available on Docker Hub..."
+          echo "Waiting for unified-release and semver-managed Docker images to be available on Docker Hub..."
           echo ""
 
           while true; do

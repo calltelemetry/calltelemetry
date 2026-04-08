@@ -1,27 +1,34 @@
 # Unified Release Workflow
 
-## Architecture (Zero Polling)
+## Architecture
 
 ```
 unified-release.yml
   ├── Job 1: Generate release notes + draft release
-  └── Job 2: Create releases in all appliance repos (matrix strategy)
+  └── Job 2: Create releases only in unified-version repos
                 │
                 ▼ (release:published events trigger Docker builds)
          ┌──────────────────────────────────────────────────┐
          │  Each repo's Docker workflow builds + pushes      │
-         │  Final step: repository_dispatch back to          │
-         │  calltelemetry/calltelemetry                      │
+         │  Unified-version repos build from the stamped tag │
+         │  Semver repos are resolved separately by version  │
          └──────────────┬───────────────────────────────────┘
                         │
-                        ▼ (repository_dispatch: docker-build-complete)
-         collect-docker-builds.yml
-           ├── Updates draft release checklist (✓ per repo)
-           ├── Checks if all required builds complete
-           └── When all required images are ready: triggers OVA + package-release
+                        ▼
+         unified-release.yml finalize
+           ├── Resolves latest semver tags for ct-media-go, ct-traceroute-go,
+           │   and ct-syslog-ingest-go unless overrides are supplied
+           ├── Polls Docker Hub until the stamped and semver-managed images exist
+           └── Generates appliance version files and dispatches package/OVA jobs
 ```
 
-## Required Step in Each Repo's Docker Workflow
+## Versioning Model
+
+- `cisco-cdr`, `ct-quasar`, `jtapi-sidecar`, and `jtapi-operator` are stamped by `Unified Release`.
+- `ct-media-go`, `ct-traceroute-go`, and `ct-syslog-ingest-go` are independently semver-released in their own repos.
+- `Unified Release` never rebuilds those semver repos; it resolves their published tag and pins that tag into the appliance bundle.
+
+## Required Step in Each Unified-Version Repo's Docker Workflow
 
 Add this as the **last step** in each repo's Docker build workflow:
 
