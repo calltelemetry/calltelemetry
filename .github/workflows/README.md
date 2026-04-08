@@ -18,7 +18,7 @@ unified-release.yml
          collect-docker-builds.yml
            ├── Updates draft release checklist (✓ per repo)
            ├── Checks if all required builds complete
-           └── When 6/6: triggers OVA + package-release
+           └── When all required images are ready: triggers OVA + package-release
 ```
 
 ## Required Step in Each Repo's Docker Workflow
@@ -49,7 +49,7 @@ Add this as the **last step** in each repo's Docker build workflow:
 | cisco-cdr | `docker-backend-release.yaml` | `calltelemetry/web` |
 | ct-quasar | `publish_docker.yaml` | `calltelemetry/vue` |
 | jtapi-sidecar | `docker-release.yml` | `calltelemetry/jtapi-sidecar` |
-| ct-media | `docker-release.yml` | `calltelemetry/ct-media` |
+| ct-media-go | `release.yml` | `calltelemetry/ct-media-go` |
 | jtapi-operator | `docker-release.yml` | `calltelemetry/jtapi-operator` |
 | ct-traceroute-go | `release.yaml` | `calltelemetry/traceroute-go` |
 | ct-syslog-ingest-go | `release.yml` | `calltelemetry/ct-syslog-ingest-go` |
