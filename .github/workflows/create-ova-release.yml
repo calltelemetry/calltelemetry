@@ -22,7 +22,7 @@ on:
         required: false
         type: string
       ct_media_version:
-        description: "ct-media version override (leave empty for default: 0.2.5)"
+        description: "ct-media-go version override (leave empty to resolve the latest release)"
         required: false
         type: string
 
@@ -79,10 +79,17 @@ jobs:
             JTAPI_VERSION="$VERSION"
           fi
 
-          # ct-media defaults to unified version (override only if needed)
           CT_MEDIA_VERSION="${{ inputs.ct_media_version }}"
           if [ -z "$CT_MEDIA_VERSION" ]; then
-            CT_MEDIA_VERSION="$VERSION"
+            CT_MEDIA_VERSION=$(gh release list \
+              --repo calltelemetry/ct-media-go \
+              --limit 1 \
+              --json tagName \
+              --jq '.[0].tagName')
+          fi
+          if [ -z "$CT_MEDIA_VERSION" ] || [ "$CT_MEDIA_VERSION" = "null" ]; then
+            echo "Failed to resolve a ct-media-go release tag"
+            exit 1
           fi
 
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
@@ -99,7 +106,7 @@ jobs:
           echo "  - Traceroute: $TRACEROUTE_VERSION"
           echo "  - Syslog ingest: $SYSLOG_INGEST_VERSION"
           echo "  - JTAPI Sidecar: $JTAPI_VERSION"
-          echo "  - ct-media: $CT_MEDIA_VERSION"
+          echo "  - ct-media-go: $CT_MEDIA_VERSION"
 
       - name: Generate version .env file
         run: |
@@ -291,7 +298,7 @@ jobs:
           | calltelemetry/traceroute-go | ${{ steps.resolve.outputs.traceroute_version }} |
           | calltelemetry/ct-syslog-ingest-go | ${{ steps.resolve.outputs.syslog_ingest_version }} |
           | calltelemetry/jtapi-sidecar | ${{ steps.resolve.outputs.jtapi_version }} |
-          | calltelemetry/ct-media | ${{ steps.resolve.outputs.ct_media_version }} |"
+          | calltelemetry/ct-media-go | ${{ steps.resolve.outputs.ct_media_version }} |"
           IMAGE_TABLE=$(echo "$IMAGE_TABLE" | sed 's/^          //')
 
           UPGRADE_CMD="### Upgrade
@@ -370,4 +377,4 @@ jobs:
           echo "| calltelemetry/traceroute-go | ${{ steps.resolve.outputs.traceroute_version }} |" >> $GITHUB_STEP_SUMMARY
           echo "| calltelemetry/ct-syslog-ingest-go | ${{ steps.resolve.outputs.syslog_ingest_version }} |" >> $GITHUB_STEP_SUMMARY
           echo "| calltelemetry/jtapi-sidecar | ${{ steps.resolve.outputs.jtapi_version }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| calltelemetry/ct-media | ${{ steps.resolve.outputs.ct_media_version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| calltelemetry/ct-media-go | ${{ steps.resolve.outputs.ct_media_version }} |" >> $GITHUB_STEP_SUMMARY

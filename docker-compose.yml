@@ -661,7 +661,7 @@ services:
 
   ct-media:
     profiles: ["jtapi"]
-    image: "calltelemetry/ct-media:${CT_MEDIA_VERSION}"
+    image: "calltelemetry/ct-media-go:${CT_MEDIA_VERSION}"
     restart: unless-stopped
     logging:
       driver: "json-file"
@@ -682,7 +682,7 @@ services:
     networks:
       - ct
     healthcheck:
-      test: ["CMD", "bash", "-c", "echo > /dev/tcp/127.0.0.1/50053"]
+      test: ["CMD", "/usr/local/bin/ct-media-go", "--health-check"]
       interval: 30s
       timeout: 5s
       retries: 3
