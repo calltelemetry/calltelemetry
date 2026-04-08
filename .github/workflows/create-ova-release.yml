@@ -10,7 +10,7 @@ on:
         required: true
         type: string
       traceroute_version:
-        description: "Traceroute version override (leave empty to use main version)"
+        description: "ct-traceroute-go version override (leave empty to resolve the latest release)"
         required: false
         type: string
       jtapi_version:
@@ -33,6 +33,8 @@ jobs:
 
       - name: Resolve versions
         id: resolve
+        env:
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
         run: |
           VERSION="${{ inputs.version }}"
 
@@ -40,10 +42,18 @@ jobs:
           WEB_VERSION="$VERSION"
           VUE_VERSION="$VERSION"
 
-          # Traceroute now follows unified versioning
+          # Traceroute is independently versioned in ct-traceroute-go
           TRACEROUTE_VERSION="${{ inputs.traceroute_version }}"
           if [ -z "$TRACEROUTE_VERSION" ]; then
-            TRACEROUTE_VERSION="$VERSION"
+            TRACEROUTE_VERSION=$(gh release list \
+              --repo calltelemetry/ct-traceroute-go \
+              --limit 1 \
+              --json tagName \
+              --jq '.[0].tagName')
+          fi
+          if [ -z "$TRACEROUTE_VERSION" ] || [ "$TRACEROUTE_VERSION" = "null" ]; then
+            echo "Failed to resolve a ct-traceroute-go release tag"
+            exit 1
           fi
 
           # JTAPI defaults to main version (unified release stamps all repos)
@@ -124,7 +134,7 @@ jobs:
                 - ct
 
             traceroute:
-              image: "calltelemetry/traceroute:TRACEROUTE_VERSION_PLACEHOLDER"
+              image: "calltelemetry/traceroute-go:TRACEROUTE_VERSION_PLACEHOLDER"
               user: root
               expose:
                 - "4100"
@@ -234,7 +244,7 @@ jobs:
           |-------|---------|
           | calltelemetry/web | ${{ steps.resolve.outputs.web_version }} |
           | calltelemetry/vue | ${{ steps.resolve.outputs.vue_version }} |
-          | calltelemetry/traceroute | ${{ steps.resolve.outputs.traceroute_version }} |
+          | calltelemetry/traceroute-go | ${{ steps.resolve.outputs.traceroute_version }} |
           | calltelemetry/jtapi-sidecar | ${{ steps.resolve.outputs.jtapi_version }} |
           | calltelemetry/ct-media | ${{ steps.resolve.outputs.ct_media_version }} |"
           IMAGE_TABLE=$(echo "$IMAGE_TABLE" | sed 's/^          //')
@@ -312,6 +322,6 @@ jobs:
           echo "|-------|---------|" >> $GITHUB_STEP_SUMMARY
           echo "| calltelemetry/web | ${{ steps.resolve.outputs.web_version }} |" >> $GITHUB_STEP_SUMMARY
           echo "| calltelemetry/vue | ${{ steps.resolve.outputs.vue_version }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| calltelemetry/traceroute | ${{ steps.resolve.outputs.traceroute_version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| calltelemetry/traceroute-go | ${{ steps.resolve.outputs.traceroute_version }} |" >> $GITHUB_STEP_SUMMARY
           echo "| calltelemetry/jtapi-sidecar | ${{ steps.resolve.outputs.jtapi_version }} |" >> $GITHUB_STEP_SUMMARY
           echo "| calltelemetry/ct-media | ${{ steps.resolve.outputs.ct_media_version }} |" >> $GITHUB_STEP_SUMMARY

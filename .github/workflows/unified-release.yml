@@ -1,12 +1,9 @@
 name: Unified Release
 run-name: "Unified Release ${{ inputs.version }}"
 
-# Single workflow dispatch that stamps ONE version across all 7 repos.
-# Detects which repos have changed since the last release — unchanged repos
-# get their previous Docker image retagged (~10s) instead of rebuilt (~15min).
-# After all Docker images are confirmed on Docker Hub, generates OVA version
-# files, packages the release bundle, triggers the appliance build, and
-# publishes the release — all automatically.
+# Single workflow dispatch that stamps one appliance version across the
+# releasable component repos while pinning independently versioned images such
+# as ct-traceroute-go into the appliance bundle.
 
 on:
   workflow_dispatch:
@@ -22,6 +19,10 @@ on:
         default: "0.8.6-release"
       ct_media_version:
         description: "ct-media version override (leave empty to use unified version)"
+        required: false
+        type: string
+      traceroute_version:
+        description: "ct-traceroute-go version override (leave empty to resolve the latest release)"
         required: false
         type: string
       skip_component_releases:
@@ -73,7 +74,7 @@ jobs:
           NOTES="${NOTES}- [ ] jtapi-sidecar Docker build"$'\n'
           NOTES="${NOTES}- [ ] ct-media Docker build"$'\n'
           NOTES="${NOTES}- [ ] jtapi-operator Docker build"$'\n'
-          NOTES="${NOTES}- [ ] tracer Docker build"$'\n'
+          NOTES="${NOTES}- [ ] ct-traceroute-go image available"$'\n'
           NOTES="${NOTES}- [ ] OVA package"$'\n'
           NOTES="$NOTES"$'\n'
           NOTES="${NOTES}---"$'\n\n'
@@ -140,11 +141,11 @@ jobs:
 
           echo "prev_version=$PREV" >> "$GITHUB_OUTPUT"
 
-          ALL_REPOS='cisco-cdr ct-quasar jtapi-sidecar ct-media jtapi-operator tracer ct-syslog-ingest'
+          ALL_REPOS='cisco-cdr ct-quasar jtapi-sidecar ct-media jtapi-operator ct-syslog-ingest'
 
           if [ "$FORCE" = "true" ] || [ -z "$PREV" ]; then
             echo "Force rebuild all (force=$FORCE, prev=$PREV)"
-            CHANGED_JSON='["cisco-cdr","ct-quasar","jtapi-sidecar","ct-media","jtapi-operator","tracer","ct-syslog-ingest"]'
+            CHANGED_JSON='["cisco-cdr","ct-quasar","jtapi-sidecar","ct-media","jtapi-operator","ct-syslog-ingest"]'
             echo "changed_repos=$CHANGED_JSON" >> "$GITHUB_OUTPUT"
             echo "unchanged_repos=[]" >> "$GITHUB_OUTPUT"
 
@@ -161,9 +162,7 @@ jobs:
           echo "|------|---------|--------|" >> $GITHUB_STEP_SUMMARY
 
           for repo in $ALL_REPOS; do
-            # Determine target branch (tracer uses master)
             TARGET="$BRANCH"
-            if [ "$repo" = "tracer" ]; then TARGET="master"; fi
 
             # Use GitHub compare API to count commits between prev tag and branch HEAD
             COMMITS=$(gh api "repos/calltelemetry/$repo/compare/${PREV}...${TARGET}" \
@@ -218,11 +217,7 @@ jobs:
             VERSION="${{ inputs.ct_media_version }}"
           fi
 
-          # Determine target branch (tracer uses master)
           TARGET="${{ inputs.target_branch }}"
-          if [ "$REPO" = "tracer" ]; then
-            TARGET="master"
-          fi
 
           echo "Creating $REPO release: $VERSION (target: $TARGET)"
           NOTES="Unified release $VERSION"$'\n\n'"**Appliance Upgrade Instructions:** https://docs.calltelemetry.com/troubleshoot/upgrade"
@@ -260,8 +255,6 @@ jobs:
             image: ct-media
           - repo: jtapi-operator
             image: jtapi-operator
-          - repo: tracer
-            image: traceroute
           - repo: ct-syslog-ingest
             image: ct-syslog-ingest
     steps:
@@ -298,12 +291,35 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
+      - name: Resolve traceroute-go version
+        id: traceroute
+        env:
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+        run: |
+          TRACEROUTE_VERSION="${{ inputs.traceroute_version }}"
+          if [ -z "$TRACEROUTE_VERSION" ]; then
+            TRACEROUTE_VERSION=$(gh release list \
+              --repo calltelemetry/ct-traceroute-go \
+              --limit 1 \
+              --json tagName \
+              --jq '.[0].tagName')
+          fi
+
+          if [ -z "$TRACEROUTE_VERSION" ] || [ "$TRACEROUTE_VERSION" = "null" ]; then
+            echo "[FAIL] Unable to resolve a ct-traceroute-go release tag"
+            exit 1
+          fi
+
+          echo "version=$TRACEROUTE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Resolved ct-traceroute-go version: $TRACEROUTE_VERSION"
+
       - name: Wait for all Docker images on Docker Hub
         run: |
           VERSION="${{ inputs.version }}"
           CT_MEDIA="${{ inputs.ct_media_version || inputs.version }}"
+          TRACEROUTE="${{ steps.traceroute.outputs.version }}"
 
-          IMAGES="web:${VERSION} vue:${VERSION} jtapi-sidecar:${VERSION} ct-media:${CT_MEDIA} traceroute:${VERSION} ct-syslog-ingest:${VERSION}"
+          IMAGES="web:${VERSION} vue:${VERSION} jtapi-sidecar:${VERSION} ct-media:${CT_MEDIA} traceroute-go:${TRACEROUTE} ct-syslog-ingest:${VERSION}"
           MAX_ATTEMPTS=30  # 30 minutes max
           ATTEMPT=0
 
@@ -347,6 +363,7 @@ jobs:
         run: |
           VERSION="${{ inputs.version }}"
           CT_MEDIA="${{ inputs.ct_media_version || inputs.version }}"
+          TRACEROUTE="${{ steps.traceroute.outputs.version }}"
 
           echo "### Unified Release: $VERSION" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -359,7 +376,7 @@ jobs:
           echo "| jtapi-sidecar | $VERSION | ${{ inputs.target_branch }} |" >> $GITHUB_STEP_SUMMARY
           echo "| ct-media | $CT_MEDIA | ${{ inputs.target_branch }} |" >> $GITHUB_STEP_SUMMARY
           echo "| jtapi-operator | $VERSION | ${{ inputs.target_branch }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| tracer | $VERSION | master |" >> $GITHUB_STEP_SUMMARY
+          echo "| ct-traceroute-go | $TRACEROUTE | main |" >> $GITHUB_STEP_SUMMARY
           echo "| ct-syslog-ingest | $VERSION | main |" >> $GITHUB_STEP_SUMMARY
 
       - name: Checkout
@@ -371,6 +388,7 @@ jobs:
         run: |
           VERSION="${{ inputs.version }}"
           CT_MEDIA="${{ inputs.ct_media_version || inputs.version }}"
+          TRACEROUTE_VERSION="${{ steps.traceroute.outputs.version }}"
 
           # Find the latest existing version file as template
           TEMPLATE=$(ls -1 ova/versions/*.yaml 2>/dev/null | sort -V | tail -1)
@@ -380,21 +398,25 @@ jobs:
           fi
 
           # Generate .yaml (docker-compose override with version-stamped images)
-          if [ ! -f "ova/versions/${VERSION}.yaml" ]; then
-            TEMPLATE_VER=$(basename "$TEMPLATE" .yaml)
-            sed "s/${TEMPLATE_VER}/${VERSION}/g" "$TEMPLATE" > "ova/versions/${VERSION}.yaml"
-            echo "[OK] Generated ova/versions/${VERSION}.yaml from ${TEMPLATE_VER}"
-          else
-            echo "[OK] ova/versions/${VERSION}.yaml already exists"
-          fi
+          TEMPLATE_VER=$(basename "$TEMPLATE" .yaml)
+          sed "s/${TEMPLATE_VER}/${VERSION}/g" "$TEMPLATE" > "ova/versions/${VERSION}.yaml"
+          sed -i -E "s|calltelemetry/traceroute-go:[^\"]*|calltelemetry/traceroute-go:${TRACEROUTE_VERSION}|g" "ova/versions/${VERSION}.yaml"
+          sed -i -E "s|calltelemetry/traceroute:[^\"]*|calltelemetry/traceroute-go:${TRACEROUTE_VERSION}|g" "ova/versions/${VERSION}.yaml"
+          sed -i -E "s|calltelemetry/ct-media:[^\"]*|calltelemetry/ct-media:${CT_MEDIA}|g" "ova/versions/${VERSION}.yaml"
+          echo "[OK] Generated ova/versions/${VERSION}.yaml from ${TEMPLATE_VER}"
 
           # Generate .env (version environment variables)
           TEMPLATE_ENV=$(ls -1 ova/versions/*.env 2>/dev/null | sort -V | tail -1)
-          if [ -n "$TEMPLATE_ENV" ] && [ ! -f "ova/versions/${VERSION}.env" ]; then
-            TEMPLATE_VER=$(basename "$TEMPLATE_ENV" .env)
-            sed "s/${TEMPLATE_VER}/${VERSION}/g" "$TEMPLATE_ENV" > "ova/versions/${VERSION}.env"
-            echo "[OK] Generated ova/versions/${VERSION}.env"
+          if [ -z "$TEMPLATE_ENV" ]; then
+            echo "[FAIL] No env template found in ova/versions/"
+            exit 1
           fi
+
+          TEMPLATE_ENV_VER=$(basename "$TEMPLATE_ENV" .env)
+          sed "s/${TEMPLATE_ENV_VER}/${VERSION}/g" "$TEMPLATE_ENV" > "ova/versions/${VERSION}.env"
+          sed -i -E "s|^TRACEROUTE_VERSION=.*$|TRACEROUTE_VERSION=${TRACEROUTE_VERSION}|g" "ova/versions/${VERSION}.env"
+          sed -i -E "s|^CT_MEDIA_VERSION=.*$|CT_MEDIA_VERSION=${CT_MEDIA}|g" "ova/versions/${VERSION}.env"
+          echo "[OK] Generated ova/versions/${VERSION}.env"
 
           # Commit and push
           git config user.name "github-actions[bot]"

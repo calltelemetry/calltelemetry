@@ -1395,6 +1395,21 @@ fix_systemd_service_if_needed() {
     echo "Restart policy added (on-failure, 60s delay)."
   fi
 
+  # Add an explicit stop timeout so compose can hand SIGTERM through cleanly.
+  if ! grep -q "^TimeoutStopSec=" "$SERVICE_FILE" 2>/dev/null; then
+    echo "Adding TimeoutStopSec=45 to systemd service..."
+    if [ "$needs_reload" != true ]; then
+      sudo cp "$SERVICE_FILE" "${SERVICE_FILE}.backup" 2>/dev/null
+    fi
+    if grep -q "^TimeoutStartSec=" "$SERVICE_FILE"; then
+      sudo sed -i '/^TimeoutStartSec=/a TimeoutStopSec=45' "$SERVICE_FILE"
+    else
+      sudo sed -i '/^\[Install\]/i TimeoutStopSec=45' "$SERVICE_FILE"
+    fi
+    needs_reload=true
+    echo "Stop timeout added."
+  fi
+
   # Add network-online.target dependency if missing (boot ordering)
   if ! grep -q "network-online.target" "$SERVICE_FILE" 2>/dev/null; then
     echo "Adding network-online.target dependency to systemd service..."
@@ -3495,6 +3510,23 @@ wait_for_services() {
     echo "  [FAIL] Web health check failed after 20s"
     phase_failures=$((phase_failures + 1))
     failed_phases="$failed_phases health-check"
+  fi
+
+  local traceroute_healthy=false
+  for i in {1..10}; do
+    if $DOCKER_COMPOSE_CMD exec -T traceroute wget -q --spider http://127.0.0.1:4100/healthz >/dev/null 2>&1; then
+      traceroute_healthy=true
+      break
+    fi
+    sleep 2
+  done
+
+  if [ "$traceroute_healthy" = true ]; then
+    echo "  ✓ Traceroute service healthy"
+  else
+    echo "  [FAIL] Traceroute health check failed after 20s"
+    phase_failures=$((phase_failures + 1))
+    failed_phases="$failed_phases traceroute-health"
   fi
 
   # Check for startup issues in logs

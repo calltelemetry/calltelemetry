@@ -289,6 +289,24 @@ jobs:
             echo "✅ Copied: ova/versions/${VERSION}.yml -> docker-compose-legacy.yml (backwards compat)"
           fi
 
+          if ! grep -q '^  traceroute:' "$BUNDLE_DIR/docker-compose.yml"; then
+            echo "❌ ERROR: Bundled docker-compose.yml no longer defines service 'traceroute'"
+            exit 1
+          fi
+
+          if ! grep -q 'calltelemetry/traceroute-go:' "$BUNDLE_DIR/docker-compose.yml"; then
+            echo "❌ ERROR: Bundled docker-compose.yml does not reference calltelemetry/traceroute-go"
+            exit 1
+          fi
+
+          if ! grep -q '^TRACEROUTE_VERSION=' "$BUNDLE_DIR/.env"; then
+            echo "❌ ERROR: Bundled .env does not contain TRACEROUTE_VERSION"
+            exit 1
+          fi
+
+          docker compose -f "$BUNDLE_DIR/docker-compose.yml" --env-file "$BUNDLE_DIR/.env" config >/dev/null
+          echo "✅ Bundle docker-compose.yml and .env render successfully"
+
           echo ""
           echo "📋 Bundle contents:"
           ls -laR "$BUNDLE_DIR/"

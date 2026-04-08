@@ -5,7 +5,7 @@
 ```
 unified-release.yml
   ├── Job 1: Generate release notes + draft release
-  └── Job 2: Create releases in all 6 repos (matrix strategy)
+  └── Job 2: Create releases in all appliance repos (matrix strategy)
                 │
                 ▼ (release:published events trigger Docker builds)
          ┌──────────────────────────────────────────────────┐
@@ -51,4 +51,4 @@ Add this as the **last step** in each repo's Docker build workflow:
 | jtapi-sidecar | `docker-release.yml` | `calltelemetry/jtapi-sidecar` |
 | ct-media | `docker-release.yml` | `calltelemetry/ct-media` |
 | jtapi-operator | `docker-release.yml` | `calltelemetry/jtapi-operator` |
-| tracer | `publish_docker.yaml` | `calltelemetry/traceroute` |
+| ct-traceroute-go | `release.yaml` | `calltelemetry/traceroute-go` |

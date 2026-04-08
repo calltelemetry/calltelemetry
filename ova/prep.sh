@@ -197,6 +197,7 @@ EnvironmentFile=/etc/network-environment
 ExecStart=${DOCKER_COMPOSE_CMD} up -d --remove-orphans
 ExecStop=${DOCKER_COMPOSE_CMD} down
 TimeoutStartSec=120
+TimeoutStopSec=45
 Restart=on-failure
 RestartSec=60
 

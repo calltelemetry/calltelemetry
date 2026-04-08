@@ -48,8 +48,12 @@ services:
       start_period: 30s
 
   traceroute:
-    image: "calltelemetry/traceroute:${TRACEROUTE_VERSION}"
+    image: "calltelemetry/traceroute-go:${TRACEROUTE_VERSION}"
+    restart: "always"
     user: root
+    mem_limit: ${TRACEROUTE_MEM_LIMIT:-256m}
+    cpus: ${TRACEROUTE_CPU_LIMIT:-0.50}
+    stop_grace_period: 30s
     expose:
       - "4100"
     networks:
@@ -60,11 +64,11 @@ services:
         max-size: "10m"
         max-file: "3"
     healthcheck:
-      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/4100'"]
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:4100/healthz || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 5
-      start_period: 30s
+      start_period: 45s
 
   db:
     image: "calltelemetry/postgres:14"
