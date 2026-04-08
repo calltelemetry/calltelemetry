@@ -17,7 +17,7 @@ unified-release.yml
                         ▼ (repository_dispatch: docker-build-complete)
          collect-docker-builds.yml
            ├── Updates draft release checklist (✓ per repo)
-           ├── Checks if all 6 complete
+           ├── Checks if all required builds complete
            └── When 6/6: triggers OVA + package-release
 ```
 
@@ -52,3 +52,4 @@ Add this as the **last step** in each repo's Docker build workflow:
 | ct-media | `docker-release.yml` | `calltelemetry/ct-media` |
 | jtapi-operator | `docker-release.yml` | `calltelemetry/jtapi-operator` |
 | ct-traceroute-go | `release.yaml` | `calltelemetry/traceroute-go` |
+| ct-syslog-ingest-go | `release.yml` | `calltelemetry/ct-syslog-ingest-go` |

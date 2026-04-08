@@ -3,7 +3,7 @@ run-name: "Unified Release ${{ inputs.version }}"
 
 # Single workflow dispatch that stamps one appliance version across the
 # releasable component repos while pinning independently versioned images such
-# as ct-traceroute-go into the appliance bundle.
+# as ct-traceroute-go and ct-syslog-ingest-go into the appliance bundle.
 
 on:
   workflow_dispatch:
@@ -23,6 +23,10 @@ on:
         type: string
       traceroute_version:
         description: "ct-traceroute-go version override (leave empty to resolve the latest release)"
+        required: false
+        type: string
+      syslog_ingest_version:
+        description: "ct-syslog-ingest-go version override (leave empty to resolve the latest release)"
         required: false
         type: string
       skip_component_releases:
@@ -75,6 +79,7 @@ jobs:
           NOTES="${NOTES}- [ ] ct-media Docker build"$'\n'
           NOTES="${NOTES}- [ ] jtapi-operator Docker build"$'\n'
           NOTES="${NOTES}- [ ] ct-traceroute-go image available"$'\n'
+          NOTES="${NOTES}- [ ] ct-syslog-ingest-go image available"$'\n'
           NOTES="${NOTES}- [ ] OVA package"$'\n'
           NOTES="$NOTES"$'\n'
           NOTES="${NOTES}---"$'\n\n'
@@ -141,11 +146,11 @@ jobs:
 
           echo "prev_version=$PREV" >> "$GITHUB_OUTPUT"
 
-          ALL_REPOS='cisco-cdr ct-quasar jtapi-sidecar ct-media jtapi-operator ct-syslog-ingest'
+          ALL_REPOS='cisco-cdr ct-quasar jtapi-sidecar ct-media jtapi-operator'
 
           if [ "$FORCE" = "true" ] || [ -z "$PREV" ]; then
             echo "Force rebuild all (force=$FORCE, prev=$PREV)"
-            CHANGED_JSON='["cisco-cdr","ct-quasar","jtapi-sidecar","ct-media","jtapi-operator","ct-syslog-ingest"]'
+            CHANGED_JSON='["cisco-cdr","ct-quasar","jtapi-sidecar","ct-media","jtapi-operator"]'
             echo "changed_repos=$CHANGED_JSON" >> "$GITHUB_OUTPUT"
             echo "unchanged_repos=[]" >> "$GITHUB_OUTPUT"
 
@@ -255,8 +260,6 @@ jobs:
             image: ct-media
           - repo: jtapi-operator
             image: jtapi-operator
-          - repo: ct-syslog-ingest
-            image: ct-syslog-ingest
     steps:
       - name: Retag ${{ matrix.repo }} image
         if: ${{ contains(needs.detect-changes.outputs.unchanged_repos, matrix.repo) }}
@@ -313,13 +316,36 @@ jobs:
           echo "version=$TRACEROUTE_VERSION" >> "$GITHUB_OUTPUT"
           echo "Resolved ct-traceroute-go version: $TRACEROUTE_VERSION"
 
+      - name: Resolve ct-syslog-ingest-go version
+        id: syslog_ingest
+        env:
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+        run: |
+          SYSLOG_INGEST_VERSION="${{ inputs.syslog_ingest_version }}"
+          if [ -z "$SYSLOG_INGEST_VERSION" ]; then
+            SYSLOG_INGEST_VERSION=$(gh release list \
+              --repo calltelemetry/ct-syslog-ingest-go \
+              --limit 1 \
+              --json tagName \
+              --jq '.[0].tagName')
+          fi
+
+          if [ -z "$SYSLOG_INGEST_VERSION" ] || [ "$SYSLOG_INGEST_VERSION" = "null" ]; then
+            echo "[FAIL] Unable to resolve a ct-syslog-ingest-go release tag"
+            exit 1
+          fi
+
+          echo "version=$SYSLOG_INGEST_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Resolved ct-syslog-ingest-go version: $SYSLOG_INGEST_VERSION"
+
       - name: Wait for all Docker images on Docker Hub
         run: |
           VERSION="${{ inputs.version }}"
           CT_MEDIA="${{ inputs.ct_media_version || inputs.version }}"
           TRACEROUTE="${{ steps.traceroute.outputs.version }}"
+          SYSLOG_INGEST="${{ steps.syslog_ingest.outputs.version }}"
 
-          IMAGES="web:${VERSION} vue:${VERSION} jtapi-sidecar:${VERSION} ct-media:${CT_MEDIA} traceroute-go:${TRACEROUTE} ct-syslog-ingest:${VERSION}"
+          IMAGES="web:${VERSION} vue:${VERSION} jtapi-sidecar:${VERSION} ct-media:${CT_MEDIA} traceroute-go:${TRACEROUTE} ct-syslog-ingest-go:${SYSLOG_INGEST}"
           MAX_ATTEMPTS=30  # 30 minutes max
           ATTEMPT=0
 
@@ -364,6 +390,7 @@ jobs:
           VERSION="${{ inputs.version }}"
           CT_MEDIA="${{ inputs.ct_media_version || inputs.version }}"
           TRACEROUTE="${{ steps.traceroute.outputs.version }}"
+          SYSLOG_INGEST="${{ steps.syslog_ingest.outputs.version }}"
 
           echo "### Unified Release: $VERSION" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -377,7 +404,7 @@ jobs:
           echo "| ct-media | $CT_MEDIA | ${{ inputs.target_branch }} |" >> $GITHUB_STEP_SUMMARY
           echo "| jtapi-operator | $VERSION | ${{ inputs.target_branch }} |" >> $GITHUB_STEP_SUMMARY
           echo "| ct-traceroute-go | $TRACEROUTE | main |" >> $GITHUB_STEP_SUMMARY
-          echo "| ct-syslog-ingest | $VERSION | main |" >> $GITHUB_STEP_SUMMARY
+          echo "| ct-syslog-ingest-go | $SYSLOG_INGEST | main |" >> $GITHUB_STEP_SUMMARY
 
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -389,6 +416,7 @@ jobs:
           VERSION="${{ inputs.version }}"
           CT_MEDIA="${{ inputs.ct_media_version || inputs.version }}"
           TRACEROUTE_VERSION="${{ steps.traceroute.outputs.version }}"
+          SYSLOG_INGEST_VERSION="${{ steps.syslog_ingest.outputs.version }}"
 
           # Find the latest existing version file as template
           TEMPLATE=$(ls -1 ova/versions/*.yaml 2>/dev/null | sort -V | tail -1)
@@ -402,6 +430,8 @@ jobs:
           sed "s/${TEMPLATE_VER}/${VERSION}/g" "$TEMPLATE" > "ova/versions/${VERSION}.yaml"
           sed -i -E "s|calltelemetry/traceroute-go:[^\"]*|calltelemetry/traceroute-go:${TRACEROUTE_VERSION}|g" "ova/versions/${VERSION}.yaml"
           sed -i -E "s|calltelemetry/traceroute:[^\"]*|calltelemetry/traceroute-go:${TRACEROUTE_VERSION}|g" "ova/versions/${VERSION}.yaml"
+          sed -i -E "s|calltelemetry/ct-syslog-ingest-go:[^\"]*|calltelemetry/ct-syslog-ingest-go:${SYSLOG_INGEST_VERSION}|g" "ova/versions/${VERSION}.yaml"
+          sed -i -E "s|calltelemetry/ct-syslog-ingest:[^\"]*|calltelemetry/ct-syslog-ingest-go:${SYSLOG_INGEST_VERSION}|g" "ova/versions/${VERSION}.yaml"
           sed -i -E "s|calltelemetry/ct-media:[^\"]*|calltelemetry/ct-media:${CT_MEDIA}|g" "ova/versions/${VERSION}.yaml"
           echo "[OK] Generated ova/versions/${VERSION}.yaml from ${TEMPLATE_VER}"
 
@@ -416,6 +446,7 @@ jobs:
           sed "s/${TEMPLATE_ENV_VER}/${VERSION}/g" "$TEMPLATE_ENV" > "ova/versions/${VERSION}.env"
           sed -i -E "s|^TRACEROUTE_VERSION=.*$|TRACEROUTE_VERSION=${TRACEROUTE_VERSION}|g" "ova/versions/${VERSION}.env"
           sed -i -E "s|^CT_MEDIA_VERSION=.*$|CT_MEDIA_VERSION=${CT_MEDIA}|g" "ova/versions/${VERSION}.env"
+          sed -i -E "s|^CT_SYSLOG_INGEST_VERSION=.*$|CT_SYSLOG_INGEST_VERSION=${SYSLOG_INGEST_VERSION}|g" "ova/versions/${VERSION}.env"
           echo "[OK] Generated ova/versions/${VERSION}.env"
 
           # Commit and push

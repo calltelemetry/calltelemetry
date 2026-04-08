@@ -294,13 +294,28 @@ jobs:
             exit 1
           fi
 
+          if ! grep -q '^  ct-syslog-ingest:' "$BUNDLE_DIR/docker-compose.yml"; then
+            echo "❌ ERROR: Bundled docker-compose.yml no longer defines service 'ct-syslog-ingest'"
+            exit 1
+          fi
+
           if ! grep -q 'calltelemetry/traceroute-go:' "$BUNDLE_DIR/docker-compose.yml"; then
             echo "❌ ERROR: Bundled docker-compose.yml does not reference calltelemetry/traceroute-go"
             exit 1
           fi
 
+          if ! grep -q 'calltelemetry/ct-syslog-ingest-go:' "$BUNDLE_DIR/docker-compose.yml"; then
+            echo "❌ ERROR: Bundled docker-compose.yml does not reference calltelemetry/ct-syslog-ingest-go"
+            exit 1
+          fi
+
           if ! grep -q '^TRACEROUTE_VERSION=' "$BUNDLE_DIR/.env"; then
             echo "❌ ERROR: Bundled .env does not contain TRACEROUTE_VERSION"
+            exit 1
+          fi
+
+          if ! grep -q '^CT_SYSLOG_INGEST_VERSION=' "$BUNDLE_DIR/.env"; then
+            echo "❌ ERROR: Bundled .env does not contain CT_SYSLOG_INGEST_VERSION"
             exit 1
           fi
 

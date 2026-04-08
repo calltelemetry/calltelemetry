@@ -463,7 +463,7 @@ services:
   # ─────────────────────────────────────────────────────────────────
 
   ct-syslog-ingest:
-    image: calltelemetry/ct-syslog-ingest:${CT_SYSLOG_INGEST_VERSION:-latest}
+    image: calltelemetry/ct-syslog-ingest-go:${CT_SYSLOG_INGEST_VERSION:-latest}
     restart: unless-stopped
     user: "1000:1000"
     read_only: true
@@ -485,13 +485,15 @@ services:
       - NATS_URL=nats://nats:4222
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}
       - OTEL_SERVICE_NAME=ct-syslog-ingest
+      - LOG_FORMAT=json
       - UDP_PORT=514
+      - TCP_PORT=514
       - HEALTH_PORT=5514
     depends_on:
       nats:
         condition: service_started
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:5514/health"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:5514/readyz"]
       interval: 30s
       timeout: 5s
       retries: 3

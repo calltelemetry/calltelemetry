@@ -27,6 +27,28 @@ services:
     networks:
       - ct
 
+  ct-syslog-ingest:
+    image: "calltelemetry/ct-syslog-ingest-go:1.0.1"
+    restart: unless-stopped
+    ports:
+      - "514:514/udp"
+      - "514:514/tcp"
+    expose:
+      - "5514"
+    environment:
+      - LOKI_URL=http://loki:3100/loki/api/v1/push
+      - NATS_URL=nats://nats:4222
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_SERVICE_NAME=ct-syslog-ingest
+      - LOG_FORMAT=json
+      - UDP_PORT=514
+      - TCP_PORT=514
+      - HEALTH_PORT=5514
+    depends_on:
+      - nats
+    networks:
+      - ct
+
   db:
     image: "calltelemetry/postgres:14"
     user: root

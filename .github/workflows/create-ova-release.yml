@@ -13,6 +13,10 @@ on:
         description: "ct-traceroute-go version override (leave empty to resolve the latest release)"
         required: false
         type: string
+      syslog_ingest_version:
+        description: "ct-syslog-ingest-go version override (leave empty to resolve the latest release)"
+        required: false
+        type: string
       jtapi_version:
         description: "JTAPI sidecar version override (leave empty to use main version)"
         required: false
@@ -56,6 +60,19 @@ jobs:
             exit 1
           fi
 
+          SYSLOG_INGEST_VERSION="${{ inputs.syslog_ingest_version }}"
+          if [ -z "$SYSLOG_INGEST_VERSION" ]; then
+            SYSLOG_INGEST_VERSION=$(gh release list \
+              --repo calltelemetry/ct-syslog-ingest-go \
+              --limit 1 \
+              --json tagName \
+              --jq '.[0].tagName')
+          fi
+          if [ -z "$SYSLOG_INGEST_VERSION" ] || [ "$SYSLOG_INGEST_VERSION" = "null" ]; then
+            echo "Failed to resolve a ct-syslog-ingest-go release tag"
+            exit 1
+          fi
+
           # JTAPI defaults to main version (unified release stamps all repos)
           JTAPI_VERSION="${{ inputs.jtapi_version }}"
           if [ -z "$JTAPI_VERSION" ]; then
@@ -72,6 +89,7 @@ jobs:
           echo "web_version=$WEB_VERSION" >> "$GITHUB_OUTPUT"
           echo "vue_version=$VUE_VERSION" >> "$GITHUB_OUTPUT"
           echo "traceroute_version=$TRACEROUTE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "syslog_ingest_version=$SYSLOG_INGEST_VERSION" >> "$GITHUB_OUTPUT"
           echo "jtapi_version=$JTAPI_VERSION" >> "$GITHUB_OUTPUT"
           echo "ct_media_version=$CT_MEDIA_VERSION" >> "$GITHUB_OUTPUT"
 
@@ -79,6 +97,7 @@ jobs:
           echo "  - Web/API: $WEB_VERSION"
           echo "  - Vue Frontend: $VUE_VERSION"
           echo "  - Traceroute: $TRACEROUTE_VERSION"
+          echo "  - Syslog ingest: $SYSLOG_INGEST_VERSION"
           echo "  - JTAPI Sidecar: $JTAPI_VERSION"
           echo "  - ct-media: $CT_MEDIA_VERSION"
 
@@ -95,6 +114,7 @@ jobs:
           WEB_VERSION=${{ steps.resolve.outputs.web_version }}
           VUE_VERSION=${{ steps.resolve.outputs.vue_version }}
           TRACEROUTE_VERSION=${{ steps.resolve.outputs.traceroute_version }}
+          CT_SYSLOG_INGEST_VERSION=${{ steps.resolve.outputs.syslog_ingest_version }}
           JTAPI_VERSION=${{ steps.resolve.outputs.jtapi_version }}
           CT_MEDIA_VERSION=${{ steps.resolve.outputs.ct_media_version }}
           EOF
@@ -111,6 +131,7 @@ jobs:
           WEB_VERSION="${{ steps.resolve.outputs.web_version }}"
           VUE_VERSION="${{ steps.resolve.outputs.vue_version }}"
           TRACEROUTE_VERSION="${{ steps.resolve.outputs.traceroute_version }}"
+          CT_SYSLOG_INGEST_VERSION="${{ steps.resolve.outputs.syslog_ingest_version }}"
 
           # Generate legacy per-version compose file for older cli.sh that expect it
           cat > "ova/versions/${VERSION}.yaml" << 'COMPOSE_EOF'
@@ -138,6 +159,28 @@ jobs:
               user: root
               expose:
                 - "4100"
+              networks:
+                - ct
+
+            ct-syslog-ingest:
+              image: "calltelemetry/ct-syslog-ingest-go:CT_SYSLOG_INGEST_VERSION_PLACEHOLDER"
+              restart: unless-stopped
+              ports:
+                - "514:514/udp"
+                - "514:514/tcp"
+              expose:
+                - "5514"
+              environment:
+                - LOKI_URL=http://loki:3100/loki/api/v1/push
+                - NATS_URL=nats://nats:4222
+                - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+                - OTEL_SERVICE_NAME=ct-syslog-ingest
+                - LOG_FORMAT=json
+                - UDP_PORT=514
+                - TCP_PORT=514
+                - HEALTH_PORT=5514
+              depends_on:
+                - nats
               networks:
                 - ct
 
@@ -218,6 +261,7 @@ jobs:
           sed -i "s|WEB_VERSION_PLACEHOLDER|${WEB_VERSION}|g" "ova/versions/${VERSION}.yaml"
           sed -i "s|VUE_VERSION_PLACEHOLDER|${VUE_VERSION}|g" "ova/versions/${VERSION}.yaml"
           sed -i "s|TRACEROUTE_VERSION_PLACEHOLDER|${TRACEROUTE_VERSION}|g" "ova/versions/${VERSION}.yaml"
+          sed -i "s|CT_SYSLOG_INGEST_VERSION_PLACEHOLDER|${CT_SYSLOG_INGEST_VERSION}|g" "ova/versions/${VERSION}.yaml"
 
           echo "Generated legacy ova/versions/${VERSION}.yaml"
 
@@ -245,6 +289,7 @@ jobs:
           | calltelemetry/web | ${{ steps.resolve.outputs.web_version }} |
           | calltelemetry/vue | ${{ steps.resolve.outputs.vue_version }} |
           | calltelemetry/traceroute-go | ${{ steps.resolve.outputs.traceroute_version }} |
+          | calltelemetry/ct-syslog-ingest-go | ${{ steps.resolve.outputs.syslog_ingest_version }} |
           | calltelemetry/jtapi-sidecar | ${{ steps.resolve.outputs.jtapi_version }} |
           | calltelemetry/ct-media | ${{ steps.resolve.outputs.ct_media_version }} |"
           IMAGE_TABLE=$(echo "$IMAGE_TABLE" | sed 's/^          //')
@@ -323,5 +368,6 @@ jobs:
           echo "| calltelemetry/web | ${{ steps.resolve.outputs.web_version }} |" >> $GITHUB_STEP_SUMMARY
           echo "| calltelemetry/vue | ${{ steps.resolve.outputs.vue_version }} |" >> $GITHUB_STEP_SUMMARY
           echo "| calltelemetry/traceroute-go | ${{ steps.resolve.outputs.traceroute_version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| calltelemetry/ct-syslog-ingest-go | ${{ steps.resolve.outputs.syslog_ingest_version }} |" >> $GITHUB_STEP_SUMMARY
           echo "| calltelemetry/jtapi-sidecar | ${{ steps.resolve.outputs.jtapi_version }} |" >> $GITHUB_STEP_SUMMARY
           echo "| calltelemetry/ct-media | ${{ steps.resolve.outputs.ct_media_version }} |" >> $GITHUB_STEP_SUMMARY
