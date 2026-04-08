@@ -3443,7 +3443,21 @@ wait_for_services() {
       elif [ -n "$last_migration" ]; then
         display_name=" — latest applied: ${last_migration}"
       fi
-      printf "\r  Migrations: %s/%s applied, running...%s    " "${applied_count:-?}" "$display_total" "$display_name"
+      # Show elapsed time of active DB query to prove progress during long migrations
+      local query_elapsed=""
+      query_elapsed=$($DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -t -c \
+        "SELECT EXTRACT(EPOCH FROM now() - query_start)::int FROM pg_stat_activity WHERE state = 'active' AND query NOT LIKE '%pg_stat_activity%' AND usename = 'calltelemetry' ORDER BY query_start LIMIT 1;" 2>/dev/null | tr -d ' \r\n')
+      local elapsed_display=""
+      if [[ "$query_elapsed" =~ ^[0-9]+$ ]] && [ "$query_elapsed" -gt 2 ]; then
+        local mins=$((query_elapsed / 60))
+        local secs=$((query_elapsed % 60))
+        if [ "$mins" -gt 0 ]; then
+          elapsed_display=" (${mins}m${secs}s)"
+        else
+          elapsed_display=" (${secs}s)"
+        fi
+      fi
+      printf "\r  Migrations: %s/%s applied, running...%s%s    " "${applied_count:-?}" "$display_total" "$display_name" "$elapsed_display"
     else
       local display_total="${total_count:-?}"
       printf "\r  Migrations: %s/%s applied, waiting for status...    " "${applied_count:-?}" "$display_total"
