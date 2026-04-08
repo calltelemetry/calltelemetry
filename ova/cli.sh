@@ -3145,6 +3145,15 @@ update() {
     wait_for_services
     services_ok=$?
 
+    # Drop TimescaleDB extension from the database if it was installed.
+    # The extension .so is no longer in our postgres images, so every query
+    # fails with "could not access file timescaledb-2.x.x" until it's dropped.
+    if $DOCKER_COMPOSE_CMD exec -T db psql -U calltelemetry -d calltelemetry_prod -tAc "SELECT 1 FROM pg_extension WHERE extname='timescaledb'" 2>/dev/null | grep -q 1; then
+      echo "Dropping TimescaleDB extension from database..."
+      $DOCKER_COMPOSE_CMD exec -T db psql -U calltelemetry -d calltelemetry_prod -c "DROP EXTENSION IF EXISTS timescaledb CASCADE;" 2>/dev/null
+      echo "[OK] TimescaleDB extension dropped"
+    fi
+
     # Platform migration: Node.js 22 (one-time, skip if already done)
     REQUIRED_NODE_MAJOR=22
     CURRENT_NODE_MAJOR=$(node --version 2>/dev/null | sed 's/v\([0-9]*\).*/\1/' || echo "0")
