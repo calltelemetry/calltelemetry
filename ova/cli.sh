@@ -3379,11 +3379,11 @@ wait_for_services() {
 
       # Extract the currently running migration filename from Ecto's "== Running VERSION Name" log
       local running_migration
-      running_migration=$(printf '%s\n' "$log_tail" | grep '== Running' | tail -1 | sed 's/.*== Running [0-9]* //' | sed 's/\.change\/0.*//' 2>/dev/null || echo "")
+      running_migration=$(printf '%s\n' "$log_tail" | grep '== Running' | tail -1 | sed 's/.*== Running //' | sed 's/\.change\/0.*//' 2>/dev/null || echo "")
 
       # Also check the last "[Release]   - VERSION filename" entry for the pending list
       if [ -z "$running_migration" ]; then
-        running_migration=$(printf '%s\n' "$log_tail" | grep '\[Release\]   - ' | tail -1 | sed 's/.*\[Release\]   - [0-9]* //' 2>/dev/null || echo "")
+        running_migration=$(printf '%s\n' "$log_tail" | grep '\[Release\]   - ' | tail -1 | sed 's/.*\[Release\]   - //' 2>/dev/null || echo "")
       fi
       running_migration=$(printf '%s' "$running_migration" | tr -d '\r' | sed 's/[[:space:]]*$//')
 
