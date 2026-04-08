@@ -3179,11 +3179,20 @@ update() {
     fi
 
     # Update ct CLI (skip if node migration failed)
-    if command -v node &>/dev/null && command -v npm &>/dev/null; then
+    # npm may not be in PATH — try common locations
+    local npm_bin=""
+    if command -v npm &>/dev/null; then
+      npm_bin="npm"
+    elif [ -x /usr/bin/npm ]; then
+      npm_bin="/usr/bin/npm"
+    elif [ -x /usr/lib/node_modules/npm/bin/npm-cli.js ]; then
+      npm_bin="/usr/lib/node_modules/npm/bin/npm-cli.js"
+    fi
+    if command -v node &>/dev/null && [ -n "$npm_bin" ]; then
       [ -f /usr/local/bin/ct ] && sudo rm -f /usr/local/bin/ct
       echo "Updating @calltelemetry/cli..."
-      sudo npm install -g @calltelemetry/cli &>/dev/null && \
-        CT_CLI_VER=$(npm list -g --depth=0 @calltelemetry/cli 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1) && \
+      sudo "$npm_bin" install -g @calltelemetry/cli &>/dev/null && \
+        CT_CLI_VER=$("$npm_bin" list -g --depth=0 @calltelemetry/cli 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1) && \
         echo "[OK] ct CLI updated to ${CT_CLI_VER:-unknown}" || echo "[WARN] ct CLI update failed (non-critical)"
     fi
 
