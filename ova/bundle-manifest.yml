@@ -8,6 +8,7 @@ version: 1
 scripts:
   - cli.sh
   - backup.sh
+  - postgres-bitnami-convert.sh
   - reset.sh
 
 # Configuration files
