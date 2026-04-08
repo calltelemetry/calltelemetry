@@ -3053,6 +3053,17 @@ update() {
     # Ensure PG/pool .env defaults exist (no-clobber — preserves customer overrides)
     ensure_postgres_defaults
 
+    # Remove legacy postgres override file — these shipped with PG 14 and contain
+    # hardcoded values (max_connections=300, autovacuum_max_workers=5) that conflict
+    # with .env-driven configuration. The main docker-compose.yml now uses .env vars.
+    if [ -f "$POSTGRES_OVERRIDE_FILE" ]; then
+      if grep -q "calltelemetry/postgres" "$POSTGRES_OVERRIDE_FILE" 2>/dev/null; then
+        echo "Removing legacy PostgreSQL override file ($POSTGRES_OVERRIDE_FILE)..."
+        rm -f "$POSTGRES_OVERRIDE_FILE"
+        echo "[OK] Removed — PG settings now driven by .env (cli.sh postgres profile)"
+      fi
+    fi
+
     # Check swap compliance: 8GB total, or 50% of RAM if RAM > 16GB
     local SWAPFILE="/swapfile"
     local total_ram_gb target_swap_gb non_file_swap_gb swapfile_target_gb current_swapfile_gb
