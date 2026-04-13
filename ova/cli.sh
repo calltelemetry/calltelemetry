@@ -3063,15 +3063,18 @@ update() {
 
     # Reinstate TimescaleDB extension if it was previously dropped.
     # A prior cli.sh version ran DROP EXTENSION timescaledb CASCADE during upgrades.
-    # This restores it so catalog queries don't crash. Idempotent — no-op if already present.
-    if ! $DOCKER_COMPOSE_CMD exec -T db psql -U calltelemetry -d calltelemetry_prod -tAc \
-        "SELECT 1 FROM pg_extension WHERE extname='timescaledb'" 2>/dev/null | grep -q 1; then
-      echo "Reinstating TimescaleDB extension (previously removed by older cli.sh)..."
-      if $DOCKER_COMPOSE_CMD exec -T db psql -U calltelemetry -d calltelemetry_prod \
-          -c "CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE" 2>/dev/null; then
-        echo "[OK] TimescaleDB extension restored"
-      else
-        echo "[WARN] TimescaleDB extension restore failed (non-critical)"
+    # Only reinstate if this bundle's docker-compose.yml preloads timescaledb — otherwise
+    # creating the extension without the preload would break postgres on next restart.
+    if grep -q "shared_preload_libraries.*timescaledb" "$ORIGINAL_FILE" 2>/dev/null; then
+      if ! $DOCKER_COMPOSE_CMD exec -T db psql -U calltelemetry -d calltelemetry_prod -tAc \
+          "SELECT 1 FROM pg_extension WHERE extname='timescaledb'" 2>/dev/null | grep -q 1; then
+        echo "Reinstating TimescaleDB extension (previously removed by older cli.sh)..."
+        if $DOCKER_COMPOSE_CMD exec -T db psql -U calltelemetry -d calltelemetry_prod \
+            -c "CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE" 2>/dev/null; then
+          echo "[OK] TimescaleDB extension restored"
+        else
+          echo "[WARN] TimescaleDB extension restore failed (non-critical)"
+        fi
       fi
     fi
 
