@@ -3061,11 +3061,14 @@ update() {
     wait_for_services
     services_ok=$?
 
-    # Reinstate TimescaleDB extension if it was previously dropped.
-    # A prior cli.sh version ran DROP EXTENSION timescaledb CASCADE during upgrades.
-    # Only reinstate if this bundle's docker-compose.yml preloads timescaledb — otherwise
-    # creating the extension without the preload would break postgres on next restart.
-    if grep -q "shared_preload_libraries.*timescaledb" "$ORIGINAL_FILE" 2>/dev/null; then
+    # Reinstate TimescaleDB extension if either the incoming bundle OR the previous
+    # compose had timescaledb in shared_preload_libraries. A prior cli.sh version ran
+    # DROP EXTENSION timescaledb CASCADE — this undoes that damage regardless of which
+    # direction the upgrade is going (older→newer or newer→older bundle).
+    local _prev_compose
+    _prev_compose=$(ls -t "$BACKUP_DIR"/docker-compose-*.yml 2>/dev/null | head -1)
+    if grep -q "shared_preload_libraries.*timescaledb" "$ORIGINAL_FILE" 2>/dev/null || \
+       grep -q "shared_preload_libraries.*timescaledb" "$_prev_compose" 2>/dev/null; then
       if ! $DOCKER_COMPOSE_CMD exec -T db psql -U calltelemetry -d calltelemetry_prod -tAc \
           "SELECT 1 FROM pg_extension WHERE extname='timescaledb'" 2>/dev/null | grep -q 1; then
         echo "Reinstating TimescaleDB extension (previously removed by older cli.sh)..."
