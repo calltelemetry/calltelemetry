@@ -10,3 +10,37 @@ datasources:
     editable: false
     jsonData:
       httpMethod: GET
+
+  - name: CallTelemetry AlertManager
+    uid: calltelemetry-alertmanager
+    type: alertmanager
+    access: proxy
+    url: http://alertmanager:9093
+    editable: false
+    jsonData:
+      implementation: prometheus
+      handleGrafanaManagedAlerts: false
+
+  - name: CallTelemetry Loki
+    uid: calltelemetry-loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    isDefault: false
+    editable: false
+
+  - name: CallTelemetry Tempo
+    uid: calltelemetry-tempo
+    type: tempo
+    access: proxy
+    url: http://tempo:3200
+    editable: false
+    jsonData:
+      tracesToMetrics:
+        datasourceUid: calltelemetry-prometheus
+      nodeGraph:
+        enabled: true
+      tracesToLogs:
+        datasourceUid: calltelemetry-loki
+      lokiSearch:
+        datasourceUid: calltelemetry-loki

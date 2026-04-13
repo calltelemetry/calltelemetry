@@ -8,16 +8,22 @@ version: 1
 scripts:
   - cli.sh
   - backup.sh
+  - postgres-bitnami-convert.sh
   - reset.sh
 
 # Configuration files
 configs:
   - nats.conf
   - versions/caddy/Caddyfile
+  - seaweedfs-s3.json
 
 # Prometheus configuration
 prometheus:
   - versions/prometheus/prometheus.yml
+
+# AlertManager configuration
+alertmanager:
+  - alertmanager/alertmanager.yml
 
 # Grafana dashboards and provisioning
 grafana:
@@ -30,5 +36,25 @@ grafana:
     - versions/grafana/provisioning/datasources/calltelemetry.yml
     - versions/grafana/provisioning/dashboards/calltelemetry.yaml
 
-# Docker compose is handled separately (version-specific)
-# The workflow will use: ova/versions/{version}.yml or root docker-compose.yml
+# OpenTelemetry Collector configuration
+otel:
+  - otel-collector/otel-collector-config.yaml
+
+# Tempo distributed tracing configuration
+tempo:
+  - tempo/tempo.yaml
+
+# Loki log aggregation configuration
+loki:
+  - loki/loki.yaml
+
+# Alloy Docker log collection configuration
+alloy:
+  - alloy/config.alloy
+
+# Environment template (new deployments copy this to .env)
+env:
+  - .env.example
+
+# Docker compose + .env are handled separately (version-specific)
+# The workflow copies: ova/versions/{version}.yaml and ova/versions/{version}.env

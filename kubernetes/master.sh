@@ -2,12 +2,12 @@
 
 # export NODES=3
 # # Primary and Secondary IPs for the CURRI API
-export primary_ip="192.168.123.205"
-export secondary_ip="192.168.123.206"
+export primary_ip="${PRIMARY_IP:?Set PRIMARY_IP to your primary CURRI API address}"
+export secondary_ip="${SECONDARY_IP:?Set SECONDARY_IP to your secondary CURRI API address}"
 # # Virtual IP for the Call Telemetry Management API
-export admin_ip="192.168.123.207"
-# token is a preshared key among the k3s nodes for HA
-export K3S_TOKEN=calltelemetry
+export admin_ip="${ADMIN_IP:?Set ADMIN_IP to your management API address}"
+# Override with: export K3S_TOKEN=your-secure-token
+export K3S_TOKEN="${K3S_TOKEN:-$(openssl rand -hex 16)}"
 
 # Master
 firewall-cmd --permanent --add-port=6443/tcp # Kubernetes API server

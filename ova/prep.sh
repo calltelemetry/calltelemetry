@@ -28,7 +28,72 @@ if [[ -f /etc/redhat-release ]]; then
 fi
 
 # Install Docker-Compose
-sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin --nobest
+# --allowerasing lets DNF replace AlmaLinux 9's built-in containerd (from the
+# podman ecosystem) with Docker's containerd.io, ensuring we get Docker 29+.
+# Install Docker CE (latest stable — 29.0+ required for nftables firewall backend).
+sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin --allowerasing
+
+# Enable IP forwarding before Docker starts.
+# Docker's nftables firewall backend does NOT enable this automatically (unlike
+# the default iptables backend). Without it Docker logs an error and may fall
+# back to iptables, loading the deprecated nft_compat/ip_set kernel modules.
+sudo tee /etc/sysctl.d/99-docker-ipforward.conf > /dev/null <<'EOF'
+net.ipv4.ip_forward = 1
+net.ipv6.conf.all.forwarding = 1
+EOF
+sudo sysctl -p /etc/sysctl.d/99-docker-ipforward.conf
+
+# Configure Docker to use the native nftables firewall backend (Docker 29.0+).
+# This eliminates the deprecated nft_compat and ip_set kernel module warnings.
+# AlmaLinux 9 firewalld already uses nftables natively — this keeps them aligned.
+# Note: incompatible with Docker Swarm overlay networks (not used here).
+sudo mkdir -p /etc/docker
+sudo tee /etc/docker/daemon.json > /dev/null <<'EOF'
+{
+  "firewall-backend": "nftables",
+  "bip": "100.64.0.1/24",
+  "default-address-pools": [
+    { "base": "100.64.0.0/14", "size": 24 }
+  ]
+}
+EOF
+
+# Prevent NetworkManager from managing Docker bridge interfaces.
+# NM's default behaviour: auto-generate /run/ profiles with autoconnect=yes for
+# any kernel bridge it sees (docker0, br-*). On every boot this races Docker for
+# bridge ownership, causing ZONE_CONFLICT errors and intermittent startup failures.
+sudo tee /etc/NetworkManager/conf.d/docker-unmanaged.conf > /dev/null <<'EOF'
+[keyfile]
+unmanaged-devices=interface-name:docker*;interface-name:br-*
+EOF
+
+# dnf install of docker-ce may auto-start Docker before this config was written,
+# causing NM to create persistent profiles for docker0/br-* bridges.
+# Delete those stale profiles now so they are not baked into the OVA image.
+# Without this, on first boot NM races Docker for bridge ownership → nft_compat loads.
+for profile in $(nmcli -t -f NAME,DEVICE connection show 2>/dev/null \
+    | awk -F: '$2 ~ /^docker|^br-/ {print $1}'); do
+  sudo nmcli connection delete "$profile" 2>/dev/null && echo "Deleted NM bridge profile: $profile" || true
+done
+
+sudo systemctl reload NetworkManager 2>/dev/null || true
+
+# Ensure Docker starts after firewalld is fully ready.
+# Prevents the boot-time race where firewalld hasn't finished initialising zones
+# before Docker tries to register docker0 in the docker zone.
+sudo mkdir -p /etc/systemd/system/docker.service.d
+sudo tee /etc/systemd/system/docker.service.d/override.conf > /dev/null <<'EOF'
+[Unit]
+After=network-online.target firewalld.service
+Wants=network-online.target
+EOF
+# Cap Docker daemon at 90% RAM — reserve 10% for OS (kernel, systemd, sshd)
+sudo tee /etc/systemd/system/docker.service.d/memory-limit.conf > /dev/null <<'EOF'
+[Service]
+MemoryMax=90%
+EOF
+
+sudo systemctl daemon-reload
 
 # Enable and Start Docker
 sudo systemctl enable --now docker
@@ -104,7 +169,7 @@ sudo tee /etc/systemd/system/setup-network-environment.service > /dev/null <<EOF
 [Unit]
 Description=Setup Network Environment
 Documentation=https://github.com/kelseyhightower/setup-network-environment
-Requires=network-online.target
+Wants=network-online.target
 After=network-online.target
 
 [Service]
@@ -121,6 +186,8 @@ Requires=setup-network-environment.service
 After=setup-network-environment.service
 Requires=docker.service
 After=docker.service
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 Type=oneshot
@@ -129,7 +196,10 @@ WorkingDirectory=${INSTALL_DIR}
 EnvironmentFile=/etc/network-environment
 ExecStart=${DOCKER_COMPOSE_CMD} up -d --remove-orphans
 ExecStop=${DOCKER_COMPOSE_CMD} down
-TimeoutStartSec=0
+TimeoutStartSec=120
+TimeoutStopSec=45
+Restart=on-failure
+RestartSec=60
 
 [Install]
 WantedBy=multi-user.target
@@ -157,22 +227,97 @@ echo "0 0 * * * $INSTALL_USER $INSTALL_DIR/backup.sh" | sudo tee -a /etc/crontab
 # GCS base URL (no GitHub dependency)
 GCS_BASE_URL="https://storage.googleapis.com/ct_releases"
 
-# Downloads a utility reset script
-wget "${GCS_BASE_URL}/reset.sh" -O reset.sh
+# Downloads utility scripts (reset.sh, backup.sh) unless they already exist locally
+# (e.g., when running from Packer where files are pre-copied)
+if [ ! -f "$INSTALL_DIR/reset.sh" ]; then
+  echo "Downloading reset.sh from GCS..."
+  wget "${GCS_BASE_URL}/reset.sh" -O "$INSTALL_DIR/reset.sh"
+else
+  echo "reset.sh already exists locally, skipping download"
+fi
 sudo chmod +x "$INSTALL_DIR/reset.sh"
 
 # Prep Backup Directory and Script
 sudo mkdir "$INSTALL_DIR/backups" -p
 sudo chown -R "$INSTALL_USER" "$INSTALL_DIR/backups"
-wget "${GCS_BASE_URL}/backup.sh" -O "$INSTALL_DIR/backup.sh"
+if [ ! -f "$INSTALL_DIR/backup.sh" ]; then
+  echo "Downloading backup.sh from GCS..."
+  wget "${GCS_BASE_URL}/backup.sh" -O "$INSTALL_DIR/backup.sh"
+else
+  echo "backup.sh already exists locally, skipping download"
+fi
 sudo chmod +x "$INSTALL_DIR/backup.sh"
 sudo chown "$INSTALL_USER" "$INSTALL_DIR/backup.sh"
+
+# Install Node.js 22 LTS (required for @calltelemetry MCP servers)
+REQUIRED_NODE_MAJOR=22
+CURRENT_NODE_MAJOR=$(node --version 2>/dev/null | sed 's/v\([0-9]*\).*/\1/')
+CURRENT_NODE_MAJOR="${CURRENT_NODE_MAJOR:-0}"
+
+if [ "${CURRENT_NODE_MAJOR}" -lt "${REQUIRED_NODE_MAJOR}" ] 2>/dev/null; then
+  echo "Installing Node.js ${REQUIRED_NODE_MAJOR} LTS..."
+  sudo dnf remove -y nodejs npm 2>/dev/null || true
+  curl -fsSL https://rpm.nodesource.com/setup_${REQUIRED_NODE_MAJOR}.x | sudo bash -
+  sudo dnf install -y nodejs
+  echo "Node.js $(/usr/bin/node --version) installed."
+else
+  echo "Node.js v${CURRENT_NODE_MAJOR} already meets minimum (>=${REQUIRED_NODE_MAJOR})"
+fi
+
+# Install ct-cli (CallTelemetry CLI) globally
+echo "Installing @calltelemetry/cli..."
+sudo /usr/bin/npm install -g @calltelemetry/cli
+echo "ct-cli $(ct --version 2>/dev/null || echo 'installed') ready."
+
+# Install k9s Kubernetes TUI
+if ! command -v k9s &> /dev/null; then
+  echo "Installing k9s..."
+  K9S_VERSION=$(curl -s https://api.github.com/repos/derailed/k9s/releases/latest | grep "tag_name" | cut -d '"' -f 4)
+  wget -q "https://github.com/derailed/k9s/releases/download/${K9S_VERSION}/k9s_Linux_amd64.tar.gz" -O /tmp/k9s.tar.gz
+  sudo tar -xzf /tmp/k9s.tar.gz -C /usr/local/bin k9s
+  rm -f /tmp/k9s.tar.gz
+  echo "k9s ${K9S_VERSION} installed."
+fi
 
 sudo usermod -aG docker "$INSTALL_USER"
 sudo systemctl restart docker
 
-sudo tee /etc/issue > /dev/null <<'EOF'
-Call Telemetry Appliance
+# Create OpenTelemetry Collector config placeholder so Docker doesn't create
+# a directory when the bind mount source is missing. Owned by the install user
+# so ct-cli can overwrite it during updates without sudo.
+mkdir -p "$INSTALL_DIR/otel-collector"
+cat > "$INSTALL_DIR/otel-collector/otel-collector-config.yaml" <<'OTELEOF'
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+processors:
+  batch:
+exporters:
+  prometheus:
+    endpoint: 0.0.0.0:8889
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [prometheus]
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp/tempo]
+OTELEOF
+chown -R "$INSTALL_USER:$INSTALL_USER" "$INSTALL_DIR/otel-collector"
+
+# Set login banners (issue for local console, issue.net for SSH, motd for post-login)
+BANNER_CONTENT='Call Telemetry Appliance
 
    ______      ____   ______     __                    __
   / ____/___ _/ / /  /_  __/__  / /__  ____ ___  ___  / /________  __
@@ -182,18 +327,64 @@ Call Telemetry Appliance
                                                             /____/
 
 https://calltelemetry.com
+'
 
+# Console login banner with dynamic info
+sudo tee /etc/issue > /dev/null <<EOF
+${BANNER_CONTENT}
 Hostname: \n
 System IP Address: \4
 Mgmt: https://\4
 EOF
 
+# SSH banner (no escape sequences)
+sudo tee /etc/issue.net > /dev/null <<EOF
+${BANNER_CONTENT}
+EOF
+
+# Suppress kernel bridge/STP "entering blocking state" messages on console
+# These flood the console when Docker creates bridge networks
+sudo tee /etc/sysctl.d/99-quiet-console.conf > /dev/null <<EOF
+# Suppress noisy kernel messages on console (bridge STP, etc.)
+kernel.printk = 3 4 1 3
+EOF
+sudo sysctl -p /etc/sysctl.d/99-quiet-console.conf 2>/dev/null || true
+
+# Disable kernel bridge module logging to console
+echo "options bridge bridge_nf_call_iptables=0" | sudo tee /etc/modprobe.d/bridge.conf > /dev/null 2>/dev/null || true
+
+# Regenerate SSH host keys — OVA clones share keys, which enables MITM attacks
+sudo rm -f /etc/ssh/ssh_host_*_key*
+sudo ssh-keygen -A
+
+# First-boot hint: show the user how to launch the TUI, don't auto-launch.
+# `ct shell` runs onboarding (network + preferences) then launches the TUI.
+# `ct` alone opens the new TUI management interface.
+sudo tee /etc/profile.d/ct-firstboot.sh > /dev/null <<'PROFILE_EOF'
+#!/bin/bash
+# ct-firstboot.sh — Login hint for Call Telemetry Appliance
+[ -t 0 ] || return 0
+command -v ct >/dev/null 2>&1 || return 0
+
+echo ""
+echo "  Type 'ct' for the management dashboard"
+echo "  Type 'ct setup' to reconfigure network, hostname, and preferences"
+echo ""
+PROFILE_EOF
+sudo chmod +x /etc/profile.d/ct-firstboot.sh
+
 echo "Appliance prep complete."
 echo "IMPORTANT - After this next step you must access the appliance on port 2222 - NOT PORT 22."
 
-# Prompt the user for confirmation to apply the SSH port change
-read -p "The SSH management port must changed to 2222. Applying this change will disconnect your SSH session. Do you want to apply this change and restart the SSH service? (yes/no): " response < /dev/tty
-
+# Support non-interactive mode for automated builds (Packer, CI, etc.)
+# Set CT_NONINTERACTIVE=1 to skip the interactive prompt and apply SSH port change automatically
+if [ "${CT_NONINTERACTIVE:-0}" = "1" ]; then
+  echo "Non-interactive mode detected. Applying SSH port change automatically..."
+  response="yes"
+else
+  # Prompt the user for confirmation to apply the SSH port change
+  read -p "The SSH management port must changed to 2222. Applying this change will disconnect your SSH session. Do you want to apply this change and restart the SSH service? (yes/no): " response < /dev/tty
+fi
 
 if [ "$response" = "yes" ]; then
   # Change SSH port to 2222
@@ -204,21 +395,21 @@ if [ "$response" = "yes" ]; then
   if grep -q "AlmaLinux" /etc/os-release; then
     echo "Detected Alma Linux. Installing semanage tools and configuring firewall..."
     sudo yum install policycoreutils-python-utils -y
-    sudo semanage port -a -t ssh_port_t -p tcp 2222
+    sudo semanage port -a -t ssh_port_t -p tcp 2222 2>/dev/null || sudo semanage port -m -t ssh_port_t -p tcp 2222 2>/dev/null || true
     sudo firewall-cmd --zone=public --add-port=2222/tcp --permanent
     sudo firewall-cmd --reload
 
   elif grep -q "CentOS" /etc/os-release; then
     echo "Detected CentOS Linux. Installing semanage tools and configuring firewall..."
     sudo yum install policycoreutils-python-utils -y
-    sudo semanage port -a -t ssh_port_t -p tcp 2222
+    sudo semanage port -a -t ssh_port_t -p tcp 2222 2>/dev/null || sudo semanage port -m -t ssh_port_t -p tcp 2222 2>/dev/null || true
     sudo firewall-cmd --zone=public --add-port=2222/tcp --permanent
     sudo firewall-cmd --reload
 
   elif grep -q "Red Hat Enterprise Linux" /etc/os-release; then
     echo "Detected Red Hat Enterprise Linux. Installing semanage tools and configuring firewall..."
     sudo yum install policycoreutils-python-utils -y
-    sudo semanage port -a -t ssh_port_t -p tcp 2222
+    sudo semanage port -a -t ssh_port_t -p tcp 2222 2>/dev/null || sudo semanage port -m -t ssh_port_t -p tcp 2222 2>/dev/null || true
     sudo firewall-cmd --zone=public --add-port=2222/tcp --permanent
     sudo firewall-cmd --reload
 
@@ -226,8 +417,16 @@ if [ "$response" = "yes" ]; then
       echo "Unsupported OS. Please make sure your firewall allows access to port 2222 "
   fi
 
-  # Restart SSH service
-  sudo systemctl restart sshd
+  # During OVA/image builds (CT_NONINTERACTIVE=1), do NOT restart sshd —
+  # it would kill the Packer SSH session. The port change takes effect on
+  # first real boot. Only restart in interactive mode or if explicitly
+  # requested via CT_RESTART_SSHD=1 (though that will break Packer).
+  if [ "${CT_NONINTERACTIVE:-0}" = "1" ] && [ "${CT_RESTART_SSHD:-0}" != "1" ]; then
+    echo "Non-interactive mode: SSH port configured for 2222 — takes effect on next boot"
+  else
+    echo "Restarting sshd on port 2222..."
+    sudo systemctl reload sshd || sudo systemctl restart sshd
+  fi
 else
   echo "The SSH port change was not applied. Please rerun the script and choose 'yes' to complete the setup."
 fi

@@ -1,6 +1,7 @@
 #!/bin/bash
 
-# ASCII Art Logo
+# ASCII Art Logo — only printed for interactive help, not subcommand calls
+if [ $# -eq 0 ] || [ "${1:-}" = "help" ]; then
 cat << "EOF"
 
    ______      ____   ______     __                    __
@@ -12,6 +13,7 @@ cat << "EOF"
 
 https://calltelemetry.com
 EOF
+fi
 
 # Detect installation user and directory
 if [ -n "${SUDO_USER:-}" ]; then
@@ -21,6 +23,27 @@ else
   INSTALL_USER=$(whoami)
   INSTALL_DIR="$HOME"
 fi
+
+# --- Existing installation detection ---
+# Prevent accidentally creating a second instance when running as root
+# or from the wrong directory. Check well-known install paths for an
+# existing docker-compose.yml with CallTelemetry services.
+KNOWN_INSTALL_PATHS="/home/calltelemetry /opt/calltelemetry"
+
+for check_path in $KNOWN_INSTALL_PATHS; do
+  if [ "$check_path" != "$INSTALL_DIR" ] && [ -f "$check_path/docker-compose.yml" ]; then
+    # Verify it's actually a CallTelemetry compose file (not some unrelated project)
+    if grep -q "calltelemetry" "$check_path/docker-compose.yml" 2>/dev/null; then
+      echo ""
+      echo "  Note: Existing installation detected at $check_path"
+      echo "  Using $check_path instead of $INSTALL_DIR"
+      echo ""
+      INSTALL_DIR="$check_path"
+      INSTALL_USER=$(stat -c '%U' "$check_path" 2>/dev/null || ls -ld "$check_path" | awk '{print $3}')
+      break
+    fi
+  fi
+done
 
 cd "$INSTALL_DIR" 2>/dev/null || true
 
@@ -47,6 +70,173 @@ fi
 
 # Prep script from GCS
 PREP_SCRIPT_URL="${GCS_BASE_URL}/prep.sh"
+
+# --- Self-healing bind-mount fix ---
+# Docker auto-creates missing bind-mount paths as DIRECTORIES.
+# If alertmanager.yml was created as a directory, fix it NOW before
+# any Docker command runs. This runs on every cli.sh invocation.
+if [ -d "${INSTALL_DIR}/alertmanager/alertmanager.yml" ]; then
+  rm -rf "${INSTALL_DIR}/alertmanager/alertmanager.yml"
+fi
+mkdir -p "${INSTALL_DIR}/alertmanager"
+if [ ! -f "${INSTALL_DIR}/alertmanager/alertmanager.yml" ]; then
+  cat > "${INSTALL_DIR}/alertmanager/alertmanager.yml" << 'AMEOF'
+global:
+  resolve_timeout: 5m
+route:
+  receiver: 'default'
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+receivers:
+  - name: 'default'
+AMEOF
+fi
+if [ -d "${INSTALL_DIR}/tempo/tempo.yaml" ]; then
+  rm -rf "${INSTALL_DIR}/tempo/tempo.yaml"
+fi
+mkdir -p "${INSTALL_DIR}/tempo"
+if [ ! -f "${INSTALL_DIR}/tempo/tempo.yaml" ]; then
+  cat > "${INSTALL_DIR}/tempo/tempo.yaml" << 'TEMPOEOF'
+server:
+  http_listen_port: 3200
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
+
+ingester:
+  max_block_duration: 5m
+
+compactor:
+  compaction:
+    block_retention: 72h    # Keep traces for 3 days
+
+storage:
+  trace:
+    backend: local
+    local:
+      path: /var/tempo/blocks
+    wal:
+      path: /var/tempo/wal
+
+metrics_generator:
+  registry:
+    external_labels:
+      source: tempo
+  storage:
+    path: /var/tempo/generator/wal
+    remote_write:
+      - url: http://prometheus:9090/api/v1/write
+        send_exemplars: true
+TEMPOEOF
+fi
+# Repair Docker-created directories for Loki/Alloy/Tempo config bind mounts.
+# Docker creates mount targets as directories when the source file doesn't exist.
+# The actual config files are deployed via the release bundle (bundle-manifest.yml).
+for _config_pair in "loki/loki.yaml" "alloy/config.alloy" "tempo/tempo.yaml" "otel-collector/otel-collector-config.yaml"; do
+  _config_path="${INSTALL_DIR}/${_config_pair}"
+  if [ -d "$_config_path" ]; then
+    rm -rf "$_config_path"
+  fi
+done
+# Remove file-provisioned Grafana dashboards that are now API-managed by BootProvisioner.
+# Grafana rejects API writes to file-provisioned dashboards ("Cannot save provisioned dashboard").
+# These dashboards are now generated dynamically per-org by the Elixir dashboard factory.
+for _stale_dashboard in "calltelemetry-system-health.json" "alarm-overview.json" "oban-job-health.json"; do
+  _dash_path="${INSTALL_DIR}/grafana/dashboards/${_stale_dashboard}"
+  if [ -f "$_dash_path" ]; then
+    rm -f "$_dash_path"
+  fi
+done
+mkdir -p "${INSTALL_DIR}/prometheus"
+if [ ! -f "${INSTALL_DIR}/prometheus/alert_rules.yml" ]; then
+  echo 'groups: []' > "${INSTALL_DIR}/prometheus/alert_rules.yml"
+fi
+
+# --- Self-healing NetworkManager fix ---
+# OVA images sometimes ship with permissions=user:root:; or autoconnect=false
+# in the NM connection profile, which prevents auto-connect on boot and breaks
+# DNS resolution. Fix on every cli.sh invocation so networking survives reboots.
+nm_heal_connections() {
+  command -v nmcli &>/dev/null || return 0
+  local changed=0
+  # Walk all ethernet connection files, not just the active one
+  for _NM_FILE in /etc/NetworkManager/system-connections/*.nmconnection; do
+    [ -f "$_NM_FILE" ] || continue
+    if grep -q 'permissions=user:root:;' "$_NM_FILE" 2>/dev/null; then
+      sudo sed -i 's/permissions=user:root:;//' "$_NM_FILE" 2>/dev/null
+      changed=1
+    fi
+    if grep -q 'autoconnect=false' "$_NM_FILE" 2>/dev/null; then
+      sudo sed -i 's/autoconnect=false/autoconnect=true/' "$_NM_FILE" 2>/dev/null
+      changed=1
+    fi
+  done
+  [ "$changed" = "1" ] && nmcli connection reload 2>/dev/null || true
+}
+nm_heal_connections
+
+# --- Self-healing NM Docker bridge fix ---
+# NetworkManager auto-creates connection profiles for Docker bridge interfaces
+# (docker0, br-*, veth*) and races Docker for ownership at boot. On firewalld-
+# enabled OVAs this triggers ZONE_CONFLICT and breaks container networking.
+# Fix: write the conf.d unmanaged-devices rule so NM never claims these interfaces.
+# Also ensure daemon.json uses the nftables firewall backend to avoid iptables/nft
+# conflicts on RHEL 9 / AlmaLinux 9 OVAs.
+nm_heal_docker_bridges() {
+  command -v nmcli &>/dev/null || return 0
+  local NM_DOCKER_CONF="/etc/NetworkManager/conf.d/docker-unmanaged.conf"
+  local changed=0
+
+  if [ ! -f "$NM_DOCKER_CONF" ]; then
+    sudo tee "$NM_DOCKER_CONF" > /dev/null << 'NMDEOF'
+[keyfile]
+unmanaged-devices=interface-name:docker*;interface-name:br-*;interface-name:veth*
+NMDEOF
+    changed=1
+  fi
+
+  if [ "$changed" = "1" ]; then
+    sudo nmcli general reload 2>/dev/null || true
+  fi
+
+  # Ensure daemon.json has correct bip/address-pools, and nftables backend
+  # if Docker 29+ is available. Avoids iptables/nftables conflicts on RHEL 9.
+  local DAEMON_JSON="/etc/docker/daemon.json"
+  local docker_major
+  docker_major=$(docker version --format '{{.Server.Version}}' 2>/dev/null | cut -d. -f1)
+  if [ -f "$DAEMON_JSON" ] && command -v python3 &>/dev/null; then
+    if ! python3 -c "import json,sys; d=json.load(open('$DAEMON_JSON')); sys.exit(0 if (d.get('firewall-backend')=='nftables' or int('${docker_major:-0}')<29) and d.get('bip')=='100.64.0.1/24' else 1)" 2>/dev/null; then
+      python3 - "$DAEMON_JSON" "${docker_major:-0}" << 'PYEOF'
+import json, sys
+path = sys.argv[1]
+docker_major = int(sys.argv[2])
+with open(path) as f:
+    d = json.load(f)
+changed = False
+if docker_major >= 29 and d.get("firewall-backend") != "nftables":
+    d["firewall-backend"] = "nftables"
+    changed = True
+if d.get("bip") != "100.64.0.1/24":
+    d["bip"] = "100.64.0.1/24"
+    d["default-address-pools"] = [{"base": "100.64.0.0/14", "size": 24}]
+    changed = True
+if changed:
+    with open(path, "w") as f:
+        json.dump(d, f, indent=2)
+        f.write("\n")
+PYEOF
+      sudo systemctl reload-or-restart docker 2>/dev/null || true
+    fi
+  fi
+}
+nm_heal_docker_bridges
 
 # PostgreSQL version configuration
 POSTGRES_OVERRIDE_FILE="docker-compose.override.yml"
@@ -107,6 +297,1078 @@ get_current_postgres_image() {
   fi
 }
 
+POSTGRES_COMPAT_SCRIPT="postgres-bitnami-convert.sh"
+
+resolve_latest_ct_media_go_version() {
+  local hub_api="https://hub.docker.com/v2/repositories/calltelemetry/ct-media-go/tags?page_size=100"
+  local tags=""
+
+  if command -v curl >/dev/null 2>&1; then
+    tags=$(curl -fsSL "$hub_api" 2>/dev/null | grep -o '"name":"[^"]*"' | sed 's/"name":"\([^"]*\)"/\1/')
+  elif command -v wget >/dev/null 2>&1; then
+    tags=$(wget -qO- "$hub_api" 2>/dev/null | grep -o '"name":"[^"]*"' | sed 's/"name":"\([^"]*\)"/\1/')
+  fi
+
+  local tag
+  tag=$(printf '%s\n' "$tags" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+  if echo "$tag" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+    echo "$tag"
+    return 0
+  fi
+
+  return 1
+}
+
+normalize_ct_media_bundle() {
+  local appliance_version="$1"
+  local current_media_version
+  current_media_version="$(env_get "CT_MEDIA_VERSION")"
+
+  local legacy_image=false
+  if grep -q 'calltelemetry/ct-media:' "$TEMP_FILE" 2>/dev/null; then
+    legacy_image=true
+  fi
+
+  local legacy_version=false
+  if [ -z "$current_media_version" ] || echo "$current_media_version" | grep -q -- '-rc'; then
+    legacy_version=true
+  fi
+
+  if [ "$legacy_image" = false ] && [ "$legacy_version" = false ]; then
+    return 0
+  fi
+
+  local replacement_version=""
+  if ! replacement_version="$(resolve_latest_ct_media_go_version)"; then
+    echo "[FAIL] Legacy ct-media bundle detected, but failed to resolve the latest ct-media-go release."
+    echo "   Please set CT_MEDIA_VERSION manually to a valid ct-media-go semver release and retry."
+    return 1
+  fi
+
+  echo "Normalizing legacy media bundle references to ct-media-go:${replacement_version}..."
+  env_set "CT_MEDIA_VERSION" "$replacement_version"
+
+  if grep -q 'calltelemetry/ct-media:' "$TEMP_FILE" 2>/dev/null; then
+    sed -i -E "s|calltelemetry/ct-media:[^\"[:space:]]*|calltelemetry/ct-media-go:${replacement_version}|g" "$TEMP_FILE"
+  fi
+
+  if grep -q 'calltelemetry/ct-media-go:' "$TEMP_FILE" 2>/dev/null; then
+    sed -i -E "s|calltelemetry/ct-media-go:[^\"[:space:]]*|calltelemetry/ct-media-go:${replacement_version}|g" "$TEMP_FILE"
+  fi
+
+  if grep -q 'calltelemetry/ct-media-go:\${CT_MEDIA_VERSION' "$TEMP_FILE" 2>/dev/null; then
+    :
+  fi
+
+  echo "[OK] Legacy media references upgraded for appliance ${appliance_version}"
+}
+
+# Repair missing PostgreSQL config files in existing data dirs created by older
+# appliance/database image combinations. Only missing files are restored.
+repair_postgres_compat() {
+  local repair_script="${INSTALL_DIR}/${POSTGRES_COMPAT_SCRIPT}"
+  local pg_data="${INSTALL_DIR}/${POSTGRES_DATA_DIR}/data"
+  local image="${1:-$(get_current_postgres_image)}"
+  shift || true
+
+  if [ ! -f "${pg_data}/PG_VERSION" ]; then
+    return 0
+  fi
+
+  if [ -f "${pg_data}/postgresql.conf" ] && [ -f "${pg_data}/pg_hba.conf" ] && [ -f "${pg_data}/pg_ident.conf" ]; then
+    return 0
+  fi
+
+  if [ ! -f "$repair_script" ]; then
+    echo "[WARN] PostgreSQL compatibility repair script not found: $repair_script"
+    return 0
+  fi
+
+  echo "Repairing missing PostgreSQL config files in ${pg_data}..."
+  if bash "$repair_script" --image "$image" --data-dir "$pg_data" "$@"; then
+    return 0
+  fi
+
+  echo "[FAIL] PostgreSQL compatibility repair failed."
+  echo "   Run manually: ${repair_script} --image ${image} --data-dir ${pg_data}"
+  return 1
+}
+
+# JTAPI feature state — now driven by COMPOSE_PROFILES in .env
+JTAPI_STATE_FILE=".jtapi-enabled"
+ENV_FILE="${INSTALL_DIR}/.env"
+
+# Read a key from .env (returns empty string if not found)
+env_get() {
+  local key="$1"
+  if [ -f "$ENV_FILE" ]; then
+    grep "^${key}=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2-
+  fi
+}
+
+# Set or update a key in .env (creates file if needed)
+env_set() {
+  local key="$1" value="$2"
+  if [ ! -f "$ENV_FILE" ]; then
+    echo "${key}=${value}" > "$ENV_FILE"
+    return
+  fi
+  if grep -q "^${key}=" "$ENV_FILE" 2>/dev/null; then
+    sed -i "s|^${key}=.*|${key}=${value}|" "$ENV_FILE"
+  else
+    echo "${key}=${value}" >> "$ENV_FILE"
+  fi
+}
+
+# Set a key in .env only if it is not already set (no-clobber)
+env_set_default() {
+  local key="$1" value="$2"
+  if [ -z "$(env_get "$key")" ]; then
+    env_set "$key" "$value"
+  fi
+}
+
+# Ensure baseline PG/pool settings exist in .env during upgrades.
+# Uses env_set_default so existing customer overrides are preserved.
+# Values match the "small" profile — safe for 4-8GB appliances.
+ensure_postgres_defaults() {
+  echo "Ensuring PostgreSQL defaults..."
+  env_set_default "PG_PROFILE" "small"
+  env_set_default "PG_SHM_SIZE" "4gb"
+  env_set_default "PG_SHARED_BUFFERS" "1GB"
+  env_set_default "PG_EFFECTIVE_CACHE_SIZE" "3GB"
+  env_set_default "PG_WORK_MEM" "32MB"
+  env_set_default "PG_MAINTENANCE_WORK_MEM" "128MB"
+  env_set_default "PG_PARALLEL_WORKERS" "2"
+  env_set_default "PG_MAX_PARALLEL_WORKERS" "4"
+  env_set_default "PG_AUTOVACUUM_WORKERS" "4"
+  env_set_default "PG_AUTOVACUUM_VACUUM_SCALE" "0.01"
+  env_set_default "PG_AUTOVACUUM_ANALYZE_SCALE" "0.005"
+  env_set_default "PG_MAX_CONNECTIONS" "200"
+  env_set_default "DB_MEM_LIMIT" "4g"
+  env_set_default "WEB_MEM_LIMIT" "3g"
+  env_set_default "DB_CPU_LIMIT" "2.0"
+  env_set_default "DB_POOL_SIZE" "50"
+  env_set_default "DB_BACKGROUND_POOL_SIZE" "15"
+  env_set_default "DB_DISCOVERY_POOL_SIZE" "25"
+  env_set_default "DB_OBAN_POOL_SIZE" "20"
+  # Disk I/O tuning — safe defaults for spinning disk (most appliances)
+  # SSD deployments should override: random_page_cost=1.1, effective_io_concurrency=200
+  env_set_default "PG_RANDOM_PAGE_COST" "4.0"
+  env_set_default "PG_EFFECTIVE_IO_CONCURRENCY" "2"
+  echo "[OK] PostgreSQL defaults applied (existing values preserved)"
+}
+
+# Apply a PostgreSQL memory sizing profile (small/medium/large)
+apply_postgres_profile() {
+  local profile="$1"
+  case "$profile" in
+    small)
+      # Production-tuned from OVA field experience (2026-04)
+      env_set "PG_PROFILE" "small"
+      env_set "PG_SHM_SIZE" "4gb"
+      env_set "PG_SHARED_BUFFERS" "1GB"
+      env_set "PG_EFFECTIVE_CACHE_SIZE" "3GB"
+      env_set "PG_WORK_MEM" "32MB"
+      env_set "PG_MAINTENANCE_WORK_MEM" "128MB"
+      env_set "PG_PARALLEL_WORKERS" "2"
+      env_set "PG_MAX_PARALLEL_WORKERS" "4"
+      env_set "PG_AUTOVACUUM_WORKERS" "4"
+      env_set "PG_AUTOVACUUM_VACUUM_SCALE" "0.01"
+      env_set "PG_AUTOVACUUM_ANALYZE_SCALE" "0.005"
+      env_set "PG_MAX_CONNECTIONS" "200"
+      env_set "DB_MEM_LIMIT" "4g"
+      env_set "WEB_MEM_LIMIT" "3g"
+      env_set "DB_CPU_LIMIT" "2.0"
+      env_set "DB_POOL_SIZE" "50"
+      env_set "DB_BACKGROUND_POOL_SIZE" "15"
+      env_set "DB_DISCOVERY_POOL_SIZE" "25"
+      env_set "DB_OBAN_POOL_SIZE" "20"
+      # Spinning disk defaults — override for SSD: 1.1 / 200
+      env_set "PG_RANDOM_PAGE_COST" "4.0"
+      env_set "PG_EFFECTIVE_IO_CONCURRENCY" "2"
+      ;;
+    medium)
+      # 16GB RAM target — DB gets 3g, web gets 2.5g, rest for OS/containers
+      env_set "PG_PROFILE" "medium"
+      env_set "PG_SHM_SIZE" "2gb"
+      env_set "PG_SHARED_BUFFERS" "768MB"
+      env_set "PG_EFFECTIVE_CACHE_SIZE" "2GB"
+      env_set "PG_WORK_MEM" "16MB"
+      env_set "PG_MAINTENANCE_WORK_MEM" "128MB"
+      env_set "PG_PARALLEL_WORKERS" "1"
+      env_set "PG_MAX_PARALLEL_WORKERS" "2"
+      env_set "PG_AUTOVACUUM_WORKERS" "3"
+      env_set "PG_AUTOVACUUM_VACUUM_SCALE" "0.02"
+      env_set "PG_AUTOVACUUM_ANALYZE_SCALE" "0.01"
+      env_set "PG_MAX_CONNECTIONS" "250"
+      env_set "DB_MEM_LIMIT" "3g"
+      env_set "WEB_MEM_LIMIT" "2500m"
+      env_set "DB_CPU_LIMIT" "1.5"
+      env_set "DB_POOL_SIZE" "35"
+      env_set "DB_BACKGROUND_POOL_SIZE" "15"
+      env_set "DB_DISCOVERY_POOL_SIZE" "12"
+      env_set "DB_OBAN_POOL_SIZE" "12"
+      # Spinning disk defaults — override for SSD: 1.1 / 200
+      env_set "PG_RANDOM_PAGE_COST" "4.0"
+      env_set "PG_EFFECTIVE_IO_CONCURRENCY" "2"
+      ;;
+    large)
+      # 32GB+ RAM target — DB gets 6g, web gets 4g, rest for OS/containers
+      # Tuned from OVA production (2026-04): old 2GB shared_buffers, 8GB cache,
+      # 1GB maintenance_work_mem, 20g DB_MEM_LIMIT all caused OOM pressure.
+      # Rutgers field incident: 53GB DB on spinning disk with SSD planner settings
+      # caused 5-minute query holds and connection pool exhaustion.
+      env_set "PG_PROFILE" "large"
+      env_set "PG_SHM_SIZE" "4gb"
+      env_set "PG_SHARED_BUFFERS" "2GB"
+      env_set "PG_EFFECTIVE_CACHE_SIZE" "6GB"
+      env_set "PG_WORK_MEM" "32MB"
+      env_set "PG_MAINTENANCE_WORK_MEM" "256MB"
+      env_set "PG_PARALLEL_WORKERS" "2"
+      env_set "PG_MAX_PARALLEL_WORKERS" "4"
+      env_set "PG_AUTOVACUUM_WORKERS" "5"
+      env_set "PG_AUTOVACUUM_VACUUM_SCALE" "0.01"
+      env_set "PG_AUTOVACUUM_ANALYZE_SCALE" "0.005"
+      env_set "PG_MAX_CONNECTIONS" "300"
+      env_set "DB_MEM_LIMIT" "6g"
+      env_set "WEB_MEM_LIMIT" "4g"
+      env_set "DB_CPU_LIMIT" "4.0"
+      env_set "DB_POOL_SIZE" "60"
+      env_set "DB_BACKGROUND_POOL_SIZE" "20"
+      env_set "DB_DISCOVERY_POOL_SIZE" "25"
+      env_set "DB_OBAN_POOL_SIZE" "20"
+      # Spinning disk defaults — override for SSD: 1.1 / 200
+      env_set "PG_RANDOM_PAGE_COST" "4.0"
+      env_set "PG_EFFECTIVE_IO_CONCURRENCY" "2"
+      ;;
+    *)
+      echo "Usage: cli.sh postgres profile <small|medium|large|show>"
+      return 1
+      ;;
+  esac
+  echo "PostgreSQL profile set to: $profile"
+  echo "  shared_buffers:        $(env_get PG_SHARED_BUFFERS)"
+  echo "  effective_cache_size:  $(env_get PG_EFFECTIVE_CACHE_SIZE)"
+  echo "  work_mem:              $(env_get PG_WORK_MEM)"
+  echo "  maintenance_work_mem:  $(env_get PG_MAINTENANCE_WORK_MEM)"
+  echo "  parallel_workers:      $(env_get PG_PARALLEL_WORKERS)/$(env_get PG_MAX_PARALLEL_WORKERS)"
+  echo "  autovacuum_workers:    $(env_get PG_AUTOVACUUM_WORKERS)"
+  echo "  db_cpu_limit:          $(env_get DB_CPU_LIMIT || echo '2.0 (default)')"
+  echo "  max_connections:       $(env_get PG_MAX_CONNECTIONS)"
+  echo "  db_mem_limit:          $(env_get DB_MEM_LIMIT)"
+  echo "  web_mem_limit:         $(env_get WEB_MEM_LIMIT)"
+  echo "  db_pool (main):        $(env_get DB_POOL_SIZE)"
+  echo "  db_pool (background):  $(env_get DB_BACKGROUND_POOL_SIZE)"
+  echo "  db_pool (discovery):   $(env_get DB_DISCOVERY_POOL_SIZE)"
+  echo "  db_pool (oban):        $(env_get DB_OBAN_POOL_SIZE)"
+  echo "  random_page_cost:      $(env_get PG_RANDOM_PAGE_COST)"
+  echo "  effective_io_concurrency: $(env_get PG_EFFECTIVE_IO_CONCURRENCY)"
+  echo ""
+  echo "Restarting services to apply new profile..."
+  $DOCKER_COMPOSE_CMD down db 2>/dev/null
+  $DOCKER_COMPOSE_CMD up -d 2>/dev/null
+  echo "[OK] Services restarted with $profile profile"
+}
+
+# Remove a key from .env
+env_remove() {
+  local key="$1"
+  [ -f "$ENV_FILE" ] && sed -i "/^${key}=/d" "$ENV_FILE"
+}
+
+# Migrate legacy .jtapi-enabled state file to .env COMPOSE_PROFILES
+migrate_jtapi_state() {
+  if [ -f "$JTAPI_STATE_FILE" ]; then
+    echo "Migrating JTAPI state from .jtapi-enabled to .env COMPOSE_PROFILES..."
+    local profiles
+    profiles=$(env_get "COMPOSE_PROFILES")
+    if ! echo "$profiles" | grep -q "jtapi"; then
+      if [ -n "$profiles" ]; then
+        env_set "COMPOSE_PROFILES" "${profiles},jtapi"
+      else
+        env_set "COMPOSE_PROFILES" "jtapi"
+      fi
+    fi
+    # Set JTAPI env vars if not already present
+    [ -z "$(env_get JTAPI_MODE)" ] && env_set "JTAPI_MODE" "direct"
+    [ -z "$(env_get JTAPI_SIDECAR_ENDPOINT)" ] && env_set "JTAPI_SIDECAR_ENDPOINT" "jtapi-sidecar:50051"
+    [ -z "$(env_get JTAPI_SIDECAR_URL)" ] && env_set "JTAPI_SIDECAR_URL" "http://jtapi-sidecar:8080"
+    [ -z "$(env_get S3_ENABLED)" ] && env_set "S3_ENABLED" "true"
+    [ -z "$(env_get CT_MEDIA_ENDPOINT)" ] && env_set "CT_MEDIA_ENDPOINT" "ct-media:50053"
+    rm -f "$JTAPI_STATE_FILE"
+    echo "Migration complete. .jtapi-enabled removed."
+  fi
+}
+
+is_jtapi_enabled() {
+  local profiles
+  profiles=$(env_get "COMPOSE_PROFILES")
+  echo "$profiles" | grep -q "jtapi"
+}
+
+# Ensure IPv4 forwarding is enabled — Docker requires this for bridge networking.
+# A kernel update or security hardening can reset this to 0, killing Docker on next boot.
+ensure_ip_forward() {
+  local current
+  current=$(sysctl -n net.ipv4.ip_forward 2>/dev/null || echo "0")
+  if [ "$current" != "1" ]; then
+    echo "[cli.sh] Enabling IPv4 forwarding (was disabled — Docker requires this)"
+    sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1 || true
+  fi
+  # Always ensure persistent config exists
+  if ! grep -q "net.ipv4.ip_forward = 1" /etc/sysctl.d/99-docker-ipforward.conf 2>/dev/null; then
+    echo "net.ipv4.ip_forward = 1" > /etc/sysctl.d/99-docker-ipforward.conf 2>/dev/null || true
+  fi
+}
+
+# Build the compose file flags — overlay no longer needed (profiles handle JTAPI)
+get_compose_files() {
+  echo "-f docker-compose.yml"
+}
+
+# Update systemd ExecStart/ExecStop (simplified — no overlay to toggle)
+fix_systemd_compose_files() {
+  local SERVICE_FILE="/etc/systemd/system/docker-compose-app.service"
+  [ -f "$SERVICE_FILE" ] || return 0
+
+  local compose_files
+  compose_files=$(get_compose_files)
+
+  local cmd_path
+  if [ "$DOCKER_COMPOSE_CMD" = "docker compose" ]; then
+    cmd_path="/usr/bin/docker compose"
+  else
+    cmd_path="/usr/bin/docker-compose"
+  fi
+
+  local new_start="ExecStart=$cmd_path $compose_files up -d"
+  local new_stop="ExecStop=$cmd_path $compose_files down"
+
+  if ! grep -qF "$new_start" "$SERVICE_FILE" 2>/dev/null; then
+    sudo cp "$SERVICE_FILE" "${SERVICE_FILE}.backup" 2>/dev/null
+    # Strip any leftover -f docker-compose-jtapi.yml from systemd
+    sudo sed -i "s|^ExecStart=.*|$new_start|" "$SERVICE_FILE"
+    sudo sed -i "s|^ExecStop=.*|$new_stop|" "$SERVICE_FILE"
+    sudo systemctl daemon-reload
+    echo "Updated systemd service compose files"
+  fi
+}
+
+jtapi_cmd() {
+  local subcmd="${1:-}"
+  shift 2>/dev/null || true
+
+  # Auto-migrate legacy state file on any jtapi command
+  migrate_jtapi_state
+
+  case "$subcmd" in
+    enable)
+      # Add jtapi to COMPOSE_PROFILES
+      local profiles
+      profiles=$(env_get "COMPOSE_PROFILES")
+      if ! echo "$profiles" | grep -q "jtapi"; then
+        if [ -n "$profiles" ]; then
+          env_set "COMPOSE_PROFILES" "${profiles},jtapi"
+        else
+          env_set "COMPOSE_PROFILES" "jtapi"
+        fi
+      fi
+      # Set JTAPI env vars
+      env_set "JTAPI_MODE" "direct"
+      env_set "JTAPI_SIDECAR_ENDPOINT" "jtapi-sidecar:50051"
+      env_set "JTAPI_SIDECAR_URL" "http://jtapi-sidecar:8080"
+      env_set "S3_ENABLED" "true"
+      env_set "CT_MEDIA_ENDPOINT" "ct-media:50053"
+      # Clean up legacy state file if present
+      rm -f "$JTAPI_STATE_FILE"
+      fix_systemd_compose_files
+      echo "[OK] JTAPI enabled — restarting services..."
+      echo ""
+      if ! restart_service "jtapi enable"; then
+        echo "[FAIL] Service restart failed. JTAPI config was saved but services may not be running."
+        echo "   Retry with: systemctl restart docker-compose-app.service"
+        return 1
+      fi
+      # Force recreate web to pick up new env vars
+      sleep 3
+      $DOCKER_COMPOSE_CMD $(get_compose_files) up -d --force-recreate web 2>/dev/null
+      echo "Services restarted."
+      echo ""
+      echo "Next steps:"
+      echo "  1. Wait for sidecar to start (~90s)"
+      echo "  2. Upload JTAPI JAR via UI (Settings > JTAPI)"
+      echo "  3. Sidecar auto-restarts when JAR is received"
+      echo "  4. Add CUCM server via UI (Settings > JTAPI > Servers)"
+      echo "  5. Sidecar auto-connects when credentials appear in NATS KV"
+      ;;
+    disable)
+      # Remove jtapi from COMPOSE_PROFILES
+      local profiles
+      profiles=$(env_get "COMPOSE_PROFILES")
+      local new_profiles
+      new_profiles=$(echo "$profiles" | sed 's/,*jtapi,*//' | sed 's/^,//' | sed 's/,$//')
+      env_set "COMPOSE_PROFILES" "$new_profiles"
+      # Clear JTAPI env vars
+      env_remove "JTAPI_MODE"
+      env_remove "JTAPI_SIDECAR_ENDPOINT"
+      env_remove "JTAPI_SIDECAR_URL"
+      env_remove "S3_ENABLED"
+      env_remove "CT_MEDIA_ENDPOINT"
+      # Clean up legacy state file if present
+      rm -f "$JTAPI_STATE_FILE"
+      fix_systemd_compose_files
+      echo "[OK] JTAPI disabled — restarting services..."
+      if ! restart_service "jtapi disable"; then
+        echo "[FAIL] Service restart failed. JTAPI config was saved but services may not be running."
+        echo "   Retry with: systemctl restart docker-compose-app.service"
+        return 1
+      fi
+      echo "JTAPI services removed."
+      ;;
+    status)
+      if is_jtapi_enabled; then
+        echo "JTAPI: enabled"
+        $DOCKER_COMPOSE_CMD $(get_compose_files) ps jtapi-sidecar ct-media seaweedfs 2>/dev/null || true
+      else
+        echo "JTAPI: disabled"
+      fi
+      ;;
+    troubleshoot)
+      echo "=== JTAPI Troubleshooting ==="
+      echo ""
+
+      # --- 1. Feature State ---
+      echo "--- Feature State ---"
+      if is_jtapi_enabled; then
+        echo "✓ JTAPI enabled (COMPOSE_PROFILES includes jtapi)"
+      else
+        echo "[FAIL] JTAPI disabled (COMPOSE_PROFILES does not include jtapi)"
+      fi
+      echo "  COMPOSE_PROFILES=$(env_get COMPOSE_PROFILES)"
+      echo "  Compose files: $(get_compose_files)"
+      echo ""
+
+      # --- 2. Container Health ---
+      echo "--- Container Health ---"
+      export DEFAULT_IPV4="${DEFAULT_IPV4:-}"
+      for svc in jtapi-jar-init jtapi-sidecar ct-media seaweedfs; do
+        local cid
+        cid=$($DOCKER_COMPOSE_CMD $(get_compose_files) ps -q "$svc" 2>/dev/null)
+        if [ -z "$cid" ]; then
+          # Init container may not show in ps after completion — check all containers
+          cid=$(docker ps -a --filter "name=${svc}" --format '{{.ID}}' 2>/dev/null | head -1)
+        fi
+
+        if [ -z "$cid" ]; then
+          if [ "$svc" = "jtapi-jar-init" ]; then
+            echo "[WARN] $svc: not found (may have been cleaned up after successful run)"
+          else
+            echo "[FAIL] $svc: not found (not deployed or not in compose files)"
+          fi
+        else
+          local cstate
+          cstate=$(docker inspect --format='{{.State.Status}}' "$cid" 2>/dev/null || echo "unknown")
+          local exit_code
+          exit_code=$(docker inspect --format='{{.State.ExitCode}}' "$cid" 2>/dev/null || echo "N/A")
+
+          if [ "$svc" = "jtapi-jar-init" ]; then
+            # Init container is expected to exit with code 0
+            if [ "$cstate" = "exited" ] && [ "$exit_code" = "0" ]; then
+              echo "✓ $svc: completed successfully (exit 0)"
+            elif [ "$cstate" = "exited" ]; then
+              echo "[FAIL] $svc: failed (exit $exit_code)"
+            else
+              echo "[WARN] $svc: $cstate"
+            fi
+          elif [ "$cstate" = "running" ]; then
+            echo "✓ $svc: running"
+          else
+            echo "[FAIL] $svc: $cstate (exit $exit_code)"
+          fi
+        fi
+      done
+      # Show restart counts
+      echo ""
+      echo "  Container restart counts:"
+      for svc in jtapi-sidecar ct-media seaweedfs; do
+        local restart_count
+        restart_count=$(docker inspect --format='{{.RestartCount}}' "$($DOCKER_COMPOSE_CMD $(get_compose_files) ps -q "$svc" 2>/dev/null)" 2>/dev/null || echo "N/A")
+        echo "    $svc: $restart_count restarts"
+      done
+      echo ""
+
+      # --- 3. NATS Connectivity ---
+      echo "--- NATS Connectivity ---"
+      # Check NATS is accepting connections via health endpoint
+      local nats_health
+      nats_health=$($DOCKER_COMPOSE_CMD $(get_compose_files) exec -T nats wget -q -O- http://127.0.0.1:8222/healthz 2>&1)
+      if echo "$nats_health" | grep -qi "ok\|status"; then
+        echo "✓ NATS server is healthy"
+      else
+        # Fallback: check container health status (pgrep not available in nats:2.11 image)
+        local nats_status
+        nats_status=$($DOCKER_COMPOSE_CMD $(get_compose_files) ps nats --format '{{.Status}}' 2>/dev/null || echo "unknown")
+        echo "  NATS: $nats_status"
+      fi
+      echo ""
+
+      # Use nats-box for KV/ObjectStore checks (nats CLI not in server image)
+      local CT_NETWORK
+      CT_NETWORK=$($DOCKER_COMPOSE_CMD $(get_compose_files) ps --format '{{.Networks}}' nats 2>/dev/null | head -1 | cut -d',' -f1)
+      if [ -z "$CT_NETWORK" ]; then
+        CT_NETWORK="calltelemetry_ct"
+      fi
+
+      echo "  NATS KV buckets:"
+      docker run --rm --network "$CT_NETWORK" natsio/nats-box:0.14.5 nats -s nats://nats:4222 kv ls 2>&1 | sed 's/^/    /' || echo "    [FAIL] Could not list KV buckets"
+      echo ""
+
+      echo "  NATS ObjectStore (jtapi-jars-1):"
+      local objstore_result
+      objstore_result=$(docker run --rm --network "$CT_NETWORK" natsio/nats-box:0.14.5 nats -s nats://nats:4222 object ls jtapi-jars-1 2>&1)
+      if echo "$objstore_result" | grep -q "jtapi.jar"; then
+        echo "    ✓ jtapi.jar found in NATS ObjectStore"
+      elif echo "$objstore_result" | grep -qi "not found\|no such\|error"; then
+        echo "    [WARN] jtapi-jars-1 bucket: $objstore_result"
+      else
+        echo "    $objstore_result" | sed 's/^/    /'
+      fi
+      echo ""
+
+      echo "--- NATS ObjectStore Buckets ---"
+      docker run --rm --network "$CT_NETWORK" natsio/nats-box:0.14.5 \
+        sh -c 'nats -s nats://nats:4222 object ls 2>/dev/null' 2>/dev/null | sed 's/^/    /' || echo "    Failed to list ObjectStore buckets"
+      echo ""
+
+      echo "--- jtapi-jars-1 bucket contents ---"
+      docker run --rm --network "$CT_NETWORK" natsio/nats-box:0.14.5 \
+        sh -c 'nats -s nats://nats:4222 object ls jtapi-jars-1 2>/dev/null' 2>/dev/null | sed 's/^/    /' || echo "    Bucket jtapi-jars-1 not found or empty"
+      echo ""
+
+      # --- 4. JAR Status ---
+      echo "--- JAR Status ---"
+      local jar_vol_check
+      jar_vol_check=$(docker run --rm -v calltelemetry_jtapi-jars:/jars alpine ls -la /jars/jtapi.jar 2>&1)
+      if echo "$jar_vol_check" | grep -q "jtapi.jar"; then
+        echo "✓ JAR found in Docker volume"
+        echo "    $jar_vol_check"
+      else
+        echo "[FAIL] JAR not found in Docker volume"
+        echo "    $jar_vol_check"
+      fi
+      echo ""
+      echo "  NATS ObjectStore JAR info:"
+      docker run --rm --network "$CT_NETWORK" natsio/nats-box:0.14.5 nats -s nats://nats:4222 object info jtapi-jars-1 jtapi.jar 2>&1 | sed 's/^/    /' || echo "    [FAIL] Could not query NATS ObjectStore"
+      echo ""
+
+      # --- 5. Sidecar Health ---
+      echo "--- Sidecar Health ---"
+      local sidecar_health
+      sidecar_health=$($DOCKER_COMPOSE_CMD $(get_compose_files) exec -T jtapi-sidecar wget -q -O- http://127.0.0.1:8080/actuator/health 2>&1 || echo "Sidecar not responding")
+      if echo "$sidecar_health" | grep -qi '"status":"UP"\|"status":"up"'; then
+        echo "✓ Sidecar health: $sidecar_health"
+      else
+        echo "[WARN] Sidecar health: $sidecar_health"
+      fi
+      echo ""
+      echo "  Last 20 lines of sidecar logs:"
+      $DOCKER_COMPOSE_CMD $(get_compose_files) logs --tail=20 jtapi-sidecar 2>&1 | sed 's/^/    /'
+      echo ""
+
+      # --- 6. SeaweedFS Health ---
+      echo "--- SeaweedFS Health ---"
+      local seaweedfs_health
+      seaweedfs_health=$($DOCKER_COMPOSE_CMD $(get_compose_files) exec -T seaweedfs curl -sf http://127.0.0.1:9333/cluster/healthz 2>&1)
+      if [ $? -eq 0 ]; then
+        echo "✓ SeaweedFS is healthy"
+      else
+        echo "[FAIL] SeaweedFS health check failed: $seaweedfs_health"
+      fi
+      echo ""
+      echo "  SeaweedFS buckets:"
+      $DOCKER_COMPOSE_CMD $(get_compose_files) exec -T seaweedfs curl -sf http://localhost:9333/cluster/healthz 2>&1 | sed 's/^/    /' || echo "    [WARN] Could not check SeaweedFS cluster status"
+      echo ""
+
+      # --- 7. ct-media Health ---
+      echo "--- ct-media Health ---"
+      local media_state
+      media_state=$($DOCKER_COMPOSE_CMD $(get_compose_files) ps --format '{{.State}}' ct-media 2>/dev/null || echo "not found")
+      if [ "$media_state" = "running" ]; then
+        echo "✓ ct-media is running"
+      else
+        echo "[FAIL] ct-media state: ${media_state:-not found}"
+      fi
+      echo ""
+      echo "  Last 10 lines of ct-media logs:"
+      $DOCKER_COMPOSE_CMD $(get_compose_files) logs --tail=10 ct-media 2>&1 | sed 's/^/    /'
+      echo ""
+
+      # --- 8. Web Service JTAPI Config ---
+      echo "--- Web Service JTAPI Config ---"
+      echo "  Environment variables:"
+      $DOCKER_COMPOSE_CMD $(get_compose_files) exec -T web env 2>/dev/null | grep -E 'JTAPI|S3_|CT_MEDIA|NATS_URL' | sort | sed 's/^/    /' || echo "    [FAIL] Could not read web container env"
+      echo ""
+
+      # --- 9. CallManager CTI Credentials Check ---
+      echo "--- CallManager CTI Credentials ---"
+      local release_bin
+      release_bin=$(get_release_binary)
+      $DOCKER_COMPOSE_CMD $(get_compose_files) exec -T web "$release_bin" rpc '
+        alias Cdrcisco.Repo
+        alias Cdrcisco.JTAPI.Servers
+        import Ecto.Query
+
+        servers = Repo.all(from s in Cdrcisco.JTAPI.Server, preload: [:callmanager])
+
+        if servers == [] do
+          IO.puts("No JTAPI servers configured")
+        else
+          Enum.each(servers, fn server ->
+            cm = server.callmanager
+            IO.puts("JTAPI Server: #{server.name || server.hostname}")
+            IO.puts("  CallManager: #{if cm, do: cm.name || cm.hostname, else: "NOT LINKED"}")
+            IO.puts("  CTI Username: #{if cm && cm.cti_username && cm.cti_username != "", do: cm.cti_username, else: "NOT SET"}")
+            IO.puts("  CTI Password: #{if cm && cm.cti_password, do: "****", else: "NOT SET"}")
+            IO.puts("  Status: #{server.status || "unknown"}")
+          end)
+        end
+      ' 2>&1 | sed 's/^/  /' || echo "  [FAIL] Could not query JTAPI server configuration (web container may not be running)"
+      echo ""
+
+      # --- 10. JTAPI Runtime Diagnostics (from web logs) ---
+      echo ""
+      echo "=== JTAPI Runtime Diagnostics (from web logs) ==="
+      echo ""
+
+      # Check for NatsSupervisor startup messages
+      echo "--- NATS Supervisor Startup ---"
+      local nats_sup_logs
+      nats_sup_logs=$($DOCKER_COMPOSE_CMD $(get_compose_files) logs web --tail=200 2>/dev/null | grep -i "NatsSupervisor\|jtapi_gnat\|JtapiGreeting" | tail -5)
+      if [ -n "$nats_sup_logs" ]; then
+        echo "$nats_sup_logs"
+      else
+        echo "  No JTAPI NATS supervisor messages found in recent logs"
+      fi
+
+      # Check for ObjectStore / JarManager errors
+      echo ""
+      echo "--- JAR Manager / ObjectStore Errors ---"
+      local jar_logs
+      jar_logs=$($DOCKER_COMPOSE_CMD $(get_compose_files) logs web --tail=500 2>/dev/null | grep -i "JarManager\|ObjectStore\|object_store\|jtapi.*jar\|bucket" | tail -10)
+      if [ -n "$jar_logs" ]; then
+        echo "$jar_logs"
+      else
+        echo "  No JAR/ObjectStore errors found in recent logs"
+      fi
+
+      # Check for gRPC client errors
+      echo ""
+      echo "--- gRPC Client Status ---"
+      local grpc_logs
+      grpc_logs=$($DOCKER_COMPOSE_CMD $(get_compose_files) logs web --tail=200 2>/dev/null | grep -i "DirectGrpcClient\|grpc.*connect\|GRPC.*error\|sidecar.*endpoint" | tail -5)
+      if [ -n "$grpc_logs" ]; then
+        echo "$grpc_logs"
+      else
+        echo "  No gRPC client messages found in recent logs"
+      fi
+
+      # --- 11. JTAPI Health API Response ---
+      echo ""
+      echo "=== JTAPI Health API Response ==="
+      echo ""
+
+      # Detect Docker Compose network name (reuse CT_NETWORK if already set)
+      if [ -z "${CT_NETWORK:-}" ]; then
+        CT_NETWORK=$(docker network ls --format '{{.Name}}' 2>/dev/null | grep '_ct$' | head -1)
+        if [ -z "$CT_NETWORK" ]; then
+          CT_NETWORK="${COMPOSE_PROJECT_NAME:-$(basename "$(pwd)")}_ct"
+        fi
+      fi
+
+      # Call the health endpoint directly (org_id=1 for OVA single-org)
+      local health_response
+      health_response=$(docker run --rm --network "$CT_NETWORK" natsio/nats-box:0.14.5 \
+        sh -c 'wget -q -O- http://web:4080/api/org/1/jtapi/sidecar/health 2>&1' 2>/dev/null)
+
+      if [ -n "$health_response" ]; then
+        if command -v jq &>/dev/null; then
+          echo "$health_response" | jq '.' 2>/dev/null || echo "$health_response"
+        else
+          echo "$health_response"
+        fi
+      else
+        echo "  Failed to reach health endpoint (may require auth token)"
+        echo "  Try: curl -s http://localhost/api/org/1/jtapi/sidecar/health (with auth header)"
+      fi
+      echo ""
+
+      echo "=== Troubleshooting Complete ==="
+      ;;
+    *)
+      echo "Usage: $0 jtapi {enable|disable|status|troubleshoot}"
+      echo ""
+      echo "Commands:"
+      echo "  enable        Enable JTAPI sidecar, ct-media, and SeaweedFS services"
+      echo "  disable       Disable JTAPI services"
+      echo "  status        Show JTAPI status and service health"
+      echo "  troubleshoot  Run comprehensive JTAPI diagnostics"
+      ;;
+  esac
+}
+
+# ─── profile_up / profile_down helpers ───────────────────────────────────────
+
+# profile_up <service> [service...]
+#   Starts the given services using the current COMPOSE_PROFILES from .env.
+#   Non-blocking: returns once containers are started (not necessarily healthy).
+profile_up() {
+  local compose_file
+  compose_file=$(get_compose_files)
+  $DOCKER_COMPOSE_CMD $compose_file up -d "$@" 2>&1 | grep -v "^time=" || true
+}
+
+# profile_down <container> [container...]
+#   Stops and removes the named containers directly.
+#   Bypasses docker compose --remove-orphans which doesn't evict profile-gated containers.
+profile_down() {
+  local containers=("$@")
+  local running=()
+  for c in "${containers[@]}"; do
+    if docker inspect "$c" >/dev/null 2>&1; then
+      running+=("$c")
+    fi
+  done
+  if [ ${#running[@]} -eq 0 ]; then
+    return 0
+  fi
+  docker stop "${running[@]}" >/dev/null 2>&1 || true
+  docker rm   "${running[@]}" >/dev/null 2>&1 || true
+}
+
+# ─── ~/.ct/preferences.json helpers ──────────────────────────────────────────
+# Compatible with the @calltelemetry/cli (ct) preferences format.
+# Uses python3 for reliable JSON read/write without requiring jq.
+CT_PREFS_FILE="${HOME}/.ct/preferences.json"
+
+# Read a boolean key from preferences.json; echoes "true" or "false".
+prefs_get() {
+  local key="$1"
+  python3 -c "
+import json, sys
+try:
+    with open('${CT_PREFS_FILE}') as f:
+        p = json.load(f)
+    v = p.get('${key}')
+    print('true' if v else 'false')
+except Exception:
+    print('none')
+" 2>/dev/null || echo "none"
+}
+
+# Write a boolean key to preferences.json (creates dir/file if needed).
+prefs_set() {
+  local key="$1" value="$2"   # value: "true" | "false"
+  python3 - << INNER_EOF 2>/dev/null
+import json, os
+d = os.path.expanduser("~/.ct")
+f = os.path.join(d, "preferences.json")
+os.makedirs(d, exist_ok=True)
+try:
+    with open(f) as fh:
+        prefs = json.load(fh)
+except Exception:
+    prefs = {}
+prefs["${key}"] = ("${value}" == "true")
+with open(f, "w") as fh:
+    json.dump(prefs, fh, indent=2)
+    fh.write("\n")
+INNER_EOF
+}
+
+# ─── Storage (SeaweedFS) commands ─────────────────────────────────────────────
+
+is_storage_enabled() {
+  local profiles
+  profiles=$(env_get "COMPOSE_PROFILES")
+  echo "$profiles" | grep -q "storage"
+}
+
+sync_prefs_to_env_storage() {
+  local pref_val
+  pref_val=$(prefs_get "storage")
+
+  case "$pref_val" in
+    true)
+      local profiles
+      profiles=$(env_get "COMPOSE_PROFILES")
+      if ! echo "$profiles" | grep -q "storage"; then
+        if [ -n "$profiles" ]; then
+          env_set "COMPOSE_PROFILES" "${profiles},storage"
+        else
+          env_set "COMPOSE_PROFILES" "storage"
+        fi
+      fi
+      ;;
+    false)
+      local profiles new_profiles
+      profiles=$(env_get "COMPOSE_PROFILES")
+      new_profiles=$(echo "$profiles" | sed 's/,*storage,*//' | sed 's/^,//' | sed 's/,$//')
+      if [ "$profiles" != "$new_profiles" ]; then
+        env_set "COMPOSE_PROFILES" "$new_profiles"
+      fi
+      ;;
+    *)
+      # Key absent in prefs — do not override .env
+      ;;
+  esac
+}
+
+storage_cmd() {
+  local subcmd="${1:-status}"
+  shift 2>/dev/null || true
+
+  case "$subcmd" in
+    enable)
+      local profiles
+      profiles=$(env_get "COMPOSE_PROFILES")
+      if ! echo "$profiles" | grep -q "storage"; then
+        if [ -n "$profiles" ]; then
+          env_set "COMPOSE_PROFILES" "${profiles},storage"
+        else
+          env_set "COMPOSE_PROFILES" "storage"
+        fi
+      fi
+      env_set "S3_ENABLED" "true"
+      env_set "S3_ENDPOINT" "http://seaweedfs:8333"
+      prefs_set "storage" "true"
+      fix_systemd_compose_files
+      echo "✅ Storage (SeaweedFS) enabled — starting services..."
+      profile_up seaweedfs
+      echo "Storage services started."
+      ;;
+    disable)
+      local profiles new_profiles
+      profiles=$(env_get "COMPOSE_PROFILES")
+      new_profiles=$(echo "$profiles" | sed 's/,*storage,*//' | sed 's/^,//' | sed 's/,$//')
+      env_set "COMPOSE_PROFILES" "$new_profiles"
+      env_set "S3_ENABLED" "false"
+      prefs_set "storage" "false"
+      fix_systemd_compose_files
+      echo "✅ Storage (SeaweedFS) disabled — stopping services..."
+      profile_down calltelemetry-seaweedfs-1
+      echo "SeaweedFS stopped."
+      ;;
+    status)
+      if is_storage_enabled; then
+        echo "Storage: enabled"
+        $DOCKER_COMPOSE_CMD $(get_compose_files) ps seaweedfs 2>/dev/null || true
+      else
+        echo "Storage: disabled"
+      fi
+      ;;
+    *)
+      echo "Usage: $0 storage {enable|disable|status}"
+      echo ""
+      echo "Commands:"
+      echo "  enable   Start SeaweedFS S3-compatible object store"
+      echo "  disable  Stop SeaweedFS"
+      echo "  status   Show storage status"
+      ;;
+  esac
+}
+
+# ─── Otel (observability) stack commands ─────────────────────────────────────
+
+is_otel_enabled() {
+  local profiles
+  profiles=$(env_get "COMPOSE_PROFILES")
+  echo "$profiles" | grep -q "otel"
+}
+
+sync_prefs_to_env_otel() {
+  local pref_val
+  pref_val=$(prefs_get "otel")
+
+  case "$pref_val" in
+    true)
+      local profiles
+      profiles=$(env_get "COMPOSE_PROFILES")
+      if ! echo "$profiles" | grep -q "otel"; then
+        if [ -n "$profiles" ]; then
+          env_set "COMPOSE_PROFILES" "${profiles},otel"
+        else
+          env_set "COMPOSE_PROFILES" "otel"
+        fi
+      fi
+      ;;
+    false)
+      local profiles new_profiles
+      profiles=$(env_get "COMPOSE_PROFILES")
+      new_profiles=$(echo "$profiles" | sed 's/,*otel,*//' | sed 's/^,//' | sed 's/,$//')
+      if [ "$profiles" != "$new_profiles" ]; then
+        env_set "COMPOSE_PROFILES" "$new_profiles"
+      fi
+      ;;
+    *)
+      # Key absent in prefs — do not override .env
+      ;;
+  esac
+}
+
+otel_cmd() {
+  local subcmd="${1:-status}"
+  shift 2>/dev/null || true
+
+  case "$subcmd" in
+    enable)
+      local profiles
+      profiles=$(env_get "COMPOSE_PROFILES")
+      if ! echo "$profiles" | grep -q "otel"; then
+        if [ -n "$profiles" ]; then
+          env_set "COMPOSE_PROFILES" "${profiles},otel"
+        else
+          env_set "COMPOSE_PROFILES" "otel"
+        fi
+      fi
+      env_set "PROM_EX_UPLOAD_DASHBOARDS" "true"
+      prefs_set "otel" "true"
+      fix_systemd_compose_files
+      echo "✅ Otel stack enabled — starting services..."
+      profile_up prometheus grafana loki alloy tempo otel-collector node-exporter nats-exporter postgres-exporter alertmanager
+      echo "Prometheus, Grafana, Loki, Alloy, Tempo, and exporters started."
+      ;;
+    disable)
+      local profiles new_profiles
+      profiles=$(env_get "COMPOSE_PROFILES")
+      new_profiles=$(echo "$profiles" | sed 's/,*otel,*//' | sed 's/^,//' | sed 's/,$//')
+      env_set "COMPOSE_PROFILES" "$new_profiles"
+      env_set "PROM_EX_UPLOAD_DASHBOARDS" "false"
+      prefs_set "otel" "false"
+      fix_systemd_compose_files
+      echo "✅ Otel stack disabled — stopping services..."
+      profile_down \
+        calltelemetry-prometheus-1 calltelemetry-grafana-1 calltelemetry-loki-1 \
+        calltelemetry-alloy-1 calltelemetry-tempo-1 calltelemetry-otel-collector-1 \
+        calltelemetry-node-exporter-1 calltelemetry-nats-exporter-1 \
+        calltelemetry-postgres-exporter-1 calltelemetry-alertmanager-1
+      echo "Otel services stopped."
+      ;;
+    status)
+      if is_otel_enabled; then
+        echo "Otel: enabled"
+        $DOCKER_COMPOSE_CMD $(get_compose_files) ps prometheus grafana loki alloy tempo otel-collector node-exporter nats-exporter postgres-exporter alertmanager 2>/dev/null || true
+      else
+        echo "Otel: disabled"
+      fi
+      ;;
+    *)
+      echo "Usage: $0 otel {enable|disable|status}"
+      echo ""
+      echo "Commands:"
+      echo "  enable   Start Prometheus, Grafana, Loki, Alloy, Tempo, otel-collector, and exporters"
+      echo "  disable  Stop the full otel stack (~900 MiB freed)"
+      echo "  status   Show otel stack status"
+      ;;
+  esac
+}
+
+ensure_bind_mount_files() {
+  # Ensure files that Docker bind-mounts exist as FILES (not directories).
+  # Docker auto-creates missing bind-mount paths as directories, which
+  # causes "not a directory" OCI runtime errors on container start.
+
+  # AlertManager config
+  mkdir -p alertmanager
+  if [ -d "alertmanager/alertmanager.yml" ]; then
+    rm -rf "alertmanager/alertmanager.yml"
+  fi
+  if [ ! -f "alertmanager/alertmanager.yml" ]; then
+    cat > alertmanager/alertmanager.yml << 'AMEOF'
+global:
+  resolve_timeout: 5m
+route:
+  receiver: 'default'
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+receivers:
+  - name: 'default'
+AMEOF
+    echo "Created default alertmanager/alertmanager.yml"
+  fi
+
+  # Tempo config
+  mkdir -p tempo
+  if [ -d "tempo/tempo.yaml" ]; then
+    rm -rf "tempo/tempo.yaml"
+  fi
+  if [ ! -f "tempo/tempo.yaml" ]; then
+    cat > tempo/tempo.yaml << 'TEMPOEOF'
+server:
+  http_listen_port: 3200
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
+
+ingester:
+  max_block_duration: 5m
+
+compactor:
+  compaction:
+    block_retention: 72h    # Keep traces for 3 days
+
+storage:
+  trace:
+    backend: local
+    local:
+      path: /var/tempo/blocks
+    wal:
+      path: /var/tempo/wal
+
+metrics_generator:
+  registry:
+    external_labels:
+      source: tempo
+  storage:
+    path: /var/tempo/generator/wal
+    remote_write:
+      - url: http://prometheus:9090/api/v1/write
+        send_exemplars: true
+TEMPOEOF
+    echo "Created default tempo/tempo.yaml"
+  fi
+
+  # Prometheus config
+  mkdir -p prometheus
+  if [ ! -f "prometheus/prometheus.yml" ]; then
+    cat > prometheus/prometheus.yml << 'PROMEOF'
+global:
+  scrape_interval: 30s
+  evaluation_interval: 30s
+scrape_configs:
+  - job_name: 'calltelemetry'
+    static_configs:
+      - targets: ['web:4080']
+PROMEOF
+    echo "Created default prometheus/prometheus.yml"
+  fi
+
+  # Prometheus alert rules
+  if [ ! -f "prometheus/alert_rules.yml" ]; then
+    cat > prometheus/alert_rules.yml << 'RULESEOF'
+groups: []
+RULESEOF
+    echo "Created default prometheus/alert_rules.yml"
+  fi
+}
+
 ensure_grafana_permissions() {
   local dirs=("$@")
 
@@ -120,10 +1382,37 @@ ensure_grafana_permissions() {
     elif sudo chmod -R a+rX "$dir" 2>/dev/null; then
       echo "Grafana directory permissions relaxed for $dir (world-readable fallback)."
     else
-      echo "⚠️  Unable to adjust permissions for $dir automatically."
+      echo "[WARN] Unable to adjust permissions for $dir automatically."
       echo "   Please run: sudo chown -R 472:472 '$dir' && sudo chmod -R u+rwX,go+rX '$dir'"
     fi
   done
+}
+
+sanitize_metadata_artifacts() {
+  local dirs=("$@")
+  local cleaned=0
+
+  for dir in "${dirs[@]}"; do
+    [ -n "$dir" ] || continue
+    [ -e "$dir" ] || continue
+
+    while IFS= read -r path; do
+      [ -n "$path" ] || continue
+      rm -rf "$path"
+      cleaned=$((cleaned + 1))
+    done < <(find "$dir" \
+      \( -type f \( -name '._*' -o -name '.DS_Store' \) \) -o \
+      \( -type d -name '__MACOSX' \) \
+      2>/dev/null)
+  done
+
+  if [ "$cleaned" -gt 0 ]; then
+    echo "Removed $cleaned metadata artifact(s) from extracted assets."
+  fi
+}
+
+sanitize_grafana_assets() {
+  sanitize_metadata_artifacts "$@"
 }
 
 # Ensure necessary directories exist and have correct permissions
@@ -246,9 +1535,512 @@ fix_systemd_service_if_needed() {
     echo "Systemd service updated to use '$target_cmd'."
   fi
 
+  # Add restart-on-failure policy if missing (boot resilience)
+  if ! grep -q "^Restart=" "$SERVICE_FILE" 2>/dev/null; then
+    echo "Adding restart-on-failure policy to systemd service..."
+    if [ "$needs_reload" != true ]; then
+      sudo cp "$SERVICE_FILE" "${SERVICE_FILE}.backup" 2>/dev/null
+    fi
+    # Add Restart=on-failure and RestartSec=60 after TimeoutStartSec line
+    if grep -q "^TimeoutStartSec=" "$SERVICE_FILE"; then
+      sudo sed -i '/^TimeoutStartSec=/a Restart=on-failure\nRestartSec=60' "$SERVICE_FILE"
+    else
+      # Fallback: add before [Install] section
+      sudo sed -i '/^\[Install\]/i Restart=on-failure\nRestartSec=60' "$SERVICE_FILE"
+    fi
+    needs_reload=true
+    echo "Restart policy added (on-failure, 60s delay)."
+  fi
+
+  # Add an explicit stop timeout so compose can hand SIGTERM through cleanly.
+  if ! grep -q "^TimeoutStopSec=" "$SERVICE_FILE" 2>/dev/null; then
+    echo "Adding TimeoutStopSec=45 to systemd service..."
+    if [ "$needs_reload" != true ]; then
+      sudo cp "$SERVICE_FILE" "${SERVICE_FILE}.backup" 2>/dev/null
+    fi
+    if grep -q "^TimeoutStartSec=" "$SERVICE_FILE"; then
+      sudo sed -i '/^TimeoutStartSec=/a TimeoutStopSec=45' "$SERVICE_FILE"
+    else
+      sudo sed -i '/^\[Install\]/i TimeoutStopSec=45' "$SERVICE_FILE"
+    fi
+    needs_reload=true
+    echo "Stop timeout added."
+  fi
+
+  # Add network-online.target dependency if missing (boot ordering)
+  if ! grep -q "network-online.target" "$SERVICE_FILE" 2>/dev/null; then
+    echo "Adding network-online.target dependency to systemd service..."
+    if [ "$needs_reload" != true ]; then
+      sudo cp "$SERVICE_FILE" "${SERVICE_FILE}.backup" 2>/dev/null
+    fi
+    sudo sed -i '/^After=docker.service/a Wants=network-online.target\nAfter=network-online.target' "$SERVICE_FILE"
+    needs_reload=true
+    echo "Network dependency added."
+  fi
+
   if [ "$needs_reload" = true ]; then
     sudo systemctl daemon-reload
   fi
+
+  # Fix NetworkManager connection autoconnect issues (no-DHCP boot problem)
+  nm_heal_connections
+}
+
+# Restart the docker-compose systemd service with error handling.
+# Checks exit code, logs diagnostics on failure, retries once.
+# Returns 0 on success, 1 on failure.
+restart_service() {
+  local context="${1:-}" # optional caller context for log messages
+  local service="docker-compose-app.service"
+
+  # Ensure bind-mount files exist before Docker starts (prevents directory auto-creation)
+  ensure_bind_mount_files
+
+  # Purge ghost containers before restart.
+  # Image tag changes between versions can leave stale container IDs in Docker's
+  # internal state AND orphaned directories in /var/lib/docker/containers/.
+  # These ghosts cause "No such container" errors on compose up — production outage.
+  echo "Cleaning up containers before restart..."
+
+  # Step 1: Remove running/stopped project containers via Docker API
+  local ghost_ids
+  ghost_ids=$(docker ps -a --filter "label=com.docker.compose.project=calltelemetry" --format '{{.ID}}' 2>/dev/null)
+  if [ -n "$ghost_ids" ]; then
+    local count=$(echo "$ghost_ids" | wc -l | tr -d ' ')
+    echo "$ghost_ids" | xargs -r docker rm -f >/dev/null 2>&1 || true
+    echo "  Removed $count containers"
+  fi
+
+  # Step 2: Nuke orphaned container directories that survive docker rm.
+  # Docker sometimes leaves /var/lib/docker/containers/<id>/ directories
+  # after the container is removed. Compose still references these IDs
+  # and fails with "No such container" on up.
+  local compose_containers
+  compose_containers=$(docker compose config --services 2>/dev/null | wc -l)
+  local docker_containers
+  docker_containers=$(ls /var/lib/docker/containers/ 2>/dev/null | wc -l)
+  if [ "$docker_containers" -gt "$((compose_containers + 5))" ]; then
+    echo "  Detected $docker_containers container dirs (expected ~$compose_containers) — pruning Docker state..."
+    docker container prune -f 2>/dev/null || true
+  fi
+
+  echo "Restarting Docker Compose service..."
+
+  # Restart synchronously — no log tailing during boot.
+  # Progress is shown by wait_for_services() which reports stepped
+  # container startup, DB readiness, migration status, and health checks.
+  systemctl restart "$service"
+  local restart_exit=$?
+
+  if [ "$restart_exit" -eq 0 ]; then
+    echo ""
+    echo "[OK] Docker Compose service restarted successfully."
+    return 0
+  fi
+
+  # First attempt failed — capture diagnostics
+  echo "[WARN] Service restart failed (exit code: $restart_exit). Gathering diagnostics..."
+  echo ""
+
+  # Show recent journal entries for context
+  echo "--- systemd journal (last 15 lines) ---"
+  journalctl -u "$service" --no-pager -n 15 2>/dev/null || true
+  echo "--- end journal ---"
+  echo ""
+
+  # Check if the service file itself is valid
+  if ! systemctl cat "$service" >/dev/null 2>&1; then
+    echo "[FAIL] Service unit file is invalid or missing."
+    echo "   Check: /etc/systemd/system/$service"
+    return 1
+  fi
+
+  # Reload daemon in case unit file was modified
+  echo "Reloading systemd daemon and retrying..."
+  systemctl daemon-reload 2>/dev/null
+
+  if systemctl restart "$service" 2>/dev/null; then
+    echo "[OK] Service restarted on retry."
+    return 0
+  fi
+
+  # Second attempt also failed
+  echo ""
+  echo "[FAIL] Service restart failed after retry."
+  echo "   Status: $(systemctl is-active "$service" 2>/dev/null || echo 'unknown')"
+  echo "   Debug:  journalctl -u $service --no-pager -n 50"
+  if [ -n "$context" ]; then
+    echo "   Context: $context"
+  fi
+  return 1
+}
+
+# ===========================================================================
+# OS Automatic Updates (systemd timer for dnf update)
+# ===========================================================================
+
+CT_OS_UPDATES_SERVICE="/etc/systemd/system/ct-os-updates.service"
+CT_OS_UPDATES_TIMER="/etc/systemd/system/ct-os-updates.timer"
+
+# Resolve a schedule keyword to a systemd OnCalendar expression and label
+os_updates_resolve_schedule() {
+  local schedule="$1"
+  case "$schedule" in
+    daily)
+      OS_UPDATE_CALENDAR="*-*-* 03:00:00"
+      OS_UPDATE_LABEL="Daily at 3:00 AM"
+      ;;
+    weekly)
+      OS_UPDATE_CALENDAR="Sun *-*-* 03:00:00"
+      OS_UPDATE_LABEL="Weekly (Sunday at 3:00 AM)"
+      ;;
+    monthly)
+      OS_UPDATE_CALENDAR="*-*-01 03:00:00"
+      OS_UPDATE_LABEL="Monthly (1st at 3:00 AM)"
+      ;;
+    *)
+      # Treat as a custom OnCalendar string
+      OS_UPDATE_CALENDAR="$schedule"
+      OS_UPDATE_LABEL="Custom ($schedule)"
+      ;;
+  esac
+}
+
+os_updates_status() {
+  echo "OS Automatic Updates"
+  echo "===================="
+
+  if systemctl is-enabled ct-os-updates.timer &>/dev/null; then
+    echo "Status:     Enabled"
+
+    # Extract schedule from timer file
+    local calendar
+    calendar=$(grep "^OnCalendar=" "$CT_OS_UPDATES_TIMER" 2>/dev/null | cut -d= -f2-)
+    if [ -n "$calendar" ]; then
+      # Map back to friendly label
+      case "$calendar" in
+        "*-*-* 03:00:00")       echo "Schedule:   Daily at 3:00 AM" ;;
+        "Sun *-*-* 03:00:00")   echo "Schedule:   Weekly (Sunday at 3:00 AM)" ;;
+        "*-*-01 03:00:00")      echo "Schedule:   Monthly (1st at 3:00 AM)" ;;
+        *)                      echo "Schedule:   Custom ($calendar)" ;;
+      esac
+    fi
+
+    # Next and last trigger times
+    local next_run last_run
+    next_run=$(systemctl show ct-os-updates.timer --property=NextElapseUSecRealtime --value 2>/dev/null)
+    last_run=$(systemctl show ct-os-updates.timer --property=LastTriggerUSec --value 2>/dev/null)
+
+    if [ -n "$next_run" ] && [ "$next_run" != "n/a" ]; then
+      echo "Next run:   $next_run"
+    fi
+    if [ -n "$last_run" ] && [ "$last_run" != "n/a" ]; then
+      echo "Last run:   $last_run"
+    fi
+
+    echo "Jitter:     up to 30 minutes"
+  else
+    echo "Status:     Disabled"
+    echo ""
+    echo "Enable with:"
+    echo "  cli.sh os-updates enable daily      Every day at 3 AM"
+    echo "  cli.sh os-updates enable weekly     Every Sunday at 3 AM"
+    echo "  cli.sh os-updates enable monthly    1st of each month at 3 AM"
+  fi
+
+  echo ""
+
+  # Show recent journal entries if any exist
+  local log_lines
+  log_lines=$(journalctl -u ct-os-updates.service --no-pager -n 5 --output=short-iso 2>/dev/null | grep -v "^-- ")
+  if [ -n "$log_lines" ]; then
+    echo "Recent update history:"
+    echo "$log_lines" | sed 's/^/  /'
+  fi
+}
+
+os_updates_enable() {
+  local schedule="${1:-weekly}"
+
+  os_updates_resolve_schedule "$schedule"
+
+  echo "OS Automatic Updates"
+  echo "===================="
+  echo "Setting up $OS_UPDATE_LABEL OS updates..."
+  echo ""
+
+  # Write the service unit
+  sudo tee "$CT_OS_UPDATES_SERVICE" > /dev/null <<EOF
+[Unit]
+Description=CallTelemetry Automatic OS Updates
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/dnf update -y --refresh
+StandardOutput=journal
+StandardError=journal
+EOF
+  echo "  Created:  $CT_OS_UPDATES_SERVICE"
+
+  # Write the timer unit
+  sudo tee "$CT_OS_UPDATES_TIMER" > /dev/null <<EOF
+[Unit]
+Description=CallTelemetry OS Update Schedule ($OS_UPDATE_LABEL)
+
+[Timer]
+OnCalendar=$OS_UPDATE_CALENDAR
+Persistent=true
+RandomizedDelaySec=1800
+
+[Install]
+WantedBy=timers.target
+EOF
+  echo "  Created:  $CT_OS_UPDATES_TIMER"
+
+  # Reload, enable, and start
+  sudo systemctl daemon-reload
+  sudo systemctl enable ct-os-updates.timer &>/dev/null
+  echo "  Enabled:  ct-os-updates.timer"
+  sudo systemctl start ct-os-updates.timer
+  echo "  Started:  ct-os-updates.timer"
+
+  echo ""
+
+  # Show next run
+  local next_run
+  next_run=$(systemctl show ct-os-updates.timer --property=NextElapseUSecRealtime --value 2>/dev/null)
+  if [ -n "$next_run" ] && [ "$next_run" != "n/a" ]; then
+    echo "Next scheduled update: $next_run"
+  fi
+
+  echo ""
+  echo "To check status:  cli.sh os-updates"
+  echo "To disable:       cli.sh os-updates disable"
+  echo "To run now:       cli.sh os-updates run"
+}
+
+os_updates_disable() {
+  echo "Disabling automatic OS updates..."
+
+  if systemctl is-enabled ct-os-updates.timer &>/dev/null; then
+    sudo systemctl stop ct-os-updates.timer 2>/dev/null
+    echo "  Stopped:  ct-os-updates.timer"
+    sudo systemctl disable ct-os-updates.timer &>/dev/null
+    echo "  Disabled: ct-os-updates.timer"
+  fi
+
+  if [ -f "$CT_OS_UPDATES_TIMER" ]; then
+    sudo rm -f "$CT_OS_UPDATES_TIMER"
+    echo "  Removed:  $CT_OS_UPDATES_TIMER"
+  fi
+
+  if [ -f "$CT_OS_UPDATES_SERVICE" ]; then
+    sudo rm -f "$CT_OS_UPDATES_SERVICE"
+    echo "  Removed:  $CT_OS_UPDATES_SERVICE"
+  fi
+
+  sudo systemctl daemon-reload
+
+  echo ""
+  echo "Automatic OS updates have been disabled."
+}
+
+os_updates_run() {
+  echo "Running OS update now..."
+  echo "================================================"
+  sudo dnf update -y --refresh
+  local exit_code=$?
+  echo "================================================"
+  if [ $exit_code -eq 0 ]; then
+    echo "OS update complete."
+  else
+    echo "OS update finished with exit code $exit_code."
+  fi
+}
+
+os_updates_log() {
+  echo "OS Update History (last 20 entries)"
+  echo "===================================="
+  journalctl -u ct-os-updates.service --no-pager -n 50 --output=short-iso 2>/dev/null || echo "No update history found."
+}
+
+os_updates_cmd() {
+  local action="${1:-}"
+  shift 2>/dev/null || true
+
+  case "$action" in
+    ""|status)
+      os_updates_status
+      ;;
+    enable)
+      os_updates_enable "$@"
+      ;;
+    disable)
+      os_updates_disable
+      ;;
+    run)
+      os_updates_run
+      ;;
+    log|logs|history)
+      os_updates_log
+      ;;
+    *)
+      echo "Unknown os-updates command: $action"
+      echo ""
+      echo "Usage: cli.sh os-updates <command>"
+      echo ""
+      echo "Commands:"
+      echo "  status              Show current schedule (default)"
+      echo "  enable <schedule>   Enable automatic updates (daily|weekly|monthly)"
+      echo "  disable             Disable automatic updates"
+      echo "  run                 Run OS update immediately"
+      echo "  log                 Show recent update history"
+      return 1
+      ;;
+  esac
+}
+
+# ─── Network configuration ──────────────────────────────────────────────────
+NETWORK_CONN_NAME="ct-network"
+
+network_get_iface() {
+  nmcli -t -f DEVICE,TYPE device 2>/dev/null | grep ':ethernet' | head -1 | cut -d: -f1
+}
+
+network_get_conn() {
+  local iface
+  iface=$(network_get_iface)
+  nmcli -t -f NAME,DEVICE connection show --active 2>/dev/null | grep ":${iface}$" | cut -d: -f1 | head -1
+}
+
+network_cmd() {
+  local subcommand="${1:-status}"
+  shift || true
+
+  case "$subcommand" in
+    ""|status)
+      echo "=== Network Configuration ==="
+      local iface
+      iface=$(network_get_iface)
+      echo "Interface : ${iface:-(none detected)}"
+      echo "IP        : $(ip -4 addr show "$iface" 2>/dev/null | grep inet | awk '{print $2}' || echo '(none)')"
+      echo "Gateway   : $(ip route 2>/dev/null | grep default | head -1 | awk '{print $3}' || echo '(none)')"
+      local conn
+      conn=$(network_get_conn)
+      if [ -n "$conn" ]; then
+        echo "DNS       : $(nmcli -g ipv4.dns connection show "$conn" 2>/dev/null | tr ',' ' ')"
+        echo "Domain    : $(nmcli -g ipv4.dns-search connection show "$conn" 2>/dev/null)"
+      fi
+      echo ""
+      echo "Commands:"
+      echo "  network address <ip/prefix> <gateway>  Set static IP and gateway"
+      echo "  network dns-servers <dns1> [dns2]       Set DNS servers"
+      echo "  network domain <domain>                 Set DNS search domain"
+      echo "  network dhcp                            Switch to DHCP"
+      echo "  network fix                             Fix NM autoconnect issues (boot problem)"
+      ;;
+
+    address)
+      local addr="${1:-}"
+      local gateway="${2:-}"
+      if [ -z "$addr" ]; then
+        read -rp "IP Address with prefix (e.g. 192.168.10.50/24): " addr </dev/tty
+      fi
+      if [ -z "$gateway" ]; then
+        read -rp "Gateway (e.g. 192.168.10.1): " gateway </dev/tty
+      fi
+      if [ -z "$addr" ] || [ -z "$gateway" ]; then
+        echo "Error: IP address and gateway are required."
+        echo "Usage: cli.sh network address <ip/prefix> <gateway>"
+        exit 1
+      fi
+      local iface
+      iface=$(network_get_iface)
+      if [ -z "$iface" ]; then
+        echo "Error: No ethernet interface detected."
+        exit 1
+      fi
+      nm_heal_connections
+      nmcli connection delete "$NETWORK_CONN_NAME" 2>/dev/null || true
+      nmcli connection add type ethernet con-name "$NETWORK_CONN_NAME" ifname "$iface" \
+        ipv4.method manual \
+        ipv4.addresses "$addr" \
+        ipv4.gateway "$gateway" \
+        connection.autoconnect yes \
+        connection.autoconnect-priority 100
+      nmcli connection up "$NETWORK_CONN_NAME"
+      echo "Static IP $addr configured (gateway: $gateway). Will auto-connect on boot."
+      echo "Next: cli.sh network dns-servers 8.8.8.8 4.4.4.4"
+      ;;
+
+    dns-servers)
+      local dns_args=("$@")
+      if [ "${#dns_args[@]}" -eq 0 ]; then
+        read -rp "DNS servers (e.g. 8.8.8.8 4.4.4.4): " -a dns_args </dev/tty
+      fi
+      if [ "${#dns_args[@]}" -eq 0 ]; then
+        echo "Error: At least one DNS server is required."
+        echo "Usage: cli.sh network dns-servers <dns1> [dns2]"
+        exit 1
+      fi
+      local dns_list
+      dns_list=$(IFS=,; echo "${dns_args[*]}")
+      local conn
+      conn=$(network_get_conn)
+      if [ -z "$conn" ]; then conn="$NETWORK_CONN_NAME"; fi
+      nmcli connection modify "$conn" ipv4.dns "$dns_list"
+      nmcli connection up "$conn" 2>/dev/null || true
+      echo "DNS servers set: ${dns_args[*]}"
+      ;;
+
+    domain)
+      local domain="${1:-}"
+      if [ -z "$domain" ]; then
+        read -rp "Search domain (e.g. example.local): " domain </dev/tty
+      fi
+      if [ -z "$domain" ]; then
+        echo "Error: Domain is required."
+        echo "Usage: cli.sh network domain <domain>"
+        exit 1
+      fi
+      local conn
+      conn=$(network_get_conn)
+      if [ -z "$conn" ]; then conn="$NETWORK_CONN_NAME"; fi
+      nmcli connection modify "$conn" ipv4.dns-search "$domain"
+      nmcli connection up "$conn" 2>/dev/null || true
+      echo "Search domain set: $domain"
+      ;;
+
+    dhcp)
+      local iface
+      iface=$(network_get_iface)
+      if [ -z "$iface" ]; then
+        echo "Error: No ethernet interface detected."
+        exit 1
+      fi
+      nm_heal_connections
+      nmcli connection delete "$NETWORK_CONN_NAME" 2>/dev/null || true
+      nmcli connection add type ethernet con-name "$NETWORK_CONN_NAME" ifname "$iface" \
+        ipv4.method auto \
+        connection.autoconnect yes \
+        connection.autoconnect-priority 100
+      nmcli connection up "$NETWORK_CONN_NAME"
+      echo "DHCP configured. IP: $(ip -4 addr show "$iface" 2>/dev/null | grep inet | awk '{print $2}' || echo '(acquiring...)')"
+      ;;
+
+    fix)
+      nm_heal_connections
+      echo "[OK] NM connection profiles checked."
+      ;;
+
+    *)
+      echo "Unknown network command: $subcommand"
+      echo "Run 'cli.sh network' for usage."
+      exit 1
+      ;;
+  esac
 }
 
 # Function to display help
@@ -263,6 +2055,9 @@ show_help() {
   echo "                      Options: --force-upgrade, --no-cleanup, --ipv6"
   echo "  rollback            Roll back to previous docker-compose configuration"
   echo "  reset               Stop application, remove data, and restart"
+  echo "  restart             Restart all services (docker compose down/up)"
+  echo "  stop                Stop all services"
+  echo "  start               Start all services"
   echo
   echo "Database Commands:"
   echo "  db                  Show database status (default)"
@@ -276,7 +2071,8 @@ show_help() {
   echo
   echo "Migration Commands:"
   echo "  migrate             Show migration status (default)"
-  echo "  migrate run         Run pending migrations"
+  echo "  migrate run         Run pending migrations + partition drain"
+  echo "  migrate drain       Run partition drain only (idempotent, safe to re-run)"
   echo "  migrate rollback [n] Rollback n migrations (default: 1)"
   echo "  migrate history     Show last 10 migrations from database"
   echo "  migrate watch       Watch migration progress continuously"
@@ -284,11 +2080,26 @@ show_help() {
   echo "Configuration Commands:"
   echo "  logging [level]     Show or set logging level (debug/info/warning/error)"
   echo "  ipv6 [enable|disable] Show or toggle IPv6 support"
+  echo "  network             Show current network configuration"
+  echo "  network address <ip/prefix> <gw>  Set static IP and gateway"
+  echo "  network dns-servers <dns1> [dns2] Set DNS servers"
+  echo "  network domain <domain>           Set DNS search domain"
+  echo "  network dhcp                      Switch to DHCP (automatic IP)"
   echo "  postgres            Show current PostgreSQL version"
   echo "  postgres set <ver>  Set PostgreSQL version (14, 15, 16, 17, 18)"
   echo "  postgres upgrade <ver> Upgrade PostgreSQL to new major version (backup required)"
   echo "  certs               Show certificate status and expiry"
   echo "  certs reset         Delete and regenerate self-signed certificates"
+  echo "  jtapi               Show JTAPI feature status"
+  echo "  jtapi enable        Enable JTAPI sidecar, ct-media, and SeaweedFS services"
+  echo "  jtapi disable       Disable JTAPI services"
+  echo "  jtapi troubleshoot  Run comprehensive JTAPI diagnostics"
+  echo "  storage             Show SeaweedFS storage status"
+  echo "  storage enable      Start SeaweedFS S3-compatible object store"
+  echo "  storage disable     Stop SeaweedFS"
+  echo "  otel                Show observability stack status"
+  echo "  otel enable         Start Prometheus, Grafana, Loki, Alloy, Tempo, and exporters"
+  echo "  otel disable        Stop otel stack (~900 MiB freed)"
   echo
   echo "Maintenance Commands:"
   echo "  selfupdate          Update CLI script to latest version"
@@ -296,6 +2107,13 @@ show_help() {
   echo "  docker              Show Docker status (containers, images, networks)"
   echo "  docker network      Show detailed network configuration"
   echo "  docker prune        Remove unused Docker resources"
+  echo
+  echo "OS Update Commands:"
+  echo "  os-updates              Show automatic update schedule"
+  echo "  os-updates enable <s>   Enable auto-updates (daily|weekly|monthly)"
+  echo "  os-updates disable      Disable automatic OS updates"
+  echo "  os-updates run          Run OS update now (dnf update)"
+  echo "  os-updates log          Show recent update history"
   echo
   echo "Offline/Air-Gap Commands:"
   echo "  offline fetch <version>     Download pre-built bundle from cloud (fast)"
@@ -310,6 +2128,7 @@ show_help() {
   echo "  diag raw_tcp <ipv4|ipv6> <url>  Test raw TCP socket only"
   echo "  diag capture <secs> [filter] [file]  Capture packets with tcpdump"
   echo "  diag database               Run comprehensive database diagnostics"
+  echo "  diag db-watch               Live database activity monitor (refreshes every 2s)"
   echo
   echo "Advanced Commands:"
   echo "  build-appliance     Download and execute the prep script"
@@ -368,10 +2187,151 @@ cli_update() {
   rm -f "$tmp_file"
 }
 
+# Pre-flight self-update for the update command.
+# Downloads the latest cli.sh from GCS and re-execs so that hotfixes
+# (e.g. TimescaleDB removal, postgres compat) are always applied
+# regardless of which release the customer is upgrading FROM.
+self_update_and_reexec() {
+  # Guard: skip if we already re-exec'd this invocation
+  if [ "${_CT_CLI_REEXECED:-}" = "1" ]; then
+    return 0
+  fi
+
+  echo "Checking for cli.sh updates before upgrade..."
+  local tmp_file
+  tmp_file=$(mktemp)
+
+  # Try wget first, then curl
+  if ! wget -q "$SCRIPT_URL" -O "$tmp_file" 2>/dev/null && \
+     ! curl -sfL "$SCRIPT_URL" -o "$tmp_file" 2>/dev/null; then
+    rm -f "$tmp_file"
+    if [ -t 0 ]; then
+      echo "[WARN] Could not download latest cli.sh from GCS."
+      echo -n "Continue with current (possibly outdated) cli.sh? [y/N] "
+      read -r answer
+      case "$answer" in
+        [yY]*) echo "Continuing with local cli.sh..."; return 0 ;;
+        *)     echo "Aborting upgrade."; exit 1 ;;
+      esac
+    else
+      echo "[WARN] Could not fetch latest cli.sh (non-interactive). Continuing with local version."
+      return 0
+    fi
+    return 0
+  fi
+
+  # Verify download
+  if [ ! -s "$tmp_file" ]; then
+    echo "[WARN] Downloaded cli.sh is empty. Continuing with local version."
+    rm -f "$tmp_file"
+    return 0
+  fi
+
+  # Check if update needed
+  if diff -q "$tmp_file" "$CURRENT_SCRIPT_PATH" >/dev/null 2>&1; then
+    echo "[OK] cli.sh is up-to-date."
+    rm -f "$tmp_file"
+    return 0
+  fi
+
+  # Replace and re-exec
+  echo "Newer cli.sh available. Updating and restarting upgrade..."
+  if cp "$tmp_file" "$CURRENT_SCRIPT_PATH" && chmod +x "$CURRENT_SCRIPT_PATH"; then
+    rm -f "$tmp_file"
+    export _CT_CLI_REEXECED=1
+    exec "$CURRENT_SCRIPT_PATH" update "$@"
+  else
+    echo "[WARN] Failed to update cli.sh. Continuing with current version."
+    rm -f "$tmp_file"
+    return 0
+  fi
+}
+
 # Function to extract image tags from a docker-compose file
+# Resolves ${VAR:-default} patterns using values from .env
 extract_images() {
   local compose_file="$1"
-  grep -E "image.*calltelemetry" "$compose_file" | sed 's/.*image: *"//' | sed 's/".*//' | grep -v "^$"
+  # Resolve .env path from compose file directory (handle bare filenames without /)
+  local compose_dir
+  if echo "$compose_file" | grep -q '/'; then
+    compose_dir="${compose_file%/*}"
+  else
+    compose_dir="."
+  fi
+  local env_file="${compose_dir}/.env"
+
+  # Source .env to get version variables (if it exists)
+  local env_vars=""
+  if [ -f "$env_file" ]; then
+    env_vars=$(grep -E '^[A-Z_]+=.' "$env_file" | grep -v '^#')
+  fi
+
+  # Extract raw image lines and resolve env vars
+  grep -E "^\s+image:.*calltelemetry" "$compose_file" | sed 's/.*image: *["]*//;s/["]*$//' | grep -v "^$" | while read -r img; do
+    # Resolve ${VAR:-default} patterns
+    resolved="$img"
+    while echo "$resolved" | grep -qE '\$\{[A-Z_]+:-[^}]*\}'; do
+      var_expr=$(echo "$resolved" | grep -oE '\$\{[A-Z_]+:-[^}]*\}' | head -1)
+      var_name=$(echo "$var_expr" | sed 's/\${//;s/:-.*//')
+      var_default=$(echo "$var_expr" | sed 's/.*:-//;s/}//')
+      var_value=$(echo "$env_vars" | grep "^${var_name}=" | head -1 | cut -d= -f2-)
+      [ -z "$var_value" ] && var_value="$var_default"
+      resolved=$(echo "$resolved" | sed "s|\${${var_name}:-[^}]*}|${var_value}|")
+    done
+
+    # Resolve ${VAR} patterns (no default — must come from .env)
+    while echo "$resolved" | grep -qE '\$\{[A-Z_]+\}'; do
+      var_expr=$(echo "$resolved" | grep -oE '\$\{[A-Z_]+\}' | head -1)
+      var_name=$(echo "$var_expr" | sed 's/\${\|}//g')
+      var_value=$(echo "$env_vars" | grep "^${var_name}=" | head -1 | cut -d= -f2-)
+      if [ -n "$var_value" ]; then
+        resolved=$(echo "$resolved" | sed "s|\${${var_name}}|${var_value}|")
+      else
+        break  # No value found, stop resolving
+      fi
+    done
+
+    echo "$resolved"
+  done
+}
+
+# Check if a single Docker image is available (local or remote)
+# Returns 0 if available, 1 if not
+check_single_image() {
+  local image="$1"
+
+  # 1. Already pulled locally — no network needed
+  if docker image inspect "$image" >/dev/null 2>&1; then
+    echo "✓ Available (local)"
+    return 0
+  fi
+
+  # 2. Try registry via docker manifest inspect (needs experimental on older Docker)
+  # timeout 10 prevents hanging indefinitely on slow/rate-limited networks
+  if timeout 10 bash -c "DOCKER_CLI_EXPERIMENTAL=enabled docker manifest inspect '$image'" >/dev/null 2>&1; then
+    echo "✓ Available (registry)"
+    return 0
+  fi
+
+  # 3. Lightweight HEAD check against Docker Hub v2 API (no auth needed for public images)
+  local repo="${image%%:*}"        # e.g. calltelemetry/postgres
+  local tag="${image##*:}"         # e.g. 14
+  [ "$tag" = "$image" ] && tag="latest"
+  local hub_url="https://hub.docker.com/v2/repositories/${repo}/tags/${tag}"
+  if command -v curl >/dev/null 2>&1; then
+    if curl -fsSL --max-time 5 -o /dev/null -w '' "$hub_url" 2>/dev/null; then
+      echo "✓ Available (hub API)"
+      return 0
+    fi
+  elif command -v wget >/dev/null 2>&1; then
+    if wget -q --timeout=5 --spider "$hub_url" 2>/dev/null; then
+      echo "✓ Available (hub API)"
+      return 0
+    fi
+  fi
+
+  echo "✗ Not available"
+  return 1
 }
 
 # Function to check if Docker images are available
@@ -380,25 +2340,24 @@ check_image_availability() {
   local images=$(extract_images "$compose_file")
   local all_available=true
   local unavailable_images=""
-  
+
   echo "Checking image availability..."
-  
+
   for image in $images; do
     echo -n "  Checking $image... "
-    if docker manifest inspect "$image" >/dev/null 2>&1; then
-      echo "✓ Available"
+    if check_single_image "$image"; then
+      : # message already printed by check_single_image
     else
-      echo "✗ Not available"
       all_available=false
       unavailable_images="$unavailable_images$image\n"
     fi
   done
-  
+
   if [ "$all_available" = true ]; then
-    echo "✅ All images are available online"
+    echo "[OK] All images are available"
     return 0
   else
-    echo "❌ Some images are not available:"
+    echo "[FAIL] Some images are not available:"
     echo -e "$unavailable_images"
     return 1
   fi
@@ -418,7 +2377,7 @@ download_bundle() {
   if command -v wget >/dev/null 2>&1; then
     if ! wget -q --show-progress "$bundle_url" -O "$bundle_name" 2>&1; then
       echo ""
-      echo "❌ Failed to download bundle from GCS"
+      echo "[FAIL] Failed to download bundle from GCS"
       echo "URL: $bundle_url"
       echo ""
       echo "Possible causes:"
@@ -432,7 +2391,7 @@ download_bundle() {
     fi
   elif command -v curl >/dev/null 2>&1; then
     if ! curl -fL --progress-bar "$bundle_url" -o "$bundle_name"; then
-      echo "❌ Failed to download bundle from GCS"
+      echo "[FAIL] Failed to download bundle from GCS"
       rm -f "$bundle_name"
       return 1
     fi
@@ -441,29 +2400,61 @@ download_bundle() {
     return 1
   fi
 
-  echo "✅ Bundle downloaded"
+  echo "[OK] Bundle downloaded"
 
   # Extract bundle
   echo "Extracting config files..."
   rm -rf "$extract_dir"
   mkdir -p "$extract_dir"
   if ! tar -xzf "$bundle_name" -C "$extract_dir" --strip-components=1; then
-    echo "❌ Failed to extract bundle"
+    echo "[FAIL] Failed to extract bundle"
     rm -f "$bundle_name"
     rm -rf "$extract_dir"
     return 1
   fi
 
+  sanitize_metadata_artifacts "$extract_dir"
+
   # Move files to proper locations
   # docker-compose.yml -> temp file for validation
   if [ -f "$extract_dir/docker-compose.yml" ]; then
     mv "$extract_dir/docker-compose.yml" "$TEMP_FILE"
-    echo "  ✅ docker-compose.yml"
+    echo "  [OK] docker-compose.yml"
   else
-    echo "❌ Bundle missing docker-compose.yml"
+    echo "[FAIL] Bundle missing docker-compose.yml"
     rm -f "$bundle_name"
     rm -rf "$extract_dir"
     return 1
+  fi
+
+  # .env -> merge version pins from bundle into existing .env
+  # Only update version keys (*_VERSION); preserve user customizations (secrets, network, profiles)
+  if [ -f "$extract_dir/.env" ]; then
+    if [ -f "$ENV_FILE" ]; then
+      # Merge all *_VERSION keys from bundle .env into existing .env
+      # This auto-discovers new version keys (e.g., CT_SYSLOG_INGEST_VERSION)
+      grep -E '^[A-Z_]+_VERSION=' "$extract_dir/.env" | grep -v '^#' | while IFS='=' read -r key val; do
+        if [ -n "$key" ] && [ -n "$val" ]; then
+          env_set "$key" "$val"
+        fi
+      done
+      echo "  [OK] .env (version pins merged)"
+    else
+      cp "$extract_dir/.env" "$ENV_FILE"
+      echo "  [OK] .env (created from bundle)"
+    fi
+  fi
+
+  if ! normalize_ct_media_bundle "$version"; then
+    rm -f "$bundle_name"
+    rm -rf "$extract_dir"
+    return 1
+  fi
+
+  # .env.example -> always overwrite template
+  if [ -f "$extract_dir/.env.example" ]; then
+    cp "$extract_dir/.env.example" ./.env.example
+    echo "  [OK] .env.example"
   fi
 
   # cli.sh -> update current script
@@ -471,17 +2462,45 @@ download_bundle() {
     if ! diff -q "$extract_dir/cli.sh" "$CURRENT_SCRIPT_PATH" >/dev/null 2>&1; then
       cp "$extract_dir/cli.sh" "$CURRENT_SCRIPT_PATH"
       chmod +x "$CURRENT_SCRIPT_PATH"
-      echo "  ✅ cli.sh (updated)"
+      echo "  [OK] cli.sh (updated)"
     else
-      echo "  ✅ cli.sh (no changes)"
+      echo "  [OK] cli.sh (no changes)"
+    fi
+  fi
+
+  # postgres-bitnami-convert.sh -> install/update compatibility repair helper
+  if [ -f "$extract_dir/${POSTGRES_COMPAT_SCRIPT}" ]; then
+    if ! diff -q "$extract_dir/${POSTGRES_COMPAT_SCRIPT}" "./${POSTGRES_COMPAT_SCRIPT}" >/dev/null 2>&1; then
+      cp "$extract_dir/${POSTGRES_COMPAT_SCRIPT}" "./${POSTGRES_COMPAT_SCRIPT}"
+      chmod +x "./${POSTGRES_COMPAT_SCRIPT}"
+      echo "  [OK] ${POSTGRES_COMPAT_SCRIPT} (updated)"
+    else
+      echo "  [OK] ${POSTGRES_COMPAT_SCRIPT} (no changes)"
     fi
   fi
 
   # prometheus/prometheus.yml
   if [ -f "$extract_dir/prometheus/prometheus.yml" ]; then
     mkdir -p prometheus
-    mv "$extract_dir/prometheus/prometheus.yml" prometheus/
-    echo "  ✅ prometheus/prometheus.yml"
+    rm -f prometheus/prometheus.yml 2>/dev/null
+    if mv -f "$extract_dir/prometheus/prometheus.yml" prometheus/; then
+      echo "  [OK] prometheus/prometheus.yml"
+    else
+      echo "  [WARN] prometheus/prometheus.yml (failed to move — check permissions)"
+    fi
+  fi
+
+  # alertmanager/alertmanager.yml
+  if [ -f "$extract_dir/alertmanager/alertmanager.yml" ]; then
+    mkdir -p alertmanager
+    # Remove if Docker auto-created it as a directory (common bind-mount gotcha)
+    [ -d "alertmanager/alertmanager.yml" ] && rm -rf "alertmanager/alertmanager.yml"
+    rm -f alertmanager/alertmanager.yml 2>/dev/null
+    if mv -f "$extract_dir/alertmanager/alertmanager.yml" alertmanager/; then
+      echo "  [OK] alertmanager/alertmanager.yml"
+    else
+      echo "  [WARN] alertmanager/alertmanager.yml (failed to move — check permissions)"
+    fi
   fi
 
   # grafana dashboards and provisioning
@@ -490,33 +2509,98 @@ download_bundle() {
 
     # Copy dashboards
     if [ -d "$extract_dir/grafana/dashboards" ]; then
-      cp -r "$extract_dir/grafana/dashboards/"* grafana/dashboards/ 2>/dev/null && echo "  ✅ grafana/dashboards"
+      cp -r "$extract_dir/grafana/dashboards/"* grafana/dashboards/ 2>/dev/null && echo "  [OK] grafana/dashboards"
     fi
 
     # Copy provisioning
     if [ -d "$extract_dir/grafana/provisioning" ]; then
-      cp -r "$extract_dir/grafana/provisioning/"* grafana/provisioning/ 2>/dev/null && echo "  ✅ grafana/provisioning"
+      cp -r "$extract_dir/grafana/provisioning/"* grafana/provisioning/ 2>/dev/null && echo "  [OK] grafana/provisioning"
     fi
+
+    sanitize_grafana_assets grafana/dashboards grafana/provisioning
   fi
 
   # nats.conf
   if [ -f "$extract_dir/nats.conf" ]; then
-    cp "$extract_dir/nats.conf" ./nats.conf
-    echo "  ✅ nats.conf"
+    rm -f ./nats.conf 2>/dev/null
+    if cp "$extract_dir/nats.conf" ./nats.conf; then
+      echo "  [OK] nats.conf"
+    else
+      echo "  [WARN] nats.conf (failed to copy — check permissions)"
+    fi
   fi
 
   # Caddyfile
   if [ -f "$extract_dir/Caddyfile" ]; then
     if [ -f "./Caddyfile" ]; then
       if ! diff -q "$extract_dir/Caddyfile" "./Caddyfile" >/dev/null 2>&1; then
+        rm -f ./Caddyfile 2>/dev/null
         cp "$extract_dir/Caddyfile" ./Caddyfile
-        echo "  ✅ Caddyfile (updated)"
+        echo "  [OK] Caddyfile (updated)"
       else
-        echo "  ✅ Caddyfile (no changes)"
+        echo "  [OK] Caddyfile (no changes)"
       fi
     else
       cp "$extract_dir/Caddyfile" ./Caddyfile
-      echo "  ✅ Caddyfile (installed)"
+      echo "  [OK] Caddyfile (installed)"
+    fi
+  fi
+
+  # seaweedfs-s3.json (required for JTAPI S3 storage)
+  if [ -f "$extract_dir/seaweedfs-s3.json" ]; then
+    rm -rf ./seaweedfs-s3.json 2>/dev/null
+    if cp "$extract_dir/seaweedfs-s3.json" ./seaweedfs-s3.json; then
+      echo "  [OK] seaweedfs-s3.json"
+    else
+      echo "  [WARN] seaweedfs-s3.json (failed to copy — check permissions)"
+    fi
+  fi
+
+  # otel-collector config
+  if [ -f "$extract_dir/otel-collector/otel-collector-config.yaml" ]; then
+    mkdir -p ./otel-collector
+    # Docker may have created config.yaml as a directory — remove it first
+    if [ -d "./otel-collector/otel-collector-config.yaml" ]; then
+      rm -rf "./otel-collector/otel-collector-config.yaml"
+      echo "  [OK] otel-collector-config.yaml (removed Docker-created directory)"
+    fi
+    if cp "$extract_dir/otel-collector/otel-collector-config.yaml" ./otel-collector/otel-collector-config.yaml; then
+      echo "  [OK] otel-collector-config.yaml"
+    else
+      echo "  [WARN] otel-collector-config.yaml (failed to copy — check permissions)"
+    fi
+  fi
+
+  # Tempo config
+  if [ -f "$extract_dir/tempo/tempo.yaml" ]; then
+    mkdir -p ./tempo
+    [ -d "./tempo/tempo.yaml" ] && rm -rf "./tempo/tempo.yaml" && echo "  [OK] tempo/tempo.yaml (removed Docker-created directory)"
+    if cp "$extract_dir/tempo/tempo.yaml" ./tempo/tempo.yaml; then
+      echo "  [OK] tempo/tempo.yaml"
+    else
+      echo "  [WARN] tempo/tempo.yaml (failed to copy — check permissions)"
+    fi
+  fi
+
+  # Loki config
+  if [ -f "$extract_dir/loki/loki.yaml" ]; then
+    mkdir -p ./loki
+    [ -d "./loki/loki.yaml" ] && rm -rf "./loki/loki.yaml" && echo "  [OK] loki/loki.yaml (removed Docker-created directory)"
+    if cp "$extract_dir/loki/loki.yaml" ./loki/loki.yaml; then
+      echo "  [OK] loki/loki.yaml"
+    else
+      echo "  [WARN] loki/loki.yaml (failed to copy — check permissions)"
+    fi
+  fi
+
+  # Alloy config
+  if [ -f "$extract_dir/alloy/config.alloy" ]; then
+    mkdir -p ./alloy
+    [ -d "./alloy/config.alloy" ] && rm -rf "./alloy/config.alloy" && echo "  [OK] alloy/config.alloy (removed Docker-created directory)"
+    if cp "$extract_dir/alloy/config.alloy" ./alloy/config.alloy; then
+      echo "  [OK] alloy/config.alloy"
+    else
+      echo "  [WARN] alloy/config.alloy (failed to copy — check permissions)"
     fi
   fi
 
@@ -524,7 +2608,7 @@ download_bundle() {
   rm -f "$bundle_name"
   rm -rf "$extract_dir"
 
-  echo "✅ All config files extracted"
+  echo "[OK] All config files extracted"
   return 0
 }
 
@@ -564,7 +2648,7 @@ download_prometheus_config() {
     mv "$tmp_file" "$dest_path"
     echo "Prometheus configuration downloaded to $dest_path."
   else
-    echo "⚠️  Failed to download Prometheus configuration from $PROMETHEUS_CONFIG_URL"
+    echo "[WARN] Failed to download Prometheus configuration from $PROMETHEUS_CONFIG_URL"
     rm -f "$tmp_file"
     return 1
   fi
@@ -623,11 +2707,12 @@ download_grafana_assets() {
       mv "$tmp_file" "$dest_path"
       echo "Grafana asset synced: $dest_path"
     else
-      echo "⚠️  Failed to download Grafana asset: ${asset}"
+      echo "[WARN] Failed to download Grafana asset: ${asset}"
       rm -f "$tmp_file"
     fi
   done
 
+  sanitize_grafana_assets "$provisioning_mount" "$dashboards_mount"
   ensure_grafana_permissions "$provisioning_mount" "$dashboards_mount"
 }
 
@@ -673,13 +2758,30 @@ check_disk_space() {
   return 0
 }
 
-# Function to get current version from docker-compose.yml
+# Function to get current version from .env (preferred) or docker-compose.yml (legacy)
 get_current_version() {
+  # Prefer .env — new upgrades write VUE_VERSION here
+  local env_ver
+  env_ver=$(env_get "VUE_VERSION")
+  if [ -n "$env_ver" ]; then
+    echo "$env_ver"
+    return
+  fi
+
+  # Fallback: parse compose file for legacy hardcoded tags
   if [ -f "$ORIGINAL_FILE" ]; then
-    # Extract version from vue-web image tag
-    current_image=$(grep -E "calltelemetry/vue:" "$ORIGINAL_FILE" | head -1 | sed 's/.*calltelemetry\/vue://' | sed 's/".*//')
-    if [ -n "$current_image" ]; then
-      echo "$current_image"
+    local raw_tag
+    raw_tag=$(grep -E "calltelemetry/vue:" "$ORIGINAL_FILE" | head -1 | sed 's/.*calltelemetry\/vue://' | sed 's/".*//')
+    if [ -n "$raw_tag" ]; then
+      # Resolve ${VAR:-default} patterns — extract the default value
+      if echo "$raw_tag" | grep -qE '^\$\{.*:-.*\}$'; then
+        echo "$raw_tag" | sed 's/.*:-//' | sed 's/}$//'
+      elif echo "$raw_tag" | grep -q '^\$'; then
+        # Other env var pattern we can't resolve
+        echo "unknown"
+      else
+        echo "$raw_tag"
+      fi
     else
       echo "unknown"
     fi
@@ -752,9 +2854,10 @@ ipv6_toggle() {
       configure_ipv6 "$ORIGINAL_FILE" true
       echo ""
       fix_systemd_service_if_needed
-      echo "Restarting Docker Compose service..."
-      systemctl restart docker-compose-app.service
-      echo "Docker Compose service restarted."
+      if ! restart_service "ipv6 enable"; then
+        echo "[FAIL] Service restart failed after IPv6 enable."
+        return 1
+      fi
       echo ""
       wait_for_services
       ;;
@@ -763,9 +2866,10 @@ ipv6_toggle() {
       configure_ipv6 "$ORIGINAL_FILE" false
       echo ""
       fix_systemd_service_if_needed
-      echo "Restarting Docker Compose service..."
-      systemctl restart docker-compose-app.service
-      echo "Docker Compose service restarted."
+      if ! restart_service "ipv6 disable"; then
+        echo "[FAIL] Service restart failed after IPv6 disable."
+        return 1
+      fi
       echo ""
       wait_for_services
       ;;
@@ -861,7 +2965,7 @@ update() {
     echo "Fetching latest stable version..."
     version=$(curl -sfL "${GCS_BASE_URL}/latest-stable.txt" 2>/dev/null)
     if [ -z "$version" ]; then
-      echo "❌ Failed to fetch latest stable version"
+      echo "[FAIL] Failed to fetch latest stable version"
       echo ""
       echo "No stable release available yet."
       echo "Use 'cli.sh update --latest' for pre-release, or specify a version manually."
@@ -872,7 +2976,7 @@ update() {
     echo "Fetching latest version (including pre-releases)..."
     version=$(curl -sfL "${GCS_BASE_URL}/latest.txt" 2>/dev/null)
     if [ -z "$version" ]; then
-      echo "❌ Failed to fetch latest version"
+      echo "[FAIL] Failed to fetch latest version"
       echo ""
       echo "Specify a version manually: cli.sh update <version>"
       return 1
@@ -892,17 +2996,17 @@ update() {
       echo "Checking RAM requirements for version $version..."
       if ! check_ram; then
         echo ""
-        echo "❌ ERROR: Insufficient RAM for version 0.8.4 and higher"
+        echo "[FAIL] ERROR: Insufficient RAM for version 0.8.4 and higher"
         echo "   Version 0.8.4+ requires 8GB RAM (minimum 7GB detected)"
         echo ""
         echo "To proceed anyway, use: $0 update $version --force-upgrade"
         echo "WARNING: Proceeding with insufficient RAM may cause performance issues or failures"
         return 1
       fi
-      echo "✅ RAM requirement met (8GB recommended for optimal performance)"
+      echo "[OK] RAM requirement met (8GB recommended for optimal performance)"
       echo ""
     else
-      echo "⚠️  WARNING: Skipping RAM check (--force-upgrade flag used)"
+      echo "[WARN] WARNING: Skipping RAM check (--force-upgrade flag used)"
       echo "   Version 0.8.4+ requires 8GB RAM - proceeding with insufficient RAM may cause issues"
       echo ""
     fi
@@ -917,7 +3021,7 @@ update() {
       available_percent=$(df -h / | awk 'NR==2 {print $5}' | sed 's/%//')
       free_percent=$((100 - ${available_percent%\%}))
       echo ""
-      echo "❌ ERROR: Insufficient disk space for upgrade"
+      echo "[FAIL] ERROR: Insufficient disk space for upgrade"
       echo "   Available: ${free_percent}% free"
       echo "   Required: 10% free minimum"
       echo ""
@@ -925,17 +3029,17 @@ update() {
       echo "WARNING: Proceeding with low disk space may cause upgrade failures"
       return 1
     fi
-    echo "✅ Sufficient disk space available"
+    echo "[OK] Sufficient disk space available"
     echo ""
   else
-    echo "⚠️  WARNING: Skipping disk space check (--force-upgrade flag used)"
+    echo "[WARN] WARNING: Skipping disk space check (--force-upgrade flag used)"
     echo ""
   fi
 
   # Check for CentOS Stream 8 and display warning
   if [ -f /etc/os-release ]; then
     if grep -qi "centos.*stream.*8\|CentOS.*Stream.*8\|CENTOS.*STREAM.*8" /etc/os-release; then
-      echo "⚠️  WARNING: This appliance is running CentOS 8 Stream, and the OS has reached end of life in the Red Hat ecosystem. Please download a new appliance from calltelemetry.com, and copy the postgres and certificate folder over to the new appliance. If you continue, older Docker versions may not work with new builds in 0.8.4 releases. Sleeping for 5 seconds. Press CTRL-C to cancel."
+      echo "[WARN] WARNING: This appliance is running CentOS 8 Stream, and the OS has reached end of life in the Red Hat ecosystem. Please download a new appliance from calltelemetry.com, and copy the postgres and certificate folder over to the new appliance. If you continue, older Docker versions may not work with new builds in 0.8.4 releases. Sleeping for 5 seconds. Press CTRL-C to cancel."
       sleep 5
     fi
   fi
@@ -945,9 +3049,9 @@ update() {
   docker_version=$(docker --version 2>/dev/null | grep -o '[0-9]\+\.[0-9]\+' | head -1 | cut -d. -f1)
 
   if [ -z "$docker_version" ]; then
-    echo "⚠️  WARNING: Docker not found or not responding"
+    echo "[WARN] WARNING: Docker not found or not responding"
   elif [ "$docker_version" -lt 26 ]; then
-    echo "⚠️  WARNING: Docker version $docker_version detected - Docker 26+ is required"
+    echo "[WARN] WARNING: Docker version $docker_version detected - Docker 26+ is required"
     echo "Docker is outdated, updating Docker packages..."
     echo "Running Docker package updates..."
     sudo dnf update -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
@@ -959,12 +3063,12 @@ update() {
     updated_docker_version=$(docker --version 2>/dev/null | grep -o '[0-9]\+\.[0-9]\+' | head -1 | cut -d. -f1)
 
     if [ -z "$updated_docker_version" ]; then
-      echo "❌ ERROR: Docker update failed - Docker is not responding"
+      echo "[FAIL] ERROR: Docker update failed - Docker is not responding"
       echo "   Docker 26+ is required to continue"
       echo "   Please manually update Docker and try again"
       return 1
     elif [ "$updated_docker_version" -lt 26 ]; then
-      echo "❌ ERROR: Docker update failed - Docker is still on version $updated_docker_version"
+      echo "[FAIL] ERROR: Docker update failed - Docker is still on version $updated_docker_version"
       echo "   Docker 26+ is required to continue"
       echo "   Current version: $updated_docker_version"
       echo "   Required version: 26 or higher"
@@ -973,11 +3077,11 @@ update() {
       echo "   You may need to check your repository configuration or available packages"
       return 1
     else
-      echo "✅ Docker successfully updated to version $updated_docker_version"
+      echo "[OK] Docker successfully updated to version $updated_docker_version"
       echo ""
     fi
   else
-    echo "✅ Docker version $docker_version is supported"
+    echo "[OK] Docker version $docker_version is supported"
   fi
 
   timestamp=$(date "+%Y-%m-%d-%H-%M-%S")
@@ -991,7 +3095,7 @@ update() {
   # Download config bundle from GCS (includes docker-compose, prometheus, grafana, cli.sh)
   echo ""
   if ! download_bundle "$version"; then
-    echo "❌ Failed to download config bundle"
+    echo "[FAIL] Failed to download config bundle"
     echo ""
     echo "Check available versions at: https://github.com/calltelemetry/calltelemetry/releases"
     return 1
@@ -1002,7 +3106,7 @@ update() {
   if [ "$force_upgrade" = false ]; then
     if ! check_image_availability "$TEMP_FILE"; then
       echo ""
-      echo "❌ Cannot proceed with upgrade - some images are not available"
+      echo "[FAIL] Cannot proceed with upgrade - some images are not available"
       echo "Please ensure all images are built and pushed to the registry"
       echo ""
       echo "To proceed anyway, use: $0 update $version --force-upgrade"
@@ -1011,18 +3115,65 @@ update() {
       return 1
     fi
   else
-    echo "⚠️  WARNING: Skipping image availability check (--force-upgrade flag used)"
+    echo "[WARN] WARNING: Skipping image availability check (--force-upgrade flag used)"
     echo ""
   fi
 
   echo ""
-  echo "Pulling Docker images..."
-  if ! $DOCKER_COMPOSE_CMD -f "$TEMP_FILE" pull; then
-    echo "❌ Failed to pull Docker images"
-    rm -f "$TEMP_FILE"
-    return 1
+  # Authenticate to Docker Hub if credentials are available (avoids unauthenticated pull rate limits)
+  if [ -n "${DOCKERHUB_USERNAME:-}" ] && [ -n "${DOCKERHUB_TOKEN:-}" ]; then
+    echo "Logging in to Docker Hub as ${DOCKERHUB_USERNAME}..."
+    echo "${DOCKERHUB_TOKEN}" | sudo docker login -u "${DOCKERHUB_USERNAME}" --password-stdin
   fi
-  echo "✅ All images pulled successfully"
+  # Smart pull — only download images that aren't already present locally.
+  # Saves bandwidth and time on re-runs or minor version bumps where most
+  # images haven't changed.
+  echo "Checking which images need updating..."
+  local pull_needed=false
+  local skipped=0
+  local pulled=0
+
+  # Core services
+  while IFS= read -r img; do
+    if docker image inspect "$img" >/dev/null 2>&1; then
+      echo "  ✓ $img (already present)"
+      skipped=$((skipped + 1))
+    else
+      echo "  ↓ $img (pulling...)"
+      if docker pull "$img"; then
+        pulled=$((pulled + 1))
+      else
+        echo "  [FAIL] Failed to pull $img"
+        rm -f "$TEMP_FILE"
+        return 1
+      fi
+    fi
+  done < <(extract_images "$TEMP_FILE")
+
+  # JTAPI profile images (if enabled)
+  if is_jtapi_enabled; then
+    for svc in jtapi-sidecar ct-media seaweedfs; do
+      local img=$($DOCKER_COMPOSE_CMD -f "$TEMP_FILE" --profile jtapi config 2>/dev/null | grep -A1 "^  ${svc}:" | grep "image:" | awk '{print $2}' | tr -d '"')
+      if [ -n "$img" ]; then
+        if docker image inspect "$img" >/dev/null 2>&1; then
+          echo "  ✓ $img (already present)"
+          skipped=$((skipped + 1))
+        else
+          echo "  ↓ $img (pulling...)"
+          docker pull "$img" || echo "  [WARN] $img not available yet"
+          pulled=$((pulled + 1))
+        fi
+      fi
+    done
+  fi
+
+  echo "[OK] Images ready ($pulled pulled, $skipped already present)"
+
+  # Pull any remaining images not covered above (e.g. calltelemetry/postgres,
+  # infrastructure images with non-versioned tags). Uses the new compose file
+  # so it pulls the correct versions for the upgrade target.
+  echo "Pulling remaining infrastructure images..."
+  $DOCKER_COMPOSE_CMD -f "$TEMP_FILE" pull --quiet 2>/dev/null || true
 
   # Extract and display the image versions
   echo ""
@@ -1032,7 +3183,7 @@ update() {
   done
 
   echo ""
-  echo "⚠️  You are about to upgrade from $current_version to $version"
+  echo "[WARN] You are about to upgrade from $current_version to $version"
   echo "This will:"
   echo "  - Stop all services"
   echo "  - Update container images"
@@ -1066,16 +3217,125 @@ update() {
 
   # Config files (nats.conf, Caddyfile, prometheus, grafana) already extracted by download_bundle()
   if [ -f "$TEMP_FILE" ]; then
+    # NOTE: PostgreSQL version guard removed — no longer auto-downloads
+    # docker-compose.override.yml during upgrades. Users who need a specific
+    # PG version can run: cli.sh postgres set <version>
+
     mv "$TEMP_FILE" "$ORIGINAL_FILE"
     echo "New docker-compose.yml moved to production."
 
     # Configure IPv6 settings based on --ipv6 flag
     configure_ipv6 "$ORIGINAL_FILE" "$enable_ipv6"
 
+    # Pre-flight: repair Docker-created directories for config bind mounts.
+    # When upgrading from versions that didn't have Loki/Alloy/Tempo, Docker
+    # creates the mount target as a directory instead of a file. Fix it now.
+    # Actual config files are deployed via the release bundle (bundle-manifest.yml).
+    for config_pair in "loki/loki.yaml" "alloy/config.alloy" "tempo/tempo.yaml" "otel-collector/otel-collector-config.yaml"; do
+      config_path="${INSTALL_DIR}/${config_pair}"
+      if [ -d "$config_path" ]; then
+        echo "  Fixing Docker-created directory: $config_path"
+        rm -rf "$config_path"
+      fi
+    done
+
     fix_systemd_service_if_needed
-    echo "Restarting Docker Compose service..."
-    systemctl restart docker-compose-app.service
-    echo "Docker Compose service restarted."
+    fix_systemd_compose_files
+
+    # Ensure PG/pool .env defaults exist (no-clobber — preserves customer overrides)
+    ensure_postgres_defaults
+
+    # Remove legacy postgres override file — these shipped with PG 14 and contain
+    # hardcoded values (max_connections=300, autovacuum_max_workers=5) that conflict
+    # with .env-driven configuration. The main docker-compose.yml now uses .env vars.
+    if [ -f "$POSTGRES_OVERRIDE_FILE" ]; then
+      if grep -q "calltelemetry/postgres" "$POSTGRES_OVERRIDE_FILE" 2>/dev/null; then
+        echo "Removing legacy PostgreSQL override file ($POSTGRES_OVERRIDE_FILE)..."
+        rm -f "$POSTGRES_OVERRIDE_FILE"
+        echo "[OK] Removed — PG settings now driven by .env (cli.sh postgres profile)"
+      fi
+    fi
+
+    # Remove TimescaleDB references — the extension is no longer shipped in our
+    # postgres images. If present in docker-compose.yml or postgresql.conf, PG
+    # crashes on startup with "could not access file timescaledb".
+    if grep -q "timescaledb" "$ORIGINAL_FILE" 2>/dev/null; then
+      echo "Removing TimescaleDB references from docker-compose.yml..."
+      sed -i "s/shared_preload_libraries='timescaledb,pg_stat_statements'/shared_preload_libraries='pg_stat_statements'/" "$ORIGINAL_FILE"
+      sed -i "s/shared_preload_libraries='timescaledb'/shared_preload_libraries=''/" "$ORIGINAL_FILE"
+      sed -i '/-c timescaledb\./d' "$ORIGINAL_FILE"
+      echo "[OK] TimescaleDB references removed from compose"
+    fi
+    local pg_conf="${INSTALL_DIR}/postgres-data/data/postgresql.conf"
+    if [ -f "$pg_conf" ] && grep -q "timescaledb" "$pg_conf" 2>/dev/null; then
+      echo "Removing TimescaleDB from postgresql.conf..."
+      sudo sed -i "s/shared_preload_libraries = 'timescaledb,pg_stat_statements'/shared_preload_libraries = 'pg_stat_statements'/" "$pg_conf"
+      sudo sed -i "s/shared_preload_libraries = 'timescaledb'/shared_preload_libraries = ''/" "$pg_conf"
+      echo "[OK] TimescaleDB references removed from postgresql.conf"
+    fi
+
+    if ! repair_postgres_compat "$(get_current_postgres_image)"; then
+      rm -f "$caddyfile_tmp"
+      rm -f "${INSTALL_DIR}/.ssh/authorized_keys"
+      return 1
+    fi
+
+    # Check swap compliance: 8GB total, or 50% of RAM if RAM > 16GB
+    local SWAPFILE="/swapfile"
+    local total_ram_gb target_swap_gb non_file_swap_gb swapfile_target_gb current_swapfile_gb
+    total_ram_gb=$(( $(grep MemTotal /proc/meminfo | awk '{print $2}') / 1024 / 1024 ))
+    if [ "$total_ram_gb" -gt 16 ]; then
+      target_swap_gb=$(( total_ram_gb / 2 ))
+    else
+      target_swap_gb=8
+    fi
+    non_file_swap_gb=$(( $(swapon --show=NAME,SIZE --noheadings --bytes 2>/dev/null | grep -v "^${SWAPFILE}" | awk '{sum+=$2} END{printf "%d", sum/1024/1024/1024}') ))
+    swapfile_target_gb=$(( target_swap_gb - non_file_swap_gb ))
+    [ "$swapfile_target_gb" -lt 0 ] && swapfile_target_gb=0
+    if [ -f "$SWAPFILE" ]; then
+      current_swapfile_gb=$(( $(stat -c%s "$SWAPFILE") / 1024 / 1024 / 1024 ))
+    else
+      current_swapfile_gb=0
+    fi
+    if [ "$current_swapfile_gb" -eq "$swapfile_target_gb" ]; then
+      echo "[OK] Swap is $(( $(free | awk '/^Swap:/{print $2}') / 1024 / 1024 ))GB (target: ${target_swap_gb}GB)"
+    else
+      # Only stop services when a swap change is actually needed
+      echo "Swap needs resize (current swapfile: ${current_swapfile_gb}GB, target: ${swapfile_target_gb}GB) — stopping services..."
+      systemctl stop docker-compose-app.service 2>/dev/null || true
+      local current_total_gb
+      current_total_gb=$(( $(free | awk '/^Swap:/{print $2}') / 1024 / 1024 ))
+      echo "Resizing swap: ${current_total_gb}GB → ${target_swap_gb}GB total (RAM: ${total_ram_gb}GB, swapfile: ${swapfile_target_gb}GB)..."
+      if swapon --show=NAME --noheadings 2>/dev/null | grep -q "^${SWAPFILE}$"; then
+        sudo swapoff "$SWAPFILE"
+      fi
+      if [ "$swapfile_target_gb" -gt 0 ]; then
+        sudo rm -f "$SWAPFILE"
+        sudo fallocate -l "${swapfile_target_gb}G" "$SWAPFILE" 2>/dev/null || \
+          sudo dd if=/dev/zero of="$SWAPFILE" bs=1M count=$(( swapfile_target_gb * 1024 )) status=none
+        sudo chmod 600 "$SWAPFILE"
+        sudo mkswap "$SWAPFILE" > /dev/null
+        sudo swapon "$SWAPFILE"
+        if ! grep -q "^${SWAPFILE}" /etc/fstab; then
+          echo "${SWAPFILE} none swap sw 0 0" | sudo tee -a /etc/fstab > /dev/null
+        fi
+      else
+        sudo rm -f "$SWAPFILE"
+        sudo sed -i "\|^${SWAPFILE}|d" /etc/fstab
+      fi
+      echo "[OK] Swap set to $(( $(free | awk '/^Swap:/{print $2}') / 1024 / 1024 ))GB"
+    fi
+
+    if ! restart_service "upgrade"; then
+      echo ""
+      echo "[FAIL] Update FAILED — Docker Compose service could not be restarted."
+      echo "   The new docker-compose.yml is in place but services are not running."
+      echo "   To retry:  systemctl restart docker-compose-app.service"
+      echo "   To revert: cli.sh rollback"
+      rm -f "$caddyfile_tmp"
+      rm -f "${INSTALL_DIR}/.ssh/authorized_keys"
+      return 1
+    fi
 
     if [ "$skip_cleanup" = false ]; then
       echo "Cleaning up unused Docker resources..."
@@ -1086,15 +3346,125 @@ update() {
 
     echo "Monitoring service startup..."
     wait_for_services
+    services_ok=$?
 
-    if [ $? -eq 0 ]; then
-      echo "✅ Update complete! All services are running and ready."
-    else
-      echo "⚠️  Update complete, but some services may still be initializing."
-      echo "This is normal during major upgrades with SQL index rebuilds."
-      echo "Monitor progress with: $DOCKER_COMPOSE_CMD logs -f"
-      echo "Check CPU usage with: top (high postgresql CPU is normal during index rebuilds)"
+    # Drop TimescaleDB extension from the database if it was installed.
+    # The extension .so is no longer in our postgres images, so every query
+    # fails with "could not access file timescaledb-2.x.x" until it's dropped.
+    if $DOCKER_COMPOSE_CMD exec -T db psql -U calltelemetry -d calltelemetry_prod -tAc "SELECT 1 FROM pg_extension WHERE extname='timescaledb'" 2>/dev/null | grep -q 1; then
+      echo "Dropping TimescaleDB extension from database..."
+      $DOCKER_COMPOSE_CMD exec -T db psql -U calltelemetry -d calltelemetry_prod -c "DROP EXTENSION IF EXISTS timescaledb CASCADE;" 2>/dev/null
+      echo "[OK] TimescaleDB extension dropped"
     fi
+
+    # Platform migration: Node.js 22 (one-time, skip if already done)
+    REQUIRED_NODE_MAJOR=22
+    CURRENT_NODE_MAJOR=$(node --version 2>/dev/null | sed 's/v\([0-9]*\).*/\1/' || echo "0")
+
+    if [ "$CURRENT_NODE_MAJOR" -ge "$REQUIRED_NODE_MAJOR" ] 2>/dev/null; then
+      echo "[OK] Node.js $(node --version) (meets requirement)"
+    else
+      echo "Migrating Node.js to v${REQUIRED_NODE_MAJOR} (current: v${CURRENT_NODE_MAJOR:-none})..."
+      # Remove old Node packages
+      sudo rpm -e --nodeps npm nodejs-full-i18n 2>/dev/null || true
+      sudo rpm -e --nodeps nodejs 2>/dev/null || true
+      # Enable Node 22 module stream (AlmaLinux AppStream default is v16)
+      sudo dnf module reset nodejs -y &>/dev/null || true
+      sudo dnf module enable nodejs:22 -y &>/dev/null || true
+      sudo dnf install -y nodejs --allowerasing &>/dev/null
+      NEW_NODE=$(node --version 2>/dev/null || echo "none")
+      NEW_MAJOR=$(echo "$NEW_NODE" | sed 's/v\([0-9]*\).*/\1/' || echo "0")
+      if [ "$NEW_MAJOR" -ge "$REQUIRED_NODE_MAJOR" ] 2>/dev/null; then
+        echo "[OK] Node.js ${NEW_NODE} installed"
+      else
+        echo "[WARN] Node.js migration failed (got ${NEW_NODE}, need v${REQUIRED_NODE_MAJOR}+) — ct CLI may not work"
+      fi
+    fi
+
+    # Update ct CLI (skip if node migration failed)
+    # npm may not be in PATH — try common locations
+    local npm_bin=""
+    if command -v npm &>/dev/null; then
+      npm_bin="npm"
+    elif [ -x /usr/bin/npm ]; then
+      npm_bin="/usr/bin/npm"
+    elif [ -x /usr/lib/node_modules/npm/bin/npm-cli.js ]; then
+      npm_bin="/usr/lib/node_modules/npm/bin/npm-cli.js"
+    fi
+    if command -v node &>/dev/null && [ -n "$npm_bin" ]; then
+      [ -f /usr/local/bin/ct ] && sudo rm -f /usr/local/bin/ct
+      echo "Updating @calltelemetry/cli..."
+      sudo "$npm_bin" install -g @calltelemetry/cli &>/dev/null && \
+        CT_CLI_VER=$("$npm_bin" list -g --depth=0 @calltelemetry/cli 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1) && \
+        echo "[OK] ct CLI updated to ${CT_CLI_VER:-unknown}" || echo "[WARN] ct CLI update failed (non-critical)"
+    fi
+
+    # Apply console loglevel fix for existing VMs
+    # nft_compat / ip_set are loaded by Docker/firewalld and emit KERN_WARNING (level 4).
+    # loglevel=3 on the kernel cmdline is reset by systemd; sysctl.d persists it.
+    if [ ! -f /etc/sysctl.d/99-console-loglevel.conf ]; then
+      echo "Applying console loglevel fix (suppresses nft_compat/ip_set warnings)..."
+      echo "kernel.printk = 3 4 1 3" | sudo tee /etc/sysctl.d/99-console-loglevel.conf > /dev/null
+      sudo sysctl -p /etc/sysctl.d/99-console-loglevel.conf > /dev/null
+      echo "[OK] Console loglevel fix applied"
+    fi
+
+    # Migrate legacy ifcfg network configs to NetworkManager keyfile format
+    # RHEL 9 / AlmaLinux 9 deprecated network-scripts ifcfg files; NM logs deprecation
+    # warnings for any connection still using the ifcfg backend.
+    if command -v nmcli &>/dev/null; then
+      ifcfg_count=$(nmcli -t -f FILENAME connection show 2>/dev/null | grep -c 'ifcfg' || true)
+      if [ "${ifcfg_count:-0}" -gt 0 ]; then
+        echo "Migrating $ifcfg_count legacy ifcfg network config(s) to keyfile format..."
+        sudo nmcli connection migrate &>/dev/null && echo "[OK] Network configs migrated to keyfile" || echo "[WARN] nmcli migrate failed (non-critical)"
+      fi
+    fi
+
+    # Generate GRAFANA_PASSWORD if missing (required for dashboard provisioning)
+    # Both web and grafana containers read this from .env as basic auth credential.
+    if ! grep -q '^GRAFANA_PASSWORD=' "$ENV_FILE" 2>/dev/null; then
+      local gf_pw
+      gf_pw=$(openssl rand -hex 16)
+      env_set "GRAFANA_PASSWORD" "$gf_pw"
+      echo "[OK] Generated GRAFANA_PASSWORD"
+
+      # Remove stale GRAFANA_TOKEN (replaced by GRAFANA_PASSWORD)
+      env_remove "GRAFANA_TOKEN"
+
+      # Reset Grafana admin password for existing volumes
+      if $DOCKER_COMPOSE_CMD exec -T grafana grafana-cli admin reset-admin-password "$gf_pw" &>/dev/null; then
+        echo "[OK] Grafana admin password synced"
+      else
+        echo "  ℹ️  Grafana container not running yet — password will apply on next start"
+      fi
+    fi
+
+    # Cap Docker daemon at 90% RAM — reserve 10% for OS (kernel, systemd, sshd)
+    DOCKER_DROPIN_DIR="/etc/systemd/system/docker.service.d"
+    DOCKER_DROPIN_FILE="${DOCKER_DROPIN_DIR}/memory-limit.conf"
+    if [ ! -f "$DOCKER_DROPIN_FILE" ] || grep -q 'MemoryMax=80%' "$DOCKER_DROPIN_FILE" 2>/dev/null; then
+      echo "Applying Docker memory limit (90% of RAM)..."
+      sudo mkdir -p "$DOCKER_DROPIN_DIR"
+      printf '[Service]\nMemoryMax=90%%\n' | sudo tee "$DOCKER_DROPIN_FILE" > /dev/null
+      sudo systemctl daemon-reload
+      echo "[OK] Docker memory limit applied (90% of RAM)"
+    fi
+
+    # Mark partition drain as complete for ct-cli compatibility.
+    # The actual drain runs automatically in onprem-start.sh (container entrypoint)
+    # BEFORE the app starts — zero lock contention. It's a no-op if nothing to drain.
+    if ! ct_migration_done "014_partition_drain" && [ "$(printf '%s\n' "0.8.6-rc166" "$version" | sort -V | head -n1)" = "0.8.6-rc166" ]; then
+      ct_migration_mark "014_partition_drain" "applied"
+      echo "[OK] Partition data migration handled by container startup (check docker logs for progress)"
+    fi
+
+    if [ $services_ok -eq 0 ]; then
+      echo "[OK] Update complete! All services are running and ready."
+    else
+      echo "[WARN] Update applied, but startup checks failed (see errors above)."
+      echo "  Run 'cli.sh status' to check current state."
+    fi
+
   else
     echo "Failed to download new docker-compose.yml or other required files. No changes made."
   fi
@@ -1111,9 +3481,12 @@ rollback() {
     cp "$BACKUP_FILE" "$ORIGINAL_FILE"
     echo "Rolled back to the previous docker-compose configuration from $BACKUP_FILE."
     fix_systemd_service_if_needed
-    echo "Restarting Docker Compose service..."
-    systemctl restart docker-compose-app.service
-    echo "Docker Compose service restarted."
+    if ! restart_service "rollback"; then
+      echo "[FAIL] Service restart failed after rollback."
+      echo "   The rollback configuration is in place but services may not be running."
+      echo "   Retry with: systemctl restart docker-compose-app.service"
+      return 1
+    fi
   else
     echo "No backup file found to rollback."
   fi
@@ -1150,7 +3523,7 @@ compact_system() {
   docker system prune --all -f
 
   echo "Starting Docker Compose database service..."
-  sudo $DOCKER_COMPOSE_CMD up -d db
+  sudo $DOCKER_COMPOSE_CMD $(get_compose_files) up -d db
 
   echo "Waiting for the database service to be fully operational..."
   sleep 15
@@ -1163,9 +3536,9 @@ compact_system() {
 
   echo "Compacting PostgreSQL database (this may take several minutes)..."
   if sudo $DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db psql -d calltelemetry_prod -U calltelemetry -c 'VACUUM FULL;'; then
-    echo "✅ Database vacuum completed successfully."
+    echo "[OK] Database vacuum completed successfully."
   else
-    echo "❌ Database vacuum failed."
+    echo "[FAIL] Database vacuum failed."
     return 1
   fi
 
@@ -1174,12 +3547,20 @@ compact_system() {
 
 # Function to wait for services to be ready
 # Flow: 1) Wait for containers 2) Wait for DB 3) Wait for migrations 4) Health check
+# Returns 0 on full success, 1 if any phase failed or timed out
 wait_for_services() {
-  local max_wait=600
+  local max_wait=3600
   local poll_interval=5
   local wait_time=0
   local release_bin=$(get_release_binary)
   local services=("db" "web" "caddy" "vue-web" "traceroute" "nats")
+  if is_jtapi_enabled; then
+    services+=("jtapi-sidecar" "ct-media" "seaweedfs")
+  fi
+
+  # Track failures across phases
+  local phase_failures=0
+  local failed_phases=""
 
   echo ""
   echo "Starting services..."
@@ -1187,6 +3568,7 @@ wait_for_services() {
 
   # Phase 1: Wait for containers to be running
   echo "Phase 1: Waiting for containers..."
+  local containers_ok=false
   while [ $wait_time -lt 120 ]; do
     local all_running=true
     local status_line=""
@@ -1198,7 +3580,7 @@ wait_for_services() {
         if [ "$status" = "running" ]; then
           status_line="$status_line ✓$service"
         else
-          status_line="$status_line ⏳$service"
+          status_line="$status_line [WAIT]$service"
           all_running=false
         fi
       else
@@ -1212,26 +3594,44 @@ wait_for_services() {
     if [ "$all_running" = true ]; then
       echo ""
       echo "  ✓ All containers running"
+      containers_ok=true
       break
     fi
 
     sleep 3
     wait_time=$((wait_time + 3))
   done
+
+  if [ "$containers_ok" != true ]; then
+    echo ""
+    echo "  [FAIL] Container startup timed out after 120s"
+    echo "  Not running:%s" "$(echo "$status_line" | grep -oE '(✗|[WAIT])[^ ]+' | tr '\n' ' ')"
+    phase_failures=$((phase_failures + 1))
+    failed_phases="$failed_phases containers"
+  fi
   echo ""
 
   # Phase 2: Wait for database to accept connections
   echo "Phase 2: Waiting for database..."
+  local db_ok=false
   wait_time=0
   while [ $wait_time -lt 120 ]; do
     if $DOCKER_COMPOSE_CMD exec -T db pg_isready -U calltelemetry -d calltelemetry_prod >/dev/null 2>&1; then
       echo "  ✓ Database accepting connections"
+      db_ok=true
       break
     fi
     printf "\r  Database: connecting... (%ds)" "$wait_time"
     sleep 3
     wait_time=$((wait_time + 3))
   done
+
+  if [ "$db_ok" != true ]; then
+    echo ""
+    echo "  [FAIL] Database connection timed out after 120s"
+    phase_failures=$((phase_failures + 1))
+    failed_phases="$failed_phases database"
+  fi
   echo ""
 
   # Phase 3: Wait for migrations to complete
@@ -1239,8 +3639,17 @@ wait_for_services() {
   wait_time=0
   local last_migration=""
   local migrations_complete=false
+  local stable_total_count=""
+  local release_total_count=""
 
   while [ $wait_time -lt $max_wait ]; do
+    if [ -z "$release_total_count" ]; then
+      release_total_count=$(get_release_migration_count "$release_bin")
+      if ! [[ "$release_total_count" =~ ^[0-9]+$ ]] || [ "$release_total_count" -le 0 ]; then
+        release_total_count=""
+      fi
+    fi
+
     # Try RPC first for accurate count
     local migration_raw=$(run_migration_status_rpc "$release_bin" 2>/dev/null)
     local pending_count=$(printf '%s\n' "$migration_raw" | awk -F= '/::pending_count=/{print $2; exit}')
@@ -1248,6 +3657,12 @@ wait_for_services() {
     # Parse "Applied migrations: X/Y (Z%)" - use awk for portability
     local applied_count=$(printf '%s\n' "$migration_raw" | awk '/Applied migrations:/ {split($3, a, "/"); print a[1]}')
     local total_count=$(printf '%s\n' "$migration_raw" | awk '/Applied migrations:/ {split($3, a, "/"); print a[2]}')
+    # Parse "Next pending: VERSION - NAME" for display
+    local next_migration=$(printf '%s\n' "$migration_raw" | awk '/Next pending:/ {sub(/^.*Next pending: /, ""); print; exit}')
+
+    if [[ "$total_count" =~ ^[0-9]+$ ]]; then
+      stable_total_count="$total_count"
+    fi
 
     # If RPC fails or returns no data, fall back to SQL
     if [ -z "$pending_count" ] || [ "$pending_count" = "error" ] || [ -z "$applied_count" ]; then
@@ -1257,14 +3672,34 @@ wait_for_services() {
       last_migration=$($DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -t -c \
         "SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1;" 2>/dev/null | tr -d ' ')
 
+      if [ -n "$stable_total_count" ]; then
+        total_count="$stable_total_count"
+      elif [ -n "$release_total_count" ]; then
+        total_count="$release_total_count"
+      fi
+
+      # Try to get the current running migration from logs
+      local log_tail
+      log_tail=$($DOCKER_COMPOSE_CMD logs --tail 100 web 2>&1 | normalize_container_log_lines)
+
+      # Extract the currently running migration filename from Ecto's "== Running VERSION Name" log
+      local running_migration
+      running_migration=$(printf '%s\n' "$log_tail" | grep '== Running' | tail -1 | sed 's/.*== Running //' | sed 's/\.change\/0.*//' 2>/dev/null || echo "")
+
+      # Also check the last "[Release]   - VERSION filename" entry for the pending list
+      if [ -z "$running_migration" ]; then
+        running_migration=$(printf '%s\n' "$log_tail" | grep '\[Release\]   - ' | tail -1 | sed 's/.*\[Release\]   - //' 2>/dev/null || echo "")
+      fi
+      running_migration=$(printf '%s' "$running_migration" | tr -d '\r' | sed 's/[[:space:]]*$//')
+
       # Check logs for migration completion
-      if $DOCKER_COMPOSE_CMD logs --tail 50 web 2>&1 | grep -q "All migrations completed successfully"; then
+      if printf '%s\n' "$log_tail" | grep -q "All migrations completed successfully"; then
         migrations_complete=true
         pending_count=0
-        total_count="$applied_count"
+        total_count="${stable_total_count:-${release_total_count:-$applied_count}}"
       else
         # Check if app is still starting
-        if $DOCKER_COMPOSE_CMD logs --tail 20 web 2>&1 | grep -qE "Running migrations|Pending migrations"; then
+        if printf '%s\n' "$log_tail" | grep -qE "Running migrations|Pending migrations"; then
           pending_count="running"
         else
           pending_count="checking"
@@ -1277,22 +3712,60 @@ wait_for_services() {
       total_count=$((applied_count + pending_count))
     fi
 
+    if [[ "$total_count" =~ ^[0-9]+$ ]]; then
+      if [[ "$applied_count" =~ ^[0-9]+$ ]] && [ "$total_count" -lt "$applied_count" ]; then
+        total_count="$applied_count"
+      fi
+      stable_total_count="$total_count"
+    elif [ -n "$stable_total_count" ]; then
+      total_count="$stable_total_count"
+    elif [ -n "$release_total_count" ]; then
+      total_count="$release_total_count"
+    fi
+
     # Display status
     if [[ "$pending_count" =~ ^[0-9]+$ ]]; then
       if [ "$pending_count" -eq 0 ]; then
-        # Use applied_count as total if total is missing
-        local display_total="${total_count:-$applied_count}"
+        # When Ecto reports 0 pending, applied_count IS the total — don't
+        # let the file-count (release_total_count) create a false X/Y mismatch.
+        local display_total="$applied_count"
         echo ""
         echo "  ✓ Migrations complete ($applied_count/$display_total)"
         migrations_complete=true
         break
       else
-        printf "\r  Migrations: %s/%s applied, %s pending...    " "$applied_count" "$total_count" "$pending_count"
+        if [ -n "$next_migration" ]; then
+          printf "\r  Migrations: %s/%s applied, %s pending — running: %s    " "$applied_count" "$total_count" "$pending_count" "$next_migration"
+        else
+          printf "\r  Migrations: %s/%s applied, %s pending...    " "$applied_count" "$total_count" "$pending_count"
+        fi
       fi
     elif [ "$pending_count" = "running" ]; then
-      printf "\r  Migrations: %s applied, running... (latest: %s)    " "${applied_count:-?}" "${last_migration:-?}"
+      local display_total="${total_count:-?}"
+      local display_name=""
+      if [ -n "$running_migration" ]; then
+        display_name=" — running: ${running_migration}"
+      elif [ -n "$last_migration" ]; then
+        display_name=" — latest applied: ${last_migration}"
+      fi
+      # Show elapsed time of active DB query to prove progress during long migrations
+      local query_elapsed=""
+      query_elapsed=$($DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -t -c \
+        "SELECT EXTRACT(EPOCH FROM now() - query_start)::int FROM pg_stat_activity WHERE state = 'active' AND query NOT LIKE '%pg_stat_activity%' AND usename = 'calltelemetry' ORDER BY query_start LIMIT 1;" 2>/dev/null | tr -d ' \r\n')
+      local elapsed_display=""
+      if [[ "$query_elapsed" =~ ^[0-9]+$ ]] && [ "$query_elapsed" -gt 2 ]; then
+        local mins=$((query_elapsed / 60))
+        local secs=$((query_elapsed % 60))
+        if [ "$mins" -gt 0 ]; then
+          elapsed_display=" (${mins}m${secs}s)"
+        else
+          elapsed_display=" (${secs}s)"
+        fi
+      fi
+      printf "\r  Migrations: %s/%s applied, running...%s%s    " "${applied_count:-?}" "$display_total" "$display_name" "$elapsed_display"
     else
-      printf "\r  Migrations: %s applied, waiting for status...    " "${applied_count:-?}"
+      local display_total="${total_count:-?}"
+      printf "\r  Migrations: %s/%s applied, waiting for status...    " "${applied_count:-?}" "$display_total"
     fi
 
     sleep $poll_interval
@@ -1301,8 +3774,10 @@ wait_for_services() {
 
   if [ "$migrations_complete" != true ]; then
     echo ""
-    echo "  ⚠️  Migration status unclear after ${max_wait}s"
+    echo "  [FAIL] Migration status unclear after ${max_wait}s"
     echo "  Check logs: $DOCKER_COMPOSE_CMD logs -f web"
+    phase_failures=$((phase_failures + 1))
+    failed_phases="$failed_phases migrations"
   fi
   echo ""
 
@@ -1312,7 +3787,7 @@ wait_for_services() {
   # Check web endpoint
   local web_healthy=false
   for i in {1..10}; do
-    if $DOCKER_COMPOSE_CMD exec -T web wget -q --spider http://127.0.0.1:4080/healthz 2>/dev/null; then
+    if $DOCKER_COMPOSE_CMD exec -T web curl -sf http://127.0.0.1:4080/healthz >/dev/null 2>&1; then
       web_healthy=true
       break
     fi
@@ -1322,14 +3797,33 @@ wait_for_services() {
   if [ "$web_healthy" = true ]; then
     echo "  ✓ Web application healthy"
   else
-    echo "  ⚠️  Web health check pending"
+    echo "  [FAIL] Web health check failed after 20s"
+    phase_failures=$((phase_failures + 1))
+    failed_phases="$failed_phases health-check"
+  fi
+
+  local traceroute_healthy=false
+  for i in {1..10}; do
+    if $DOCKER_COMPOSE_CMD exec -T traceroute wget -q --spider http://127.0.0.1:4100/healthz >/dev/null 2>&1; then
+      traceroute_healthy=true
+      break
+    fi
+    sleep 2
+  done
+
+  if [ "$traceroute_healthy" = true ]; then
+    echo "  ✓ Traceroute service healthy"
+  else
+    echo "  [FAIL] Traceroute health check failed after 20s"
+    phase_failures=$((phase_failures + 1))
+    failed_phases="$failed_phases traceroute-health"
   fi
 
   # Check for startup issues in logs
   local scheduler_errors=$($DOCKER_COMPOSE_CMD logs --tail 100 web 2>&1 | grep -c "not started: invalid task function" 2>/dev/null | tail -1 || echo "0")
   scheduler_errors=${scheduler_errors:-0}
   if [ "$scheduler_errors" -gt 0 ] 2>/dev/null; then
-    echo "  ⚠️  $scheduler_errors scheduler jobs failed (non-fatal)"
+    echo "  [WARN] $scheduler_errors scheduler jobs failed (non-fatal)"
   fi
 
   # RPC check
@@ -1337,49 +3831,68 @@ wait_for_services() {
   if [[ "$rpc_ok" == *"ok"* ]]; then
     echo "  ✓ Application RPC responding"
   else
-    echo "  ⚠️  Application RPC not ready"
+    echo "  [FAIL] Application RPC not responding"
+    phase_failures=$((phase_failures + 1))
+    failed_phases="$failed_phases rpc"
   fi
 
   echo ""
   show_system_activity
   echo ""
 
-  if [ "$migrations_complete" = true ] && [ "$web_healthy" = true ]; then
-    echo "✅ Startup complete!"
+  if [ $phase_failures -eq 0 ]; then
+    echo "[OK] Startup complete!"
     return 0
   else
-    echo "⚠️  Startup complete with warnings. Run 'cli.sh app_status' for details."
-    return 0
+    echo "[FAIL] Startup failed — $phase_failures phase(s) had errors:$failed_phases"
+    echo ""
+    echo "  Troubleshoot:"
+    echo "    cli.sh status              Service health summary"
+    echo "    cli.sh logs web --tail 50  Recent web logs"
+    echo "    cli.sh logs db --tail 50   Recent database logs"
+    return 1
   fi
 }
 
 # Function to purge unused Docker resources
 purge_docker() {
   echo "Starting Docker cleanup..."
-  
+
   echo -n "Removing stopped containers... "
   containers_removed=$(docker container prune -f 2>/dev/null | grep "Total reclaimed space" | awk '{print $4 $5}' || echo "0B")
   echo "done (${containers_removed})"
-  
+
   echo -n "Removing unused networks... "
   networks_removed=$(docker network prune -f 2>/dev/null | wc -l)
   echo "done (${networks_removed} networks)"
-  
+
   echo -n "Removing unused volumes... "
   volumes_output=$(docker volume prune -f 2>/dev/null)
   volumes_space=$(echo "$volumes_output" | grep "Total reclaimed space" | awk '{print $4 $5}' || echo "0B")
   echo "done (${volumes_space})"
-  
-  echo -n "Removing unused images (keeping recent ones)... "
-  images_output=$(docker image prune -a -f --filter "until=24h" 2>/dev/null)
-  images_space=$(echo "$images_output" | grep "Total reclaimed space" | awk '{print $4 $5}' || echo "0B")
-  echo "done (${images_space})"
-  
+
+  # Remove old calltelemetry images not in the active docker-compose.yml.
+  # Suppress per-layer deletion output — just show count and space saved.
+  echo -n "Removing old calltelemetry images... "
+  local active_images=""
+  if [ -f "$ORIGINAL_FILE" ]; then
+    active_images=$(extract_images "$ORIGINAL_FILE" 2>/dev/null | tr '\n' '|' | sed 's/|$//')
+  fi
+
+  local old_removed=0
+  if [ -n "$active_images" ]; then
+    docker images --format '{{.Repository}}:{{.Tag}}' | grep "calltelemetry/" | while read -r img; do
+      if ! echo "$img" | grep -qE "$active_images"; then
+        docker rmi "$img" >/dev/null 2>&1 && old_removed=$((old_removed + 1))
+      fi
+    done
+  fi
+  echo "done (${old_removed} old images removed)"
+
   echo -n "Removing dangling images... "
-  dangling_output=$(docker image prune -f 2>/dev/null)
-  dangling_space=$(echo "$dangling_output" | grep "Total reclaimed space" | awk '{print $4 $5}' || echo "0B")
-  echo "done (${dangling_space})"
-  
+  docker image prune -f >/dev/null 2>&1
+  echo "done"
+
   echo "Docker cleanup complete."
 }
 
@@ -1443,6 +3956,231 @@ list_backups() {
   else
     echo "  No backups found"
   fi
+}
+
+# ---------------------------------------------------------------------------
+# seed_cmd — generate demo seed data and stream live progress
+# ---------------------------------------------------------------------------
+seed_cmd() {
+  local subcommand="${1:-help}"
+  shift || true
+
+  local release_bin
+  release_bin=$(get_release_binary)
+
+  case "$subcommand" in
+    run)
+      local org_id=1
+      local preset="comprehensive_demo"
+      local curri_count=0
+      local days=90
+
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --org)      org_id="$2";     shift 2 ;;
+          --preset)   preset="$2";     shift 2 ;;
+          --curri)    curri_count="$2"; shift 2 ;;
+          --days)     days="$2";       shift 2 ;;
+          *) echo "Unknown option: $1"; shift ;;
+        esac
+      done
+
+      echo ""
+      echo "╔══════════════════════════════════════════════════════╗"
+      echo "║         CallTelemetry Demo Seed Generator            ║"
+      echo "╚══════════════════════════════════════════════════════╝"
+      echo ""
+      echo "  Org:    $org_id"
+      echo "  Preset: $preset"
+      if [ "$curri_count" -gt 0 ] 2>/dev/null; then
+        echo "  Curri:  $curri_count events (mega loader)"
+      fi
+      echo "  Days:   $days day spread"
+      echo ""
+
+      # Ensure org exists — bootstrap if needed
+      echo "▶ Checking org $org_id..."
+      local org_exists
+      org_exists=$($DOCKER_COMPOSE_CMD exec -T web "$release_bin" rpc \
+        "IO.puts(if Cdrcisco.Repo.get(Cdrcisco.Identity.Org, ${org_id}), do: \"exists\", else: \"missing\")" 2>&1 | tail -1)
+
+      if [ "$org_exists" != "exists" ]; then
+        echo "  Org $org_id not found — bootstrapping demo org..."
+        $DOCKER_COMPOSE_CMD exec -T web "$release_bin" rpc "
+{:ok, user} = Cdrcisco.Identity.create_user_with_org(
+  %{\"email\" => \"demo@calltelemetry.com\", \"password\" => \"demo\",
+    \"password_confirmation\" => \"demo\", \"terms_accepted\" => true},
+  %{name: \"CallTelemetry Demo\", check_new_version_on_login: true}
+)
+org = Cdrcisco.Identity.get_first_org(user)
+{:ok, token, _} = Cdrcisco.Token.trial(\"demo@calltelemetry.com\", \"Demo\", 30)
+{:ok, org} = Cdrcisco.Identity.update_org(org, %{license_token: token})
+Cdrcisco.License.update_license(org)
+IO.puts(\"created org \" <> to_string(org.id))
+" 2>&1 | grep -v "^\s*$"
+      else
+        echo "  ✓ Org $org_id exists"
+      fi
+      echo ""
+
+      # Enqueue preset via Oban (persistent — survives container restart)
+      echo "▶ Enqueueing $preset seed job via Oban..."
+      local job_id
+      job_id=$($DOCKER_COMPOSE_CMD exec -T web "$release_bin" rpc "
+{:ok, job} = Cdrcisco.Seeds.DemoSeedWorker.new(%{
+  \"action\" => \"preset\",
+  \"org_id\" => ${org_id},
+  \"preset_name\" => \"${preset}\",
+  \"overrides\" => %{\"curri_call_events\" => %{\"count\" => ${days} * 10000, \"days\" => ${days}}}
+}) |> Oban.insert()
+IO.puts(to_string(job.id))
+" 2>&1 | tail -1)
+
+      echo "  ✓ Oban job enqueued (id=$job_id)"
+
+      # Also kick off mega curri loader if requested
+      if [ "$curri_count" -gt 0 ] 2>/dev/null; then
+        echo "▶ Launching CurriMegaLoader ($curri_count events)..."
+        $DOCKER_COMPOSE_CMD exec -T web "$release_bin" rpc "
+Task.start(fn ->
+  Cdrcisco.Seeds.CurriMegaLoader.load(${org_id}, %{
+    count: ${curri_count}, days: ${days}, chunk_size: 100_000
+  })
+end)
+IO.puts(\"mega loader started\")
+" 2>&1 | grep -v "^\s*$"
+      fi
+
+      echo ""
+      echo "▶ Streaming progress (Ctrl+C to stop monitoring, seeds continue in background)..."
+      echo "──────────────────────────────────────────────────────────"
+      seed_monitor "$org_id" "$job_id"
+      ;;
+
+    monitor)
+      local org_id="${1:-1}"
+      local job_id="${2:-}"
+      seed_monitor "$org_id" "$job_id"
+      ;;
+
+    status)
+      local org_id="${1:-1}"
+      echo ""
+      echo "=== Seed Status (org $org_id) ==="
+      $DOCKER_COMPOSE_CMD exec -T db psql -U calltelemetry -d calltelemetry_prod -c "
+SELECT
+  (SELECT COUNT(*) FROM curri_events) AS curri_events,
+  (SELECT COUNT(*) FROM reputation_signals) AS reputation_signals,
+  (SELECT SUM(reltuples::bigint) FROM pg_class
+   WHERE relname LIKE 'cdrcalls_%' AND relkind = 'r'
+   AND relnamespace = 'public'::regnamespace) AS cdrcalls,
+  (SELECT SUM(reltuples::bigint) FROM pg_class
+   WHERE relname LIKE 'cmr_records_%' AND relkind = 'r'
+   AND relnamespace = 'public'::regnamespace) AS cmr_records,
+  (SELECT COUNT(*) FROM oban_jobs
+   WHERE state IN ('available','executing','scheduled')
+   AND worker LIKE '%Seed%') AS active_seed_jobs,
+  (SELECT COUNT(*) FROM policies) AS policies,
+  (SELECT COUNT(*) FROM watch_lists) AS watch_lists;
+" 2>&1
+      ;;
+
+    cancel)
+      echo "▶ Cancelling all active seed jobs..."
+      $DOCKER_COMPOSE_CMD exec -T web "$release_bin" rpc "
+import Ecto.Query
+{:ok, n} = Oban.cancel_all_jobs(from j in Oban.Job,
+  where: j.worker == \"Cdrcisco.Seeds.DemoSeedWorker\"
+  and j.state in [\"available\",\"scheduled\",\"executing\"])
+IO.puts(\"Cancelled \" <> to_string(n) <> \" jobs\")
+" 2>&1 | tail -3
+      ;;
+
+    help|*)
+      echo ""
+      echo "Usage: cli.sh seed <subcommand> [options]"
+      echo ""
+      echo "Subcommands:"
+      echo "  run      Generate demo seeds (enqueues Oban job + streams progress)"
+      echo "  monitor  Re-attach to progress stream for an org"
+      echo "  status   Quick DB row counts for all seed tables"
+      echo "  cancel   Cancel all queued seed jobs"
+      echo ""
+      echo "Options for 'run':"
+      echo "  --org <id>        Org ID (default: 1)"
+      echo "  --preset <name>   Preset name (default: comprehensive_demo)"
+      echo "  --curri <count>   Also run CurriMegaLoader with this many events"
+      echo "  --days <n>        Day spread for data (default: 90)"
+      echo ""
+      echo "Examples:"
+      echo "  cli.sh seed run"
+      echo "  cli.sh seed run --curri 10000000"
+      echo "  cli.sh seed run --preset comprehensive_demo --curri 1000000 --days 90"
+      echo "  cli.sh seed status"
+      echo "  cli.sh seed monitor 1"
+      echo ""
+      ;;
+  esac
+}
+
+# Live seed progress monitor — tails logs filtered to seed output + polls DB counts
+seed_monitor() {
+  local org_id="${1:-1}"
+  local job_id="${2:-}"
+  local poll_interval=10
+
+  echo ""
+  echo "  Monitoring org=$org_id  (refreshes every ${poll_interval}s)"
+  echo "  Logs: docker logs calltelemetry-web-1 | grep seed activity"
+  echo ""
+
+  # Background log tail filtered to seed-relevant lines
+  $DOCKER_COMPOSE_CMD logs -f web 2>&1 | grep -v "CurriController\|Keepalive\|Renewal token\|session_controller" \
+    | grep --line-buffered -E "DemoEngine|DemoSeedWorker|CurriMegaLoader|DemoStreamer|chunk=|Seed|seed|DONE|preset|ERROR|error" &
+  local log_pid=$!
+
+  # Foreground periodic DB count table
+  while true; do
+    sleep "$poll_interval"
+    local counts
+    counts=$($DOCKER_COMPOSE_CMD exec -T db psql -U calltelemetry -d calltelemetry_prod -t -A -c "
+SELECT
+  'curri=' || (SELECT COUNT(*) FROM curri_events) ||
+  '  rep=' || (SELECT COUNT(*) FROM reputation_signals) ||
+  '  cdr=' || COALESCE((SELECT SUM(reltuples::bigint) FROM pg_class
+    WHERE relname LIKE 'cdrcalls_%' AND relkind = 'r'
+    AND relnamespace = 'public'::regnamespace)::text, '?') ||
+  '  jobs=' || (SELECT COUNT(*) FROM oban_jobs
+    WHERE state IN ('available','executing','scheduled')
+    AND worker LIKE '%Seed%');
+" 2>/dev/null | tr -d ' ')
+
+    local oban_state=""
+    if [ -n "$job_id" ]; then
+      oban_state=$($DOCKER_COMPOSE_CMD exec -T db psql -U calltelemetry -d calltelemetry_prod -t -A -c \
+        "SELECT state FROM oban_jobs WHERE id = ${job_id};" 2>/dev/null | tr -d ' ')
+      oban_state=" job=$job_id:$oban_state"
+    fi
+
+    echo "  [$(date +%H:%M:%S)]  $counts$oban_state"
+
+    # Stop polling when job completes
+    if [ -n "$job_id" ] && [ "$oban_state" = " job=$job_id:completed" ]; then
+      echo ""
+      echo "  [OK] Seed job $job_id completed!"
+      break
+    fi
+    if [ -n "$job_id" ] && [ "$oban_state" = " job=$job_id:discarded" ]; then
+      echo ""
+      echo "  [FAIL] Seed job $job_id failed (discarded). Check logs above."
+      break
+    fi
+  done
+
+  kill "$log_pid" 2>/dev/null || true
+  echo ""
+  echo "Final counts:"
+  seed_cmd status "$org_id"
 }
 
 # Consolidated database command
@@ -1528,6 +4266,23 @@ db_cmd() {
 # Function to get the release binary path
 get_release_binary() {
   echo "/home/app/onprem/bin/onprem"
+}
+
+normalize_container_log_lines() {
+  sed -n 's/^.*"message":"\([^"]*\)".*$/\1/p; t; p'
+}
+
+get_release_migration_count() {
+  local release_bin="${1:-$(get_release_binary)}"
+  local release_root="${release_bin%/bin/*}"
+
+  $DOCKER_COMPOSE_CMD exec -T web sh -lc "
+    count=\$(find \"$release_root/lib\" -path '*/priv/repo/migrations/[0-9]*.exs' -type f 2>/dev/null | wc -l)
+    if [ \"\${count:-0}\" -eq 0 ]; then
+      count=\$(find /app/lib -path '*/priv/repo/migrations/[0-9]*.exs' -type f 2>/dev/null | wc -l)
+    fi
+    printf '%s' \"\$count\"
+  " 2>/dev/null | tr -d '[:space:]'
 }
 
 print_sql_migration_snapshot() {
@@ -1634,7 +4389,7 @@ check_service_ports() {
   local container
   container=$($DOCKER_COMPOSE_CMD ps -q "$service" 2>/dev/null)
   if [ -z "$container" ]; then
-    echo "    ⚠️  $service ports: container not found"
+    echo "    [WARN] $service ports: container not found"
     return 0
   fi
 
@@ -1661,7 +4416,7 @@ check_service_ports() {
         service_ok=false
       fi
     else
-      echo "    ⚠️  $service:$port not published to host; skipping port probe"
+      echo "    [WARN] $service:$port not published to host; skipping port probe"
     fi
   done
 
@@ -1675,7 +4430,7 @@ report_service_health() {
   local container
   container=$($DOCKER_COMPOSE_CMD ps -q "$service" 2>/dev/null)
   if [ -z "$container" ]; then
-    echo "    ⚠️  $service: container not found"
+    echo "    [WARN] $service: container not found"
     return 0
   fi
 
@@ -1688,11 +4443,11 @@ report_service_health() {
       return 0
       ;;
     starting)
-      echo "    ⏳ $service healthcheck: starting"
+      echo "    $service healthcheck: starting"
       return 1
       ;;
     unhealthy)
-      echo "    ⚠️  $service healthcheck: unhealthy"
+      echo "    [WARN] $service healthcheck: unhealthy"
       docker inspect --format '{{range .State.Health.Log}}{{println .Output}}{{end}}' "$container" 2>/dev/null | tail -n 3 | sed 's/^/      /'
       return 1
       ;;
@@ -1706,7 +4461,7 @@ report_service_health() {
       fi
       ;;
     *)
-      echo "    ⚠️  $service healthcheck: $health"
+      echo "    [WARN] $service healthcheck: $health"
       return 1
       ;;
   esac
@@ -1737,7 +4492,7 @@ show_web_logs() {
   pending_migrations=$(printf '%s\n' "$logs" | awk '/Pending migrations \(will run now\):/ {pending=1; next} pending && /^  - / {gsub(/^  - /, ""); print} pending && !/^  - / {pending=0}' || true)
 
   if [ -n "$pending_migrations" ]; then
-    echo "📋 Pending migrations detected from logs:"
+    echo "Pending migrations detected from logs:"
     while IFS= read -r line; do
       [ -n "$line" ] && printf '  • %s\n' "$line"
     done <<< "$pending_migrations"
@@ -1749,7 +4504,7 @@ show_web_logs() {
   local scheduler_warnings
   scheduler_warnings=$(printf '%s\n' "$logs" | grep "not started: invalid task function" | wc -l)
   if [ "$scheduler_warnings" -gt 0 ]; then
-    echo "⚠️  Note: $scheduler_warnings scheduler jobs have invalid task functions (non-fatal)"
+    echo "[WARN] Note: $scheduler_warnings scheduler jobs have invalid task functions (non-fatal)"
     echo ""
   fi
 
@@ -2016,7 +4771,7 @@ EOF
       echo "Last updated: $timestamp (report: $report_file)"
     else
       echo ""
-      echo "✅ Migration status check completed"
+      echo "[OK] Migration status check completed"
       echo "Report saved to: $report_file"
     fi
 
@@ -2301,7 +5056,7 @@ sql_purge_table() {
 
   echo "$delete_result"
   echo ""
-  echo "✅ Purge completed in ${duration} seconds"
+  echo "[OK] Purge completed in ${duration} seconds"
   echo ""
 
   # Show updated table size
@@ -2317,14 +5072,14 @@ FROM $table_name;
 "
 
   echo ""
-  echo "💡 Tip: Run 'VACUUM FULL $table_name' to reclaim disk space"
+  echo "Tip: Run 'VACUUM FULL $table_name' to reclaim disk space"
   echo "   Use: $DOCKER_COMPOSE_CMD exec -T db psql -U calltelemetry -d calltelemetry_prod -c 'VACUUM FULL $table_name;'"
 }
 
 # Function to run pending migrations using Elixir release
 migration_run() {
   echo "Running pending database migrations..."
-  
+
   # Check if web container is running and application is ready
   web_container=$($DOCKER_COMPOSE_CMD ps -q web 2>/dev/null)
   if [ -z "$web_container" ]; then
@@ -2350,17 +5105,17 @@ migration_run() {
   fi
 
   echo "Using release binary: $release_bin"
-  
-  # Execute migrations
+
+  # Execute migrations — stream output live (no variable capture)
   echo "Executing migrations..."
-  migration_output=$($DOCKER_COMPOSE_CMD exec -T web "$release_bin" rpc '
+  $DOCKER_COMPOSE_CMD exec -T web "$release_bin" rpc '
     IO.puts("=== Running Migrations ===")
-    
+
     try do
       result = Ecto.Migrator.run(Cdrcisco.Repo, :up, all: true)
-      
+
       case result do
-        [] -> 
+        [] ->
           IO.puts("No pending migrations to run.")
         migrations ->
           IO.puts("Successfully ran #{length(migrations)} migrations:")
@@ -2368,25 +5123,112 @@ migration_run() {
             IO.puts("  #{status} #{version} #{name}")
           end
       end
-      
+
       IO.puts("")
       IO.puts("Migration run completed successfully!")
     rescue
-      e -> 
+      e ->
         IO.puts("Error running migrations: #{inspect(e)}")
         System.halt(1)
     end
-  ' 2>&1)
+  ' 2>&1
 
-  # Display output
-  echo "$migration_output"
-  
   if [ $? -eq 0 ]; then
     echo ""
-    echo "✅ Migration run completed successfully"
+    echo "[OK] Migration run completed successfully"
   else
     echo ""
-    echo "❌ Migration run failed"
+    echo "[FAIL] Migration run failed"
+    return 1
+  fi
+}
+
+# ── ct-cli migration state helpers ──
+# Read/write ~/.ct/migrations.json in the same format ct-cli uses:
+#   { "completed": { "014_partition_drain": { "at": "ISO8601", "result": "applied" } } }
+# This lets ct-cli skip migrations already completed by cli.sh.
+CT_MIGRATIONS_FILE="$HOME/.ct/migrations.json"
+
+# Check if a migration ID is already completed. Returns 0 (true) if done.
+ct_migration_done() {
+  local id="$1"
+  if [ ! -f "$CT_MIGRATIONS_FILE" ]; then
+    return 1
+  fi
+  # Use python3 (available on AlmaLinux) for reliable JSON parsing
+  python3 -c "
+import json, sys
+try:
+    state = json.load(open('$CT_MIGRATIONS_FILE'))
+    sys.exit(0 if '$id' in state.get('completed', {}) else 1)
+except:
+    sys.exit(1)
+" 2>/dev/null
+}
+
+# Mark a migration as completed with timestamp.
+ct_migration_mark() {
+  local id="$1"
+  local result="${2:-applied}"
+  local ts
+  ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+  mkdir -p "$HOME/.ct"
+
+  # Merge into existing state or create new
+  python3 -c "
+import json, os
+path = '$CT_MIGRATIONS_FILE'
+state = {'completed': {}, 'errors': {}}
+if os.path.exists(path):
+    try:
+        state = json.load(open(path))
+    except:
+        pass
+state.setdefault('completed', {})['$id'] = {'at': '$ts', 'result': '$result'}
+with open(path, 'w') as f:
+    json.dump(state, f, indent=2)
+    f.write('\n')
+" 2>/dev/null
+}
+
+# Drain legacy partition tables and default partition overflow.
+# Runs synchronously — may take a while for large tables (progress is streamed).
+# Safe to run multiple times (idempotent).
+migration_drain() {
+  echo "=== Partition Data Migration ==="
+  echo "Checking for legacy tables and default partition overflow..."
+  echo ""
+  echo "The application will be stopped during this operation to avoid"
+  echo "lock contention. It will be restarted automatically when complete."
+  echo ""
+
+  release_bin=$(get_release_binary)
+
+  # Stop the web container — drain needs exclusive DB access.
+  # CREATE TABLE PARTITION OF takes ACCESS EXCLUSIVE on the parent table;
+  # running this while the app serves traffic blocks all queries.
+  echo "Stopping application..."
+  $DOCKER_COMPOSE_CMD stop web 2>/dev/null
+
+  # Start the container without the app (just the OS) so we can exec into it.
+  # Override the entrypoint to sleep instead of running the app.
+  echo "Starting drain container..."
+  $DOCKER_COMPOSE_CMD run --rm -T --no-deps --entrypoint "" web \
+    "$release_bin" eval 'Cdrcisco.Release.drain_legacy_partitions()' 2>&1
+
+  drain_exit=$?
+
+  # Restart the full stack (entrypoint runs migrations then starts app)
+  echo ""
+  echo "Restarting application..."
+  $DOCKER_COMPOSE_CMD up -d web 2>/dev/null
+
+  if [ $drain_exit -eq 0 ]; then
+    echo "[OK] Partition drain completed — application restarting"
+  else
+    echo "[FAIL] Partition drain failed (exit code $drain_exit)"
+    echo "       Application is restarting. Retry with: cli.sh migrate drain"
     return 1
   fi
 }
@@ -2454,10 +5296,10 @@ migration_rollback() {
   
   if [ $? -eq 0 ]; then
     echo ""
-    echo "✅ Migration rollback completed successfully"
+    echo "[OK] Migration rollback completed successfully"
   else
     echo ""
-    echo "❌ Migration rollback failed"
+    echo "[FAIL] Migration rollback failed"
     return 1
   fi
 }
@@ -2470,6 +5312,9 @@ migrate_cmd() {
   case "$action" in
     run)
       migration_run
+      ;;
+    drain)
+      migration_drain
       ;;
     rollback)
       migration_rollback "${1:-1}"
@@ -2490,7 +5335,8 @@ migrate_cmd() {
       echo ""
       echo "Commands:"
       echo "  status            Show migration status (default)"
-      echo "  run               Run pending migrations"
+      echo "  run               Run pending migrations + partition drain"
+      echo "  drain             Run partition drain only (idempotent)"
       echo "  rollback [n]      Rollback n migrations (default: 1)"
       echo "  history           Show last 10 migrations from database"
       echo "  watch             Watch migration progress continuously"
@@ -2508,19 +5354,26 @@ app_status() {
 
   # Container status
   echo "=== Container Status ==="
-  $DOCKER_COMPOSE_CMD ps
+  $DOCKER_COMPOSE_CMD $(get_compose_files) ps
   echo ""
 
+  # JTAPI feature status
+  if is_jtapi_enabled; then
+    echo "=== JTAPI Status ==="
+    echo "✓ JTAPI: enabled"
+    echo ""
+  fi
+
   # Check if web container is running
-  web_container=$($DOCKER_COMPOSE_CMD ps -q web 2>/dev/null)
+  web_container=$($DOCKER_COMPOSE_CMD $(get_compose_files) ps -q web 2>/dev/null)
   if [ -z "$web_container" ]; then
-    echo "❌ Web container not running"
+    echo "[FAIL] Web container not running"
     return 1
   fi
 
   container_status=$(docker inspect --format='{{.State.Status}}' "$web_container" 2>/dev/null)
   if [ "$container_status" != "running" ]; then
-    echo "❌ Web container status: $container_status"
+    echo "[FAIL] Web container status: $container_status"
     return 1
   fi
 
@@ -2529,17 +5382,22 @@ app_status() {
   if $DOCKER_COMPOSE_CMD exec -T db pg_isready -U calltelemetry -d calltelemetry_prod >/dev/null 2>&1; then
     echo "✓ Database: accepting connections"
 
-    # Get migration count from DB
+    # Get applied migration count from DB
     migration_count=$($DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -t -c \
       "SELECT COUNT(*) FROM schema_migrations;" 2>/dev/null | tr -d ' ')
-    echo "✓ Migrations in database: $migration_count"
+
+    # Get total expected migrations from release
+    total_migrations=$(get_release_migration_count "$release_bin")
+    total_migrations=${total_migrations:-"?"}
+
+    echo "✓ Migrations in database: $migration_count / $total_migrations"
 
     # Get latest migration
     latest=$($DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -t -c \
       "SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1;" 2>/dev/null | tr -d ' ')
     echo "✓ Latest migration: $latest"
   else
-    echo "❌ Database: not accepting connections"
+    echo "[FAIL] Database: not accepting connections"
   fi
   echo ""
 
@@ -2572,9 +5430,43 @@ app_status() {
       end
     ' 2>&1
   else
-    echo "❌ RPC connection: failed"
+    echo "[FAIL] RPC connection: failed"
     echo "   Application may still be starting up"
     echo "   Error: $rpc_test"
+  fi
+  echo ""
+
+  # Host-facing service ports
+  echo "=== Service Ports ==="
+  local port_ok=true
+
+  # CURRI HTTP (Caddy port 80)
+  if probe_host_port 80 2; then
+    echo "✓ CURRI HTTP (port 80): reachable"
+  else
+    echo "✗ CURRI HTTP (port 80): not reachable"
+    port_ok=false
+  fi
+
+  # Admin HTTPS (Caddy port 443)
+  if probe_host_port 443 2; then
+    echo "✓ Admin HTTPS (port 443): reachable"
+  else
+    echo "✗ Admin HTTPS (port 443): not reachable"
+    port_ok=false
+  fi
+
+  # SFTP (port 22)
+  if probe_host_port 22 2; then
+    echo "✓ SFTP (port 22): reachable"
+  else
+    echo "✗ SFTP (port 22): not reachable"
+    port_ok=false
+  fi
+
+  if $port_ok; then
+    echo ""
+    echo "✓ All service ports healthy"
   fi
   echo ""
 
@@ -2591,7 +5483,7 @@ app_status() {
   if echo "$recent_logs" | grep -q "All migrations completed successfully"; then
     echo "✓ Migrations: completed successfully"
   elif echo "$recent_logs" | grep -q "Pending migrations"; then
-    echo "⏳ Migrations: still running"
+    echo "Migrations: still running"
   else
     echo "? Migrations: status unknown from logs"
   fi
@@ -2599,7 +5491,7 @@ app_status() {
   # Check for scheduler errors
   scheduler_errors=$(echo "$recent_logs" | grep "not started: invalid task function" | wc -l)
   if [ "$scheduler_errors" -gt 0 ]; then
-    echo "⚠️  Scheduler: $scheduler_errors jobs failed to start (invalid task function)"
+    echo "[WARN] Scheduler: $scheduler_errors jobs failed to start (invalid task function)"
     echo "   This may indicate version mismatch or missing modules"
     echo "$recent_logs" | grep "not started: invalid task function" | head -5 | sed 's/^/   /'
   else
@@ -2651,9 +5543,10 @@ logging_toggle() {
       echo "Logging level set to $level"
       echo ""
       fix_systemd_service_if_needed
-      echo "Restarting Docker Compose service..."
-      systemctl restart docker-compose-app.service
-      echo "Docker Compose service restarted."
+      if ! restart_service "logging $level"; then
+        echo "[FAIL] Service restart failed after logging level change."
+        return 1
+      fi
       echo ""
       wait_for_services
       ;;
@@ -2678,19 +5571,43 @@ logging_toggle() {
 }
 
 # Function to build the appliance by fetching and executing the prep script
+# Supports CT_PREP_SCRIPT_PATH environment variable to use a local script instead of downloading
 build_appliance() {
-  echo "Downloading and executing the prep script to build the appliance..."
-  wget -q "$PREP_SCRIPT_URL" -O /tmp/prep.sh
-  echo "Script downloaded. Executing the script..."
-  if [ $? -eq 0 ]; then
+  local prep_script="/tmp/prep.sh"
+  local cleanup_script=true
+
+  # Check if a local prep script path was provided
+  if [ -n "${CT_PREP_SCRIPT_PATH:-}" ] && [ -f "${CT_PREP_SCRIPT_PATH}" ]; then
+    echo "Using local prep script: ${CT_PREP_SCRIPT_PATH}"
+    prep_script="${CT_PREP_SCRIPT_PATH}"
+    cleanup_script=false
+  else
+    echo "Downloading and executing the prep script to build the appliance..."
+    wget -q "$PREP_SCRIPT_URL" -O /tmp/prep.sh
+    if [ $? -ne 0 ]; then
+      echo "Failed to download the prep script. Please check your internet connection."
+      return 1
+    fi
+    echo "Script downloaded."
     chmod +x /tmp/prep.sh
-    /tmp/prep.sh
+  fi
+
+  echo "Executing the prep script..."
+  # Run the script - it will pick up CT_NONINTERACTIVE from the environment
+  "$prep_script"
+  local result=$?
+
+  if [ $result -eq 0 ]; then
     sudo chown -R "$INSTALL_USER" "$BACKUP_DIR"
     sudo chown -R "$INSTALL_USER" "$BACKUP_FOLDER_PATH"
-  else
-    echo "Failed to download the prep script. Please check your internet connection."
   fi
-  rm -f /tmp/prep.sh
+
+  # Cleanup only if we downloaded the script
+  if [ "$cleanup_script" = true ] && [ -f /tmp/prep.sh ]; then
+    rm -f /tmp/prep.sh
+  fi
+
+  return $result
 }
 
 # Function to prepare the cluster node with necessary tools
@@ -2714,29 +5631,60 @@ prep_cluster_node() {
   # Install K9s Kubernetes Management tool
   echo "Installing k9s toolkit - https://github.com/derailed/k9s/"
   K9S_LATEST_VERSION=$(curl -s https://api.github.com/repos/derailed/k9s/releases/latest | grep "tag_name" | cut -d '"' -f 4)
-  wget https://github.com/derailed/k9s/releases/download/$K9S_LATEST_VERSION/k9s_Linux_x86_64.tar.gz
-  tar -xzf k9s_Linux_x86_64.tar.gz
+  wget https://github.com/derailed/k9s/releases/download/$K9S_LATEST_VERSION/k9s_Linux_amd64.tar.gz
+  tar -xzf k9s_Linux_amd64.tar.gz
   sudo mv k9s /usr/local/bin
   mkdir -p ~/.k9s
-  rm -rf k9s*
+  rm -rf k9s_Linux_amd64.tar.gz
 
   # Install GIT
   sudo dnf install -y git
+
+  # Copy k3s kubeconfig so kubectl/k9s/helm work without sudo
+  if [ -f /etc/rancher/k3s/k3s.yaml ]; then
+    mkdir -p ~/.kube
+    sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
+    sudo chown "$(id -u):$(id -g)" ~/.kube/config
+    echo "k3s kubeconfig copied to ~/.kube/config"
+  else
+    echo "k3s not installed yet — run k3s install first, then re-run prep-cluster-node to copy kubeconfig"
+  fi
 }
 
-# Function to generate self-signed certificates if they do not exist
+# Function to generate self-signed certificates if they do not exist, are expired, or are mismatched
 generate_self_signed_certificates() {
   cert_dir="./certs"
   cert_file="$cert_dir/appliance.crt"
   key_file="$cert_dir/appliance_key.pem"
 
+  local need_generate=false
+
   if [ ! -f "$cert_file" ] || [ ! -f "$key_file" ]; then
+    need_generate=true
+  elif command -v openssl >/dev/null 2>&1; then
+    # Regenerate if expired
+    if ! openssl x509 -in "$cert_file" -noout -checkend 0 >/dev/null 2>&1; then
+      echo "Certificate is expired. Regenerating..."
+      need_generate=true
+    else
+      # Regenerate if cert and key don't match
+      local cert_mod key_mod
+      cert_mod=$(openssl x509 -in "$cert_file" -noout -modulus 2>/dev/null | md5sum)
+      key_mod=$(openssl rsa -in "$key_file" -noout -modulus 2>/dev/null | md5sum)
+      if [ "$cert_mod" != "$key_mod" ]; then
+        echo "Certificate and key do not match. Regenerating..."
+        need_generate=true
+      fi
+    fi
+  fi
+
+  if [ "$need_generate" = true ]; then
     echo "Generating self-signed certificates..."
     mkdir -p "$cert_dir"
     openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout "$key_file" -out "$cert_file" -subj "/CN=appliance.calltelemetry.internal"
-    echo "No certs found. Self-signed certificates generated."
+    echo "Self-signed certificates generated."
   else
-    echo "Certificates already exist. Skipping generation."
+    echo "Certificates already exist and are valid. Skipping generation."
   fi
 }
 
@@ -2787,7 +5735,7 @@ certs_status() {
         if openssl x509 -in "$cert_file" -noout -checkend 2592000 >/dev/null 2>&1; then
           echo "  Status:     ✓ Valid"
         else
-          echo "  Status:     ⚠️  Expiring soon (within 30 days)"
+          echo "  Status:     [WARN] Expiring soon (within 30 days)"
         fi
       else
         echo "  Status:     ✗ EXPIRED"
@@ -2864,6 +5812,12 @@ certs_cmd() {
   esac
 }
 
+# Auto-migrate legacy .jtapi-enabled to .env on any CLI invocation
+migrate_jtapi_state
+# Sync preferences.json → COMPOSE_PROFILES for optional stacks
+sync_prefs_to_env_storage
+sync_prefs_to_env_otel
+
 # Main script logic
 case "$1" in
   --help|-h|help)
@@ -2871,6 +5825,9 @@ case "$1" in
     ;;
   update)
     shift
+    self_update_and_reexec "$@"
+    ensure_ip_forward
+    nm_heal_connections
     generate_self_signed_certificates
     update "$@"
     ;;
@@ -2882,6 +5839,12 @@ case "$1" in
     ;;
   status)
     app_status
+    ;;
+
+  # Seed / demo data commands
+  seed)
+    shift
+    seed_cmd "$@"
     ;;
 
   # Database commands
@@ -2903,6 +5866,10 @@ case "$1" in
   ipv6)
     ipv6_toggle "$2"
     ;;
+  network)
+    shift
+    network_cmd "$@"
+    ;;
   certs)
     certs_cmd "$2"
     ;;
@@ -2916,8 +5883,46 @@ case "$1" in
         echo "Supported versions: $POSTGRES_SUPPORTED_VERSIONS"
         echo ""
         echo "Usage:"
-        echo "  cli.sh postgres set <version>     Set version for next update"
-        echo "  cli.sh postgres upgrade <version> Upgrade to new major version"
+        echo "  cli.sh postgres set <version>              Set version for next update"
+        echo "  cli.sh postgres upgrade <version>          Upgrade to new major version"
+        echo "  cli.sh postgres convert-bitnami [--dry-run] Repair missing config files in postgres-data/data"
+        echo "  cli.sh postgres profile <small|medium|large|show>  Set memory sizing profile"
+        ;;
+      profile)
+        subaction="${3:-show}"
+        case "$subaction" in
+          show)
+            current=$(env_get "PG_PROFILE")
+            echo "Current PostgreSQL profile: ${current:-small (default)}"
+            echo ""
+            echo "  small  —  1GB shared_buffers, 32MB work_mem, DB limit 4g  (8GB RAM,  <40GB DB)"
+            echo "  medium — 768MB shared_buffers, 16MB work_mem, DB limit 3g  (16GB RAM, 40-100GB DB)"
+            echo "  large  —  2GB shared_buffers, 32MB work_mem, DB limit 6g  (32GB RAM, 100GB+ DB)"
+            echo ""
+            echo "All profiles default to spinning disk I/O settings (random_page_cost=4.0)."
+            echo "For SSD: set PG_RANDOM_PAGE_COST=1.1 and PG_EFFECTIVE_IO_CONCURRENCY=200 in .env"
+            echo ""
+            echo "Current values:"
+            echo "  shared_buffers:        $(env_get PG_SHARED_BUFFERS || echo '1GB (default)')"
+            echo "  effective_cache_size:  $(env_get PG_EFFECTIVE_CACHE_SIZE || echo '3GB (default)')"
+            echo "  work_mem:              $(env_get PG_WORK_MEM || echo '32MB (default)')"
+            echo "  maintenance_work_mem:  $(env_get PG_MAINTENANCE_WORK_MEM || echo '128MB (default)')"
+            echo "  parallel_workers:      $(env_get PG_PARALLEL_WORKERS || echo '2 (default)')/$(env_get PG_MAX_PARALLEL_WORKERS || echo '4 (default)')"
+            echo "  autovacuum_workers:    $(env_get PG_AUTOVACUUM_WORKERS || echo '4 (default)')"
+            echo "  random_page_cost:      $(env_get PG_RANDOM_PAGE_COST || echo '4.0 (default — spinning disk)')"
+            echo "  effective_io_concurrency: $(env_get PG_EFFECTIVE_IO_CONCURRENCY || echo '2 (default — spinning disk)')"
+            echo "  db_cpu_limit:          $(env_get DB_CPU_LIMIT || echo '2.0 (default)')"
+            echo "  db_mem_limit:          $(env_get DB_MEM_LIMIT || echo '4g (default)')"
+            echo "  web_mem_limit:         $(env_get WEB_MEM_LIMIT || echo '3g (default)')"
+            ;;
+          small|medium|large)
+            apply_postgres_profile "$subaction"
+            ;;
+          *)
+            echo "Usage: cli.sh postgres profile <small|medium|large|show>"
+            exit 1
+            ;;
+        esac
         ;;
       set)
         if [ -z "$3" ]; then
@@ -2969,6 +5974,35 @@ case "$1" in
           sleep 10
         fi
 
+        # Pre-flight: disk space check
+        echo "Checking disk space..."
+        db_size_kb=$($DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db \
+          psql -U calltelemetry -d calltelemetry_prod -t -c \
+          "SELECT pg_database_size('calltelemetry_prod') / 1024" 2>/dev/null | tr -d ' ')
+        free_kb=$(df -k "$INSTALL_DIR" | tail -1 | awk '{print $4}')
+
+        if [ -n "$db_size_kb" ] && [ -n "$free_kb" ]; then
+          # Compressed dump needs ~20% of DB size (conservative estimate)
+          required_kb=$((db_size_kb / 5))
+          db_size_mb=$((db_size_kb / 1024))
+          free_mb=$((free_kb / 1024))
+          required_mb=$((required_kb / 1024))
+
+          echo "  Database size:  ${db_size_mb} MB"
+          echo "  Free space:     ${free_mb} MB"
+          echo "  Required:       ~${required_mb} MB (compressed backup)"
+
+          if [ "$free_kb" -lt "$required_kb" ]; then
+            echo ""
+            echo "ERROR: Insufficient disk space for PostgreSQL upgrade"
+            echo "  Free up at least ${required_mb} MB before proceeding."
+            exit 1
+          fi
+          echo "  Sufficient disk space"
+        else
+          echo "  Could not determine database size - proceeding anyway"
+        fi
+
         # Set the new version (Step 1)
         echo ""
         echo "Step 1: Setting PostgreSQL $target_version override..."
@@ -2976,20 +6010,22 @@ case "$1" in
           exit 1
         fi
 
-        # Create backup
+        # Create compressed backup
         echo ""
-        echo "Step 2: Creating database backup..."
-        backup_file="postgres-upgrade-$(date +%Y%m%d-%H%M%S).sql"
-        if ! $DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db pg_dump -U calltelemetry -d calltelemetry_prod > "$backup_file"; then
+        echo "Step 2: Creating compressed database backup..."
+        backup_file="postgres-upgrade-$(date +%Y%m%d-%H%M%S).sql.gz"
+        if ! $DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db \
+          pg_dump -U calltelemetry -d calltelemetry_prod | gzip > "$backup_file"; then
           echo "ERROR: Failed to create database backup"
           exit 1
         fi
-        echo "Backup created: $backup_file"
+        backup_size=$(du -h "$backup_file" | cut -f1)
+        echo "Backup created: $backup_file ($backup_size compressed)"
 
         # Stop services
         echo ""
         echo "Step 3: Stopping all services..."
-        $DOCKER_COMPOSE_CMD down
+        $DOCKER_COMPOSE_CMD $(get_compose_files) down
 
         # Remove old data directory
         echo ""
@@ -2999,7 +6035,7 @@ case "$1" in
         # Start just the database (override file already set in Step 1)
         echo ""
         echo "Step 5: Starting PostgreSQL $target_version..."
-        $DOCKER_COMPOSE_CMD up -d db
+        $DOCKER_COMPOSE_CMD $(get_compose_files) up -d db
 
         echo "Waiting for PostgreSQL to initialize..."
         sleep 10
@@ -3014,10 +6050,12 @@ case "$1" in
           sleep 2
         done
 
-        # Restore the database
+        # Restore the database from compressed backup
         echo ""
-        echo "Step 6: Restoring database from backup..."
-        if ! $DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod < "$backup_file"; then
+        echo "Step 6: Restoring database from compressed backup..."
+        if ! gunzip -c "$backup_file" | \
+          $DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db \
+          psql -q -U calltelemetry -d calltelemetry_prod; then
           echo "ERROR: Failed to restore database"
           echo "Backup file preserved at: $backup_file"
           exit 1
@@ -3027,19 +6065,74 @@ case "$1" in
         # Start all services
         echo ""
         echo "Step 7: Starting all services..."
-        $DOCKER_COMPOSE_CMD up -d
+        $DOCKER_COMPOSE_CMD $(get_compose_files) up -d
+
+        # If upgraded to the base default (17), the override is no longer needed
+        if [ "$target_version" = "17" ] && [ -f "$POSTGRES_OVERRIDE_FILE" ]; then
+          echo "Removing PostgreSQL override (now matches base default)."
+          rm -f "$POSTGRES_OVERRIDE_FILE"
+        fi
 
         echo ""
         echo "PostgreSQL upgrade complete!"
         echo "New image: calltelemetry/postgres:$target_version"
-        echo "Backup preserved at: $backup_file"
+        echo ""
+
+        # Post-upgrade verification and backup cleanup
+        if [[ -t 0 ]]; then
+          echo "─────────────────────────────────────────────"
+          echo "  Post-Upgrade Verification"
+          echo "─────────────────────────────────────────────"
+          echo ""
+          echo "Please verify the database upgrade was successful:"
+          echo "  - Log in to the web UI"
+          echo "  - Check that dashboards and reports load correctly"
+          echo "  - Verify historical data is intact"
+          echo ""
+          read -p "Was the upgrade successful? (yes/no): " upgrade_ok
+          if [[ "$upgrade_ok" =~ ^[Yy] ]]; then
+            echo ""
+            echo "The database backup is at:"
+            echo "  $backup_file ($backup_size compressed)"
+            read -p "Would you like to delete the backup file? (yes/no): " delete_backup
+            if [[ "$delete_backup" =~ ^[Yy] ]]; then
+              rm -f "$backup_file"
+              echo "[OK] Backup file deleted."
+            else
+              echo "Backup preserved at: $backup_file"
+            fi
+          else
+            echo ""
+            echo "The database backup is preserved at: $backup_file"
+            echo "To restore manually:"
+            echo "  gunzip -c $backup_file | docker exec -i <db-container> psql -U calltelemetry -d calltelemetry_prod"
+          fi
+        else
+          echo "Backup preserved at: $backup_file"
+        fi
+        ;;
+      convert-bitnami)
+        shift 2
+        repair_postgres_compat "$(get_current_postgres_image)" "$@"
         ;;
       *)
         echo "Unknown postgres command: $2"
-        echo "Usage: cli.sh postgres [status|set <version>|upgrade <version>]"
+        echo "Usage: cli.sh postgres [status|set <version>|upgrade <version>|convert-bitnami [--dry-run]|profile <small|medium|large|show>]"
         exit 1
         ;;
     esac
+    ;;
+
+  jtapi)
+    jtapi_cmd "$2"
+    ;;
+
+  storage)
+    storage_cmd "$2"
+    ;;
+
+  otel)
+    otel_cmd "$2"
     ;;
 
   # Maintenance commands
@@ -3079,6 +6172,12 @@ case "$1" in
     echo "  sudo systemctl restart docker-compose-app.service"
     ;;
 
+  # OS automatic update scheduling
+  os-updates)
+    shift
+    os_updates_cmd "$@"
+    ;;
+
   # Offline/Air-Gap commands for environments without internet access
   offline)
     offline_download() {
@@ -3109,7 +6208,7 @@ case "$1" in
       if command -v wget >/dev/null 2>&1; then
         if ! wget -q --show-progress "$bundle_url" -O "$config_bundle" 2>&1; then
           echo ""
-          echo "❌ ERROR: Failed to download config bundle for version $version"
+          echo "[FAIL] ERROR: Failed to download config bundle for version $version"
           echo "URL: $bundle_url"
           echo ""
           echo "Make sure this version exists. Check:"
@@ -3120,7 +6219,7 @@ case "$1" in
       elif command -v curl >/dev/null 2>&1; then
         if ! curl -fL --progress-bar "$bundle_url" -o "$config_bundle"; then
           echo ""
-          echo "❌ ERROR: Failed to download config bundle for version $version"
+          echo "[FAIL] ERROR: Failed to download config bundle for version $version"
           rm -f "$config_bundle"
           return 1
         fi
@@ -3128,7 +6227,7 @@ case "$1" in
         echo "Error: Neither wget nor curl is available"
         return 1
       fi
-      echo "✅ Config bundle downloaded"
+      echo "[OK] Config bundle downloaded"
       echo ""
 
       # Step 2: Extract config bundle
@@ -3136,8 +6235,9 @@ case "$1" in
       rm -rf "$bundle_dir"
       mkdir -p "$bundle_dir"
       tar -xzf "$config_bundle" -C "$bundle_dir" --strip-components=1
+      sanitize_metadata_artifacts "$bundle_dir"
       rm -f "$config_bundle"
-      echo "✅ Config bundle extracted"
+      echo "[OK] Config bundle extracted"
       echo ""
 
       # Step 3: Extract image list and pull images
@@ -3145,7 +6245,7 @@ case "$1" in
       cd "$bundle_dir" || return 1
 
       if [ ! -f "docker-compose.yml" ]; then
-        echo "❌ ERROR: docker-compose.yml not found in bundle"
+        echo "[FAIL] ERROR: docker-compose.yml not found in bundle"
         cd "$start_dir"
         rm -rf "$bundle_dir"
         return 1
@@ -3166,14 +6266,14 @@ case "$1" in
         image_count=$((image_count + 1))
         echo "[$image_count/$total_images] Pulling: $img"
         if ! docker pull "$img"; then
-          echo "⚠️  Warning: Failed to pull $img"
+          echo "[WARN] Warning: Failed to pull $img"
           pull_failed=true
         fi
       done
 
       if [ "$pull_failed" = true ]; then
         echo ""
-        echo "⚠️  Warning: Some images failed to pull. Bundle may be incomplete."
+        echo "[WARN] Warning: Some images failed to pull. Bundle may be incomplete."
       fi
 
       # Step 4: Save Docker images to tar
@@ -3181,9 +6281,9 @@ case "$1" in
       echo "Step 4: Saving Docker images to images.tar..."
       # shellcheck disable=SC2086
       if docker save $images -o images.tar; then
-        echo "✅ Images saved: $(du -h images.tar | cut -f1)"
+        echo "[OK] Images saved: $(du -h images.tar | cut -f1)"
       else
-        echo "❌ ERROR: Failed to save Docker images"
+        echo "[FAIL] ERROR: Failed to save Docker images"
         cd "$start_dir"
         rm -rf "$bundle_dir"
         return 1
@@ -3236,6 +6336,7 @@ case "$1" in
 
       echo "Extracting bundle..."
       tar -xzf "$bundle_file" -C "$extract_dir"
+      sanitize_metadata_artifacts "$extract_dir"
 
       # Find the inner directory (bundle creates a subdirectory)
       local inner_dir=$(find "$extract_dir" -maxdepth 1 -type d -name "offline-bundle-*" | head -1)
@@ -3276,7 +6377,41 @@ case "$1" in
         [ -f "$inner_dir/grafana/provisioning/datasources/calltelemetry.yml" ] && cp "$inner_dir/grafana/provisioning/datasources/calltelemetry.yml" ./grafana/provisioning/datasources/
         [ -f "$inner_dir/grafana/provisioning/dashboards/calltelemetry.yaml" ] && cp "$inner_dir/grafana/provisioning/dashboards/calltelemetry.yaml" ./grafana/provisioning/dashboards/
         [ -f "$inner_dir/grafana/dashboards/calltelemetry-overview.json" ] && cp "$inner_dir/grafana/dashboards/calltelemetry-overview.json" ./grafana/dashboards/
+        sanitize_grafana_assets ./grafana/provisioning ./grafana/dashboards
         echo "  - grafana configs"
+      fi
+
+      # Install otel-collector config if present
+      if [ -f "$inner_dir/otel-collector/otel-collector-config.yaml" ]; then
+        mkdir -p otel-collector
+        [ -d "./otel-collector/otel-collector-config.yaml" ] && rm -rf "./otel-collector/otel-collector-config.yaml"
+        cp "$inner_dir/otel-collector/otel-collector-config.yaml" ./otel-collector/otel-collector-config.yaml
+        echo "  - otel-collector-config.yaml"
+      fi
+
+      # Install Tempo config if present
+      if [ -f "$inner_dir/tempo/tempo.yaml" ]; then
+        mkdir -p tempo
+        [ -d "./tempo/tempo.yaml" ] && rm -rf "./tempo/tempo.yaml"
+        cp "$inner_dir/tempo/tempo.yaml" ./tempo/tempo.yaml
+        echo "  - tempo/tempo.yaml"
+      fi
+
+      # Install Loki config if present
+      if [ -f "$inner_dir/loki/loki.yaml" ]; then
+        mkdir -p loki
+        # Docker may have created loki.yaml as a directory — remove it first
+        [ -d "./loki/loki.yaml" ] && rm -rf "./loki/loki.yaml"
+        cp "$inner_dir/loki/loki.yaml" ./loki/loki.yaml
+        echo "  - loki/loki.yaml"
+      fi
+
+      # Install Alloy config if present
+      if [ -f "$inner_dir/alloy/config.alloy" ]; then
+        mkdir -p alloy
+        [ -d "./alloy/config.alloy" ] && rm -rf "./alloy/config.alloy"
+        cp "$inner_dir/alloy/config.alloy" ./alloy/config.alloy
+        echo "  - alloy/config.alloy"
       fi
 
       # Cleanup extraction directory
@@ -3285,13 +6420,19 @@ case "$1" in
       echo ""
       echo "Restarting services..."
       fix_systemd_service_if_needed
-      systemctl restart docker-compose-app.service
+      fix_systemd_compose_files
+      if ! restart_service "offline apply"; then
+        echo "[FAIL] Service restart failed after offline bundle apply."
+        echo "   Images are loaded but services may not be running."
+        echo "   Retry with: systemctl restart docker-compose-app.service"
+        return 1
+      fi
 
       echo ""
       echo "=== Offline Bundle Applied ==="
       echo "Verifying containers..."
       sleep 5
-      $DOCKER_COMPOSE_CMD ps
+      $DOCKER_COMPOSE_CMD $(get_compose_files) ps
 
       echo ""
       echo "Check status with: ./cli.sh status"
@@ -3305,6 +6446,7 @@ case "$1" in
       fi
 
       local images=$(grep -E '^\s*image:' docker-compose.yml | sed 's/.*image:[[:space:]]*["'\'']*\([^"'\'']*\)["'\'']*[[:space:]]*$/\1/' | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
+
       echo ""
       for img in $images; do
         [ -z "$img" ] && continue
@@ -3348,7 +6490,7 @@ case "$1" in
       if command -v wget >/dev/null 2>&1; then
         if ! wget -q --show-progress "$bundle_url" -O "$bundle_file" 2>&1; then
           echo ""
-          echo "❌ ERROR: Failed to download bundle for version $version"
+          echo "[FAIL] ERROR: Failed to download bundle for version $version"
           echo ""
           echo "The version may not exist or network error occurred."
           echo "Check available versions at: https://github.com/calltelemetry/calltelemetry/releases"
@@ -3358,7 +6500,7 @@ case "$1" in
       elif command -v curl >/dev/null 2>&1; then
         if ! curl -fL --progress-bar "$bundle_url" -o "$bundle_file"; then
           echo ""
-          echo "❌ ERROR: Failed to download bundle for version $version"
+          echo "[FAIL] ERROR: Failed to download bundle for version $version"
           echo ""
           echo "The version may not exist or network error occurred."
           rm -f "$bundle_file"
@@ -3382,9 +6524,9 @@ case "$1" in
       if [ -f "$checksum_file" ]; then
         if command -v sha256sum >/dev/null 2>&1; then
           if sha256sum -c "$checksum_file" >/dev/null 2>&1; then
-            echo "✅ Checksum verified"
+            echo "[OK] Checksum verified"
           else
-            echo "⚠️  Checksum mismatch - file may be corrupted"
+            echo "[WARN] Checksum mismatch - file may be corrupted"
           fi
         else
           echo "ℹ️  sha256sum not available, skipping verification"
@@ -3466,7 +6608,7 @@ case "$1" in
         echo "=== Docker Status ==="
         echo ""
         echo "Containers:"
-        $DOCKER_COMPOSE_CMD ps
+        $DOCKER_COMPOSE_CMD $(get_compose_files) ps
         echo ""
         echo "Images:"
         docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}" | grep -E "calltelemetry|REPOSITORY"
@@ -3493,8 +6635,8 @@ case "$1" in
   diag)
     case "$2" in
       tesla)
-        local ip_mode="$3"
-        local url="$4"
+        ip_mode="$3"
+        url="$4"
 
         if [ -z "$ip_mode" ] || [ -z "$url" ]; then
           echo "Usage: cli.sh diag tesla <ipv4|ipv6> <url>"
@@ -3517,7 +6659,7 @@ case "$1" in
         fi
 
         # Parse URL to extract host and port
-        local host port
+        host port
         if [[ "$url" =~ http://\[([^\]]+)\]:([0-9]+) ]]; then
           # IPv6 format: http://[host]:port
           host="${BASH_REMATCH[1]}"
@@ -3542,7 +6684,7 @@ case "$1" in
         echo ""
 
         # Get current image tag
-        local image_tag=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep "calltelemetry/web" | head -1)
+        image_tag=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep "calltelemetry/web" | head -1)
         if [ -z "$image_tag" ]; then
           image_tag="calltelemetry/web:latest"
         fi
@@ -3551,7 +6693,7 @@ case "$1" in
         echo ""
 
         # Build Elixir code based on mode
-        local elixir_code="Application.ensure_all_started(:hackney)"
+        elixir_code="Application.ensure_all_started(:hackney)"
 
         if [ "$ip_mode" = "ipv4" ]; then
           elixir_code="$elixir_code
@@ -3574,7 +6716,7 @@ end
 "
         elif [ "$ip_mode" = "ipv6" ]; then
           # Convert IPv6 to Erlang tuple format
-          local ipv6_tuple=$(echo "$host" | python3 -c "
+          ipv6_tuple=$(echo "$host" | python3 -c "
 import sys
 import ipaddress
 addr = ipaddress.ip_address(sys.stdin.read().strip())
@@ -3612,8 +6754,8 @@ end
         docker run --rm --network host "$image_tag" /home/app/onprem/bin/onprem eval "$elixir_code"
         ;;
       raw_tcp)
-        local ip_mode="$3"
-        local url="$4"
+        ip_mode="$3"
+        url="$4"
 
         if [ -z "$ip_mode" ] || [ -z "$url" ]; then
           echo "Usage: cli.sh diag raw_tcp <ipv4|ipv6> <url>"
@@ -3636,7 +6778,7 @@ end
         fi
 
         # Parse URL to extract host and port
-        local host port
+        host port
         if [[ "$url" =~ http://\[([^\]]+)\]:([0-9]+) ]]; then
           host="${BASH_REMATCH[1]}"
           port="${BASH_REMATCH[2]}"
@@ -3659,7 +6801,7 @@ end
         echo ""
 
         # Get current image tag
-        local image_tag=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep "calltelemetry/web" | head -1)
+        image_tag=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep "calltelemetry/web" | head -1)
         if [ -z "$image_tag" ]; then
           image_tag="calltelemetry/web:latest"
         fi
@@ -3667,7 +6809,7 @@ end
         echo "Using image: $image_tag"
         echo ""
 
-        local elixir_code=""
+        elixir_code=""
 
         if [ "$ip_mode" = "ipv4" ]; then
           elixir_code="
@@ -3681,7 +6823,7 @@ case :gen_tcp.connect(~c\"$host\", $port, [:inet], 5000) do
 end
 "
         elif [ "$ip_mode" = "ipv6" ]; then
-          local ipv6_tuple=$(echo "$host" | python3 -c "
+          ipv6_tuple=$(echo "$host" | python3 -c "
 import sys
 import ipaddress
 addr = ipaddress.ip_address(sys.stdin.read().strip())
@@ -3711,9 +6853,9 @@ end
         docker run --rm --network host "$image_tag" /home/app/onprem/bin/onprem eval "$elixir_code"
         ;;
       capture)
-        local duration="$3"
-        local filter="$4"
-        local output_file="$5"
+        duration="$3"
+        filter="$4"
+        output_file="$5"
 
         if [ -z "$duration" ]; then
           echo "Usage: cli.sh diag capture <duration> [filter] [output.pcap]"
@@ -3764,7 +6906,7 @@ end
         echo ""
 
         # Build tcpdump command
-        local tcpdump_cmd="sudo tcpdump -w '$output_file'"
+        tcpdump_cmd="sudo tcpdump -w '$output_file'"
         if [ -n "$filter" ]; then
           tcpdump_cmd="$tcpdump_cmd $filter"
         fi
@@ -3782,8 +6924,8 @@ end
 
         echo ""
         if [ -f "$output_file" ]; then
-          local file_size=$(ls -lh "$output_file" | awk '{print $5}')
-          local packet_count=$(sudo tcpdump -r "$output_file" 2>/dev/null | wc -l)
+          file_size=$(ls -lh "$output_file" | awk '{print $5}')
+          packet_count=$(sudo tcpdump -r "$output_file" 2>/dev/null | wc -l)
           echo "Capture complete!"
           echo "  File:    $output_file"
           echo "  Size:    $file_size"
@@ -3848,6 +6990,18 @@ end
         echo ""
 
         echo "=== Database Diagnostics Complete ==="
+        ;;
+      db-watch|dbwatch)
+        echo "=== Live Database Activity Monitor ==="
+        echo "Refreshing every 2 seconds. Press Ctrl+C to stop."
+        echo ""
+        watch -n 2 -d -- docker exec calltelemetry-db-1 env PGPASSWORD=postgres psql -U calltelemetry -d calltelemetry_prod -xc \
+          "SELECT pid, state, wait_event_type, now() - query_start AS duration, left(query, 120) AS query
+           FROM pg_stat_activity
+           WHERE datname = 'calltelemetry_prod'
+             AND state != 'idle'
+             AND query NOT ILIKE '%pg_stat_activity%'
+           ORDER BY query_start;"
         ;;
       network)
         echo "=== Network Diagnostics ==="
@@ -3997,7 +7151,7 @@ end
                   echo "    $CERT_ISSUER"
                   if echo "$CERT_ISSUER" | grep -qi "cisco\|umbrella\|zscaler\|palo alto\|fortinet\|fortigate\|bluecoat\|symantec\|mcafee\|websense"; then
                     echo ""
-                    echo "  ⚠️  Corporate proxy detected! The firewall is doing SSL inspection."
+                    echo "  [WARN] Corporate proxy detected! The firewall is doing SSL inspection."
                     echo "  Solutions:"
                     echo "    1. Add the corporate CA certificate to /etc/pki/ca-trust/source/anchors/"
                     echo "       then run: sudo update-ca-trust"
@@ -4035,7 +7189,7 @@ end
         echo "=== Service Diagnostics ==="
         echo ""
 
-        local SERVICE_FILE="/etc/systemd/system/docker-compose-app.service"
+        SERVICE_FILE="/etc/systemd/system/docker-compose-app.service"
 
         # Print systemd service file
         echo "--- Systemd Service File ($SERVICE_FILE) ---"
@@ -4083,6 +7237,7 @@ end
         echo "  raw_tcp <ipv4|ipv6> <url>  Test raw TCP socket only"
         echo "  capture <secs> [filter] [file]  Capture packets with tcpdump"
         echo "  database                   Run comprehensive database diagnostics"
+        echo "  db-watch                   Live database activity monitor (refreshes every 2s)"
         echo ""
         echo "Examples:"
         echo "  cli.sh diag network"
@@ -4102,8 +7257,26 @@ end
     esac
     ;;
 
+  # Service lifecycle commands
+  restart)
+    echo "Restarting Call Telemetry services..."
+    restart_service "cli restart"
+    ;;
+  stop)
+    echo "Stopping Call Telemetry services..."
+    systemctl stop docker-compose-app.service
+    echo "[OK] Services stopped."
+    ;;
+  start)
+    echo "Starting Call Telemetry services..."
+    ensure_bind_mount_files
+    systemctl start docker-compose-app.service
+    echo "[OK] Services started."
+    ;;
+
   # Advanced commands
   build-appliance)
+    ensure_ip_forward
     build_appliance
     ;;
   prep-cluster-node)

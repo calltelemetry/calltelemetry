@@ -1,15 +1,22 @@
-version: "3.8"
-
 services:
   caddy:
     image: caddy:2-alpine
+    init: true
+    restart: unless-stopped
+    mem_limit: 128m
     ports:
+      - "80:80"
       - "443:443"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile
       - ./certs:/certs:ro
     networks:
       - ct
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "25m"
+        max-file: "3"
     healthcheck:
       test:
         [
@@ -22,67 +29,191 @@ services:
       start_period: 30s
 
   vue-web:
-    image: "calltelemetry/vue:0.8.6-rc1"
+    image: "calltelemetry/vue:${VUE_VERSION}"
     restart: "always"
     expose:
-      - "80"
+      - "8080"
     networks:
       - ct
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "25m"
+        max-file: "3"
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:80"]
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8080"]
       interval: 30s
       timeout: 5s
       retries: 5
       start_period: 30s
 
   traceroute:
-    image: "calltelemetry/traceroute:0.8.5-rc27"
+    image: "calltelemetry/traceroute-go:${TRACEROUTE_VERSION}"
+    restart: "always"
     user: root
+    mem_limit: ${TRACEROUTE_MEM_LIMIT:-256m}
+    cpus: ${TRACEROUTE_CPU_LIMIT:-0.50}
+    stop_grace_period: 30s
     expose:
       - "4100"
     networks:
       - ct
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     healthcheck:
-      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/4100'"]
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:4100/healthz || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 5
-      start_period: 30s
+      start_period: 45s
 
   db:
-    image: "bitnamilegacy/postgresql:14"
+    image: "calltelemetry/postgres:14"
     user: root
     restart: "always"
+    shm_size: "${PG_SHM_SIZE:-4gb}"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
     environment:
-      - POSTGRES_USER=calltelemetry
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=calltelemetry_prod
-      - POSTGRESQL_MAX_CONNECTIONS=300
+      - POSTGRES_USER=${POSTGRES_USER:-calltelemetry}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_DB=${POSTGRES_DB:-calltelemetry_prod}
+      - PGDATA=/bitnami/postgresql/data
+    command: >
+      postgres
+      -c max_connections=${PG_MAX_CONNECTIONS:-200}
+      -c shared_buffers=${PG_SHARED_BUFFERS:-1GB}
+      -c effective_cache_size=${PG_EFFECTIVE_CACHE_SIZE:-3GB}
+      -c work_mem=${PG_WORK_MEM:-32MB}
+      -c maintenance_work_mem=${PG_MAINTENANCE_WORK_MEM:-128MB}
+      -c max_wal_size=2GB
+      -c checkpoint_completion_target=0.9
+      -c random_page_cost=${PG_RANDOM_PAGE_COST:-4.0}
+      -c effective_io_concurrency=${PG_EFFECTIVE_IO_CONCURRENCY:-2}
+      -c max_parallel_workers_per_gather=${PG_PARALLEL_WORKERS:-2}
+      -c max_parallel_workers=${PG_MAX_PARALLEL_WORKERS:-4}
+      -c autovacuum_max_workers=${PG_AUTOVACUUM_WORKERS:-4}
+      -c autovacuum_vacuum_scale_factor=${PG_AUTOVACUUM_VACUUM_SCALE:-0.01}
+      -c autovacuum_analyze_scale_factor=${PG_AUTOVACUUM_ANALYZE_SCALE:-0.005}
+      -c autovacuum_vacuum_cost_delay=2
+      -c log_min_duration_statement=1000
+      -c track_io_timing=on
+      -c track_functions=all
+      -c shared_preload_libraries='timescaledb,pg_stat_statements'
+      -c timescaledb.max_background_workers=${TS_MAX_BACKGROUND_WORKERS:-8}
+      -c timescaledb.bgw_scheduler_restart_time=${TS_BGW_SCHEDULER_RESTART_TIME:-60000}
+      -c pg_stat_statements.track=all
+      -c pg_stat_statements.max=10000
+      -c bgwriter_lru_maxpages=200
+      -c bgwriter_delay=100
+      -c wal_compression=on
+      -c deadlock_timeout=500ms
+      -c log_lock_waits=on
+      -c jit=off
     expose:
       - "5432"
     volumes:
       - ./postgres-data:/bitnami/postgresql
     networks:
       - ct
+    mem_limit: ${DB_MEM_LIMIT:-4g}
+    deploy:
+      resources:
+        limits:
+          # Hard cgroup quota for the DB container. Docker may still report 100% of quota
+          # in container metrics, but host usage will not exceed DB_CPU_LIMIT logical CPUs.
+          cpus: '${DB_CPU_LIMIT:-2.0}'
+          memory: ${DB_MEM_LIMIT:-4g}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-calltelemetry} -d $${POSTGRES_DB:-calltelemetry_prod}"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+
+  node-exporter:
+    profiles: ["otel"]
+    image: prom/node-exporter:v1.8.2
+    restart: unless-stopped
+    mem_limit: 128m
+    pid: host
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    command:
+      - --path.rootfs=/host
+      - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)
+      - --collector.filesystem.fs-types-exclude=^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|iso9660|mqueue|nsfs|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tracefs)$$
+    volumes:
+      - /:/host:ro,rslave
+    ports:
+      - "9100:9100"
+    networks:
+      - ct
+
+  postgres-exporter:
+    profiles: ["otel"]
+    image: prometheuscommunity/postgres-exporter:v0.18.1
+    mem_limit: 256m
+    environment:
+      DATA_SOURCE_NAME: "postgresql://${POSTGRES_USER:-calltelemetry}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-calltelemetry_prod}?sslmode=disable&application_name=postgres_exporter"
+      PG_EXPORTER_AUTO_DISCOVER_DATABASES: "false"
+      PG_EXPORTER_COLLECTION_TIMEOUT: "5s"
+    command:
+      - --disable-settings-metrics
+      - --no-collector.stat_user_tables
+      - --no-collector.statio_user_tables
+      - --no-collector.statio_user_indexes
+      - --extend.query-path=/etc/postgres_exporter/queries.yaml
+    volumes:
+      - ./prometheus/postgres-queries.yaml:/etc/postgres_exporter/queries.yaml:ro
+    ports:
+      - "9187:9187"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - ct
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:9187/metrics"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
 
   web:
-    image: "calltelemetry/web:0.8.6-rc1"
+    image: "calltelemetry/web:${WEB_VERSION}"
     restart: "always"
     user: root
     expose:
       - 4000
       - 4080
     ports:
-      - "80:4080"
       - "22:3022"
     environment:
-      - DB_USER=calltelemetry
-      - DB_PASSWORD=postgres
+      - DB_USER=${POSTGRES_USER:-calltelemetry}
+      - DB_PASSWORD=${POSTGRES_PASSWORD:-postgres}
       - DB_HOSTNAME=db
-      - DB_NAME=calltelemetry_prod
+      - DB_NAME=${POSTGRES_DB:-calltelemetry_prod}
       - DB_PORT=5432
-      - EXTERNAL_IP=$DEFAULT_IPV4
+      - EXTERNAL_IP=${DEFAULT_IPV4:-127.0.0.1}
       - LOGGING_LEVEL=warning
+      - LOG_FORMAT=json
       - ADMIN_NODE=TRUE
       - WORKER_NODE=TRUE
       - CERT_KEY=/home/app/cert/appliance_key.pem
@@ -92,9 +223,34 @@ services:
       - LOG_PATH=/var/log
       - ERL_CRASH_DUMP=/tmp/crash-dumps/erl_crash.dump
       - ERL_CRASH_DUMP_NICE=1
-      - PROM_EX_UPLOAD_DASHBOARDS=${PROM_EX_UPLOAD_DASHBOARDS:-false}
-      - GRAFANA_HOST=${GRAFANA_HOST_INTERNAL:-http://grafana:3000/grafana}
+      # BEAM VM tuning — async I/O threads, buffer limit, scheduler idle, GC frequency
+      - ERL_FLAGS=+A 64 +zdbbl 8192 +sbwt none +sbwtdcpu none +sbwtdio none
+      - ERL_FULLSWEEP_AFTER=1000
+      - PROM_EX_UPLOAD_DASHBOARDS=${PROM_EX_UPLOAD_DASHBOARDS:-true}
+      - GRAFANA_HOST=${GRAFANA_HOST_INTERNAL:-http://grafana:3000}
       - GRAFANA_TOKEN=${GRAFANA_TOKEN:-secret-token}
+      - GRAFANA_PASSWORD=${GRAFANA_PASSWORD}
+      # JTAPI / phone control (populated by ct-cli or cli.sh when JTAPI is enabled)
+      - JTAPI_MODE=${JTAPI_MODE:-disabled}
+      - JTAPI_SIDECAR_ENDPOINT=${JTAPI_SIDECAR_ENDPOINT:-}
+      - JTAPI_SIDECAR_URL=${JTAPI_SIDECAR_URL:-}
+      - S3_ENABLED=${S3_ENABLED:-false}
+      - S3_ENDPOINT=${S3_ENDPOINT:-http://seaweedfs:8333}
+      - S3_ACCESS_KEY_ID=${S3_ACCESS_KEY_ID:-changeme}
+      - S3_SECRET_ACCESS_KEY=${S3_SECRET_ACCESS_KEY:-changeme}
+      - S3_REGION=us-east-1
+      - CT_MEDIA_ENDPOINT=${CT_MEDIA_ENDPOINT:-}
+      - DOCKER_SOCKET=/var/run/docker.sock
+      - NATS_URL=nats://nats:4222
+      - DB_POOL_SIZE=${DB_POOL_SIZE:-15}
+      - DB_CALL_CONTROL_POOL_SIZE=${DB_CALL_CONTROL_POOL_SIZE:-15}
+      # OpenTelemetry (enable via: ct otel enable)
+      - OTEL_ENABLED=${OTEL_ENABLED:-false}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}
+    deploy:
+      resources:
+        limits:
+          memory: ${WEB_MEM_LIMIT:-4g}
     tmpfs:
       - /var/log:rw,mode=0555,size=5000m
     networks:
@@ -102,69 +258,516 @@ services:
     volumes:
       - ./certs:/home/app/cert:rw
       - ./crash-dumps:/tmp/crash-dumps:rw
+      # Persistent org-scoped media storage (JTAPI audio, recordings, etc)
+      - ./org-data:/data:rw
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Shared alert rules files — API writes thresholds, Prometheus reads them
+      - ./prometheus/alert_rules.yml:/etc/prometheus/alert_rules.yml:rw
+      - ./prometheus/custom_rules.yml:/etc/prometheus/custom_rules.yml:rw
     logging:
       driver: "json-file"
       options:
-        max-size: "100m"
-        max-file: "7" # Keeps 7 days of logs
-        compress: "true" # Compresses rotated files
+        max-size: "10m"
+        max-file: "5"
+        compress: "true"
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:4080/healthz"]
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:4080/healthz || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 5
       start_period: 30s
 
   nats:
-    image: "nats:2.11"
+    image: "nats:2.11-alpine"
     command: "-c /etc/nats/nats.conf"
     volumes:
       - ./nats.conf:/etc/nats/nats.conf
+      - nats-data:/jetstream/store
     expose:
       - "4222"
+      - "8222"
     networks:
       - ct
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "25m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8222/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  nats-exporter:
+    profiles: ["otel"]
+    image: "natsio/prometheus-nats-exporter:0.19.1"
+    restart: "always"
+    mem_limit: 128m
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    command:
+      - "-varz"
+      - "-jsz=all"
+      - "-connz"
+      - "-routez"
+      - "-subz"
+      - "http://nats:8222"
+    expose:
+      - "7777"
+    networks:
+      - ct
+    depends_on:
+      nats:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:7777/metrics"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   prometheus:
+    profiles: ["otel"]
     image: prom/prometheus:v2.52.0
     restart: "always"
     user: root
+    mem_limit: 512m
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "25m"
+        max-file: "3"
     ports:
       - "9090:9090"
     command:
       - --config.file=/etc/prometheus/prometheus.yml
-      # Retain a modest retention window to cap disk usage.
       - --storage.tsdb.path=/prometheus
       - --storage.tsdb.retention.time=15d
       - --web.console.libraries=/usr/share/prometheus/console_libraries
       - --web.console.templates=/usr/share/prometheus/consoles
-      - --web.external-url=/prometheus
-      - --web.route-prefix=/prometheus
+      - --web.enable-lifecycle
+      - --web.enable-admin-api
+      - --web.enable-remote-write-receiver
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alert_rules.yml:/etc/prometheus/alert_rules.yml:rw
+      - ./prometheus/custom_rules.yml:/etc/prometheus/custom_rules.yml:ro
       - prometheus-data:/prometheus
     networks:
       - ct
 
+  alertmanager:
+    profiles: ["otel"]
+    image: prom/alertmanager:v0.28.1
+    restart: "always"
+    mem_limit: 128m
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    ports:
+      - "9093:9093"
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+      - --web.route-prefix=/alertmanager
+      - --web.external-url=${ALERTMANAGER_EXTERNAL_URL:-http://localhost/alertmanager}
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+    networks:
+      - ct
+
   grafana:
+    profiles: ["otel"]
     image: grafana/grafana:12.2.1
     restart: "always"
     user: "472"
+    mem_limit: 256m
     depends_on:
       - prometheus
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "25m"
+        max-file: "3"
     ports:
       - "3000:3000"
     environment:
-      - GF_SECURITY_ADMIN_USER=${GF_ADMIN_USER:-admin}
-      - GF_SECURITY_ADMIN_PASSWORD=${GF_ADMIN_PASSWORD:-calltelemetry}
+      - GF_SECURITY_ADMIN_USER=${GF_SECURITY_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
       - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
       - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/calltelemetry-overview.json
       - GF_SERVER_ROOT_URL=/grafana
       - GF_SERVER_SERVE_FROM_SUB_PATH=true
+      # Auth proxy — Caddy validates CT JWT and passes X-Webauth-User header
+      - GF_AUTH_PROXY_ENABLED=true
+      - GF_AUTH_PROXY_HEADER_NAME=X-Webauth-User
+      - GF_AUTH_PROXY_HEADER_PROPERTY=email
+      - GF_AUTH_PROXY_AUTO_SIGN_UP=true
+      # Empty whitelist = trust all sources (Grafana only reachable via Caddy on internal network)
+      - GF_AUTH_PROXY_WHITELIST=
+      - GF_AUTH_DISABLE_LOGIN_FORM=true
+      # Disable phone-home telemetry — prevents DNS timeout storm to stats.grafana.org
+      - GF_ANALYTICS_REPORTING_ENABLED=false
+      - GF_ANALYTICS_CHECK_FOR_UPDATES=false
+      - GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES=false
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana-data:/var/lib/grafana
+    networks:
+      - ct
+
+  # ─────────────────────────────────────────────────────────────────
+  # Grafana Loki — log aggregation backend for syslog ingestion
+  # ─────────────────────────────────────────────────────────────────
+
+  loki:
+    profiles: ["otel"]
+    image: grafana/loki:3.0.0
+    command: ["-config.file=/etc/loki/loki.yaml"]
+    restart: unless-stopped
+    expose:
+      - "3100"
+    volumes:
+      - ./loki/loki.yaml:/etc/loki/loki.yaml:ro
+      - loki-data:/loki
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:3100/ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    mem_limit: 1g
+    cpus: 2.0
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "5"
+    networks:
+      - ct
+
+  # ─────────────────────────────────────────────────────────────────
+  # CT Syslog Ingest — UDP+TCP syslog receiver for Cisco UC platforms
+  # Receives syslog from CUCM, CUBE, CMS, Expressway, Unity, IM&P
+  # Parses, routes critical alerts to NATS, stores all in Loki
+  # ─────────────────────────────────────────────────────────────────
+
+  ct-syslog-ingest:
+    image: calltelemetry/ct-syslog-ingest-go:${CT_SYSLOG_INGEST_VERSION:-latest}
+    restart: unless-stopped
+    user: "1000:1000"
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid,nodev
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    ports:
+      - "514:514/udp"
+      - "514:514/tcp"
+    expose:
+      - "5514"
+    environment:
+      - LOKI_URL=http://loki:3100/loki/api/v1/push
+      - NATS_URL=nats://nats:4222
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}
+      - OTEL_SERVICE_NAME=ct-syslog-ingest
+      - LOG_FORMAT=json
+      - UDP_PORT=514
+      - TCP_PORT=514
+      - HEALTH_PORT=5514
+    depends_on:
+      nats:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/127.0.0.1/5514'"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    mem_limit: 512m
+    cpus: 1.0
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "5"
+    networks:
+      - ct
+
+  # ─────────────────────────────────────────────────────────────────
+  # OpenTelemetry Collector (activate with COMPOSE_PROFILES=otel)
+  # Receives OTLP from web + sidecar, exports metrics to Prometheus.
+  # Enable via: ct otel enable  (or COMPOSE_PROFILES=otel)
+  # ─────────────────────────────────────────────────────────────────
+
+  otel-collector:
+    profiles: ["otel"]
+    image: otel/opentelemetry-collector-contrib:0.96.0
+    restart: unless-stopped
+    mem_limit: 256m
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./otel-collector/otel-collector-config.yaml:/etc/otelcol/config.yaml:ro
+    expose:
+      - "4317"   # OTLP gRPC
+      - "4318"   # OTLP HTTP
+      - "8889"   # Prometheus metrics
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "25m"
+        max-file: "3"
+    networks:
+      - ct
+
+  # ─────────────────────────────────────────────────────────────────
+  # Grafana Tempo — distributed tracing backend
+  # Receives OTLP traces from OTEL Collector, queryable via Grafana
+  # Enable via: ct otel enable  (shares profile with otel-collector)
+  # ─────────────────────────────────────────────────────────────────
+
+  tempo:
+    profiles: ["otel"]
+    image: grafana/tempo:2.6.1
+    restart: unless-stopped
+    mem_limit: 256m
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    volumes:
+      - ./tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    expose:
+      - "3200"   # Tempo HTTP API (Grafana queries this)
+      - "4317"   # OTLP gRPC receiver
+      - "4318"   # OTLP HTTP receiver
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "25m"
+        max-file: "3"
+    networks:
+      - ct
+
+  # ─────────────────────────────────────────────────────────────────
+  # JTAPI Phone Control Stack (activate with COMPOSE_PROFILES=jtapi)
+  # ─────────────────────────────────────────────────────────────────
+
+  jtapi-jar-init:
+    profiles: ["jtapi"]
+    image: natsio/nats-box:0.14.5
+    pull_policy: if_not_present
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Checking NATS ObjectStore for JTAPI JAR..."
+        BUCKET="jtapi-jars-$${NATS_ORG_ID:-1}"
+        # Wait for NATS to be ready
+        for i in $$(seq 1 30); do
+          nats -s "$${NATS_URL}" server ping --count=1 2>/dev/null && break
+          echo "  Waiting for NATS... ($$i/30)"
+          sleep 2
+        done
+        # Try to download JAR from ObjectStore
+        if nats -s "$${NATS_URL}" object get "$$BUCKET" jtapi.jar --output /jars/jtapi.jar 2>/dev/null; then
+          SIZE=$$(stat -c%s /jars/jtapi.jar 2>/dev/null || echo "unknown")
+          echo "Downloaded jtapi.jar from NATS ObjectStore ($$SIZE bytes)"
+        elif [ -f /jars/jtapi.jar ]; then
+          echo "JAR already present on volume, skipping download"
+        else
+          echo "No JAR in NATS ObjectStore yet — sidecar will wait for upload via UI"
+        fi
+    environment:
+      - NATS_URL=nats://nats:4222
+      - NATS_ORG_ID=1
+    volumes:
+      - jtapi-jars:/jars
+    depends_on:
+      nats:
+        condition: service_started
+    networks:
+      - ct
+
+  jtapi-sidecar:
+    profiles: ["jtapi"]
+    image: "calltelemetry/jtapi-sidecar:${JTAPI_VERSION}"
+    restart: unless-stopped
+    mem_limit: 1g
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+    expose:
+      - "50051"
+      - "8080"
+    environment:
+      - SPRING_PROFILES_ACTIVE=standalone
+      - NATS_URL=nats://nats:4222
+      - NATS_ORG_ID=1
+      - POD_NAME=jtapi-sidecar-1
+      - GRPC_PORT=50051
+      - JTAPI_PORT=8080
+      # Auto-connect/configure via NATS KV (CtiConfigWatcher)
+      - CTI_POOL_AUTO_CONNECT=true
+      - CTI_POOL_AUTO_CONFIGURE=true
+      - CTI_POOL_SOURCE=nats
+      - CTI_POOL_ENABLE_MEDIA=true
+      # S3 object storage for audio
+      - S3_ENABLED=true
+      - S3_ENDPOINT=http://seaweedfs:8333
+      - S3_ACCESS_KEY_ID=${S3_ACCESS_KEY_ID:-changeme}
+      - S3_SECRET_ACCESS_KEY=${S3_SECRET_ACCESS_KEY:-changeme}
+      # JAR auto-restart when downloaded from NATS ObjectStore
+      - WATCH_JARS=true
+      # OpenTelemetry (enable via: ct otel enable)
+      - OTEL_ENABLED=${OTEL_ENABLED:-false}
+      - OTEL_SDK_DISABLED=${OTEL_SDK_DISABLED:-true}
+      - OTEL_TRACES_EXPORTER=${OTEL_TRACES_EXPORTER:-none}
+      - OTEL_METRICS_EXPORTER=${OTEL_METRICS_EXPORTER:-none}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
+      # Disable Spring Boot tracing autoconfiguration when OTel is off
+      - MANAGEMENT_TRACING_ENABLED=${OTEL_ENABLED:-false}
+      # Spring Boot 3.5+ bean override (prevents conventionErrorViewResolver conflict)
+      - SPRING_MAIN_ALLOW_BEAN_DEFINITION_OVERRIDING=true
+    volumes:
+      - jtapi-jars:/app/jars
+    depends_on:
+      jtapi-jar-init:
+        condition: service_completed_successfully
+      nats:
+        condition: service_started
+    networks:
+      - ct
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8080/actuator/health || curl -sf http://127.0.0.1:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+
+  ct-media:
+    profiles: ["jtapi"]
+    image: "calltelemetry/ct-media-go:${CT_MEDIA_VERSION}"
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "25m"
+        max-file: "3"
+    expose:
+      - "50053"
+    environment:
+      - GRPC_PORT=50053
+      - S3_ENDPOINT=seaweedfs:8333
+      - S3_ACCESS_KEY_ID=${S3_ACCESS_KEY_ID:-changeme}
+      - S3_SECRET_ACCESS_KEY=${S3_SECRET_ACCESS_KEY:-changeme}
+      # OpenTelemetry (enable via: ct otel enable)
+      - OTEL_ENABLED=${OTEL_ENABLED:-false}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
+      - OTEL_SERVICE_NAME=ct-media
+    networks:
+      - ct
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/ct-media-go", "--health-check"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    depends_on:
+      seaweedfs:
+        condition: service_healthy
+
+  seaweedfs:
+    # Optional storage service — S3-compatible object store for syslog snapshots, config audits,
+    # as-built reports, and JTAPI audio. Auto-starts with jtapi or otel profiles;
+    # can also be activated standalone via COMPOSE_PROFILES=storage.
+    profiles: ["storage", "jtapi", "otel"]
+    image: chrislusf/seaweedfs:4.13
+    pull_policy: if_not_present
+    init: true
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "25m"
+        max-file: "3"
+    entrypoint: /usr/bin/weed
+    command: >
+      -logtostderr=true server -dir=/data
+      -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json
+      -master.volumeSizeLimitMB=100
+      -master.defaultReplication=000
+      -metricsPort=9325
+      -volume.max=2
+    restart: unless-stopped
+    cpus: 0.5
+    environment:
+      - GOMAXPROCS=1
+      - GOMEMLIMIT=256MiB
+    expose:
+      - "8333"   # S3 API
+      - "8888"   # Filer
+      - "9333"   # Master
+      - "9325"   # Prometheus metrics
+    volumes:
+      - seaweedfs-data:/data
+      - type: bind
+        source: ./seaweedfs-s3.json
+        target: /etc/seaweedfs/s3.json
+        read_only: true
+    networks:
+      - ct
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:9333/cluster/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # ─────────────────────────────────────────────────────────────────
+  # Grafana Alloy — Docker container log collection → Loki
+  # Tails stdout/stderr from all containers, parses JSON from ct-api,
+  # promotes only low-cardinality labels (compose_service, level).
+  # ─────────────────────────────────────────────────────────────────
+
+  alloy:
+    profiles: ["otel"]
+    image: grafana/alloy:v1.8.0
+    restart: unless-stopped
+    command: run --server.http.listen-addr=0.0.0.0:12345 /etc/alloy/config.alloy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
+    expose:
+      - "12345"
+    depends_on:
+      loki:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/12345'"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    mem_limit: 256m
+    cpus: 0.5
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - ct
 
@@ -181,5 +784,17 @@ volumes:
     driver: local
   prometheus-data:
     driver: local
+  alertmanager-data:
+    driver: local
   grafana-data:
+    driver: local
+  tempo-data:
+    driver: local
+  nats-data:
+    driver: local
+  jtapi-jars:
+    driver: local
+  loki-data:
+    driver: local
+  seaweedfs-data:
     driver: local

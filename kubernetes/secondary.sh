@@ -1,11 +1,10 @@
 #!/bin/bash
 # Edit this to be the primary node ip
-export primary_ip="192.168.123.156"
-#This token is a preshared-key shared between the cluster. It's generated dynamically on the primary node.
+export primary_ip="${PRIMARY_IP:?Set PRIMARY_IP to your primary node address}"
+# This token is a preshared-key shared between the cluster. It's generated dynamically on the primary node.
 # get it by sudo cat /var/lib/rancher/k3s/server/node-token
-# Default from the master script was calltelemetry
-
-export K3S_TOKEN=calltelemetry
+# Override with: export K3S_TOKEN=your-secure-token
+export K3S_TOKEN="${K3S_TOKEN:?Set K3S_TOKEN from primary node: sudo cat /var/lib/rancher/k3s/server/node-token}"
 # Node
 firewall-cmd --permanent --add-port=10250/tcp
 firewall-cmd --permanent --add-port=8285/udp # Flannel

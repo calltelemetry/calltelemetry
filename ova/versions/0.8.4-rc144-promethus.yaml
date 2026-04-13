@@ -83,7 +83,7 @@ services:
         max-file: "7" # Keeps 7 days of logs
         compress: "true" # Compresses rotated files
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:4080/healthz"]
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:4080/healthz || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 5

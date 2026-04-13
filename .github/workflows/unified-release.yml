@@ -1,0 +1,529 @@
+name: Unified Release
+run-name: "Unified Release ${{ inputs.version }}"
+
+# Single workflow dispatch that stamps one appliance version across the
+# releasable component repos while pinning independently versioned images such
+# as ct-media-go, ct-traceroute-go, and ct-syslog-ingest-go into the appliance
+# bundle from their own semver release streams.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version stamped on ALL repos (e.g., 0.8.6-rc49)"
+        required: true
+        type: string
+      target_branch:
+        description: "Target branch in component repos"
+        required: false
+        type: string
+        default: "0.8.6-release"
+      ct_media_version:
+        description: "ct-media-go version override (leave empty to resolve the latest release)"
+        required: false
+        type: string
+      traceroute_version:
+        description: "ct-traceroute-go version override (leave empty to resolve the latest release)"
+        required: false
+        type: string
+      syslog_ingest_version:
+        description: "ct-syslog-ingest-go version override (leave empty to resolve the latest release)"
+        required: false
+        type: string
+      skip_component_releases:
+        description: "Skip creating GitHub releases (use existing tags/images)"
+        type: boolean
+        default: false
+      force_rebuild_all:
+        description: "Force rebuild ALL repos even if unchanged"
+        type: boolean
+        default: true
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────
+  # Job 1: Generate release notes and create draft release
+  # ─────────────────────────────────────────────────────────────────
+  generate-release-notes:
+    runs-on: ubuntu-latest
+    outputs:
+      release_notes: ${{ steps.notes.outputs.body }}
+      prev_version: ${{ steps.prev.outputs.prev_version }}
+    steps:
+      - name: Detect previous release
+        id: prev
+        env:
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+        run: |
+          PREV=$(gh release list --repo calltelemetry/calltelemetry --limit 1 \
+            --json tagName --jq '.[0].tagName' 2>/dev/null || echo "")
+          echo "Previous release: $PREV"
+          echo "prev_version=$PREV" >> "$GITHUB_OUTPUT"
+
+      - name: Collect commits across repos
+        id: notes
+        env:
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+        run: |
+          VERSION="${{ inputs.version }}"
+          PREV="${{ steps.prev.outputs.prev_version }}"
+
+          # Initial draft with build status checklist
+          # This will be replaced with public-facing release notes once builds complete
+          NOTES="## Call Telemetry $VERSION"
+          NOTES="$NOTES"$'\n\n'
+
+          # Build status checklist (replaced with release notes after builds complete)
+          NOTES="${NOTES}### Build Status"$'\n'
+          NOTES="${NOTES}- [ ] cisco-cdr Docker build"$'\n'
+          NOTES="${NOTES}- [ ] ct-quasar Docker build"$'\n'
+          NOTES="${NOTES}- [ ] jtapi-sidecar Docker build"$'\n'
+          NOTES="${NOTES}- [ ] ct-media-go image available"$'\n'
+          NOTES="${NOTES}- [ ] jtapi-operator Docker build"$'\n'
+          NOTES="${NOTES}- [ ] ct-traceroute-go image available"$'\n'
+          NOTES="${NOTES}- [ ] ct-syslog-ingest-go image available"$'\n'
+          NOTES="${NOTES}- [ ] OVA package"$'\n'
+          NOTES="$NOTES"$'\n'
+          NOTES="${NOTES}---"$'\n\n'
+          NOTES="${NOTES}**To upgrade:**"$'\n'
+          NOTES="${NOTES}\`\`\`bash"$'\n'
+          NOTES="${NOTES}sudo curl -fsSL https://get.calltelemetry.com | sudo sh -s -- update ${VERSION}"$'\n'
+          NOTES="${NOTES}\`\`\`"$'\n'
+
+          # Write to output using delimiter
+          echo "body<<NOTES_DELIM" >> "$GITHUB_OUTPUT"
+          echo "$NOTES" >> "$GITHUB_OUTPUT"
+          echo "NOTES_DELIM" >> "$GITHUB_OUTPUT"
+
+      - name: Create draft release on calltelemetry
+        env:
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+        run: |
+          VERSION="${{ inputs.version }}"
+
+          # Delete existing draft if re-running
+          gh release delete "$VERSION" --repo calltelemetry/calltelemetry --yes 2>/dev/null || true
+
+          # Write release notes to a temp file to avoid shell expansion issues
+          cat > /tmp/release-notes.md << 'NOTES_EOF'
+          ${{ steps.notes.outputs.body }}
+          NOTES_EOF
+
+          gh release create "$VERSION" \
+            --repo calltelemetry/calltelemetry \
+            --title "$VERSION" \
+            --draft \
+            --notes-file /tmp/release-notes.md
+
+          echo "Created draft release: $VERSION"
+
+      - name: Summary
+        run: |
+          echo "### Draft Release Created: ${{ inputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Previous version: ${{ steps.prev.outputs.prev_version }}" >> $GITHUB_STEP_SUMMARY
+
+  # ─────────────────────────────────────────────────────────────────
+  # Job 2: Detect which repos have changed since last release
+  # Compares each repo's branch HEAD against the previous release tag.
+  # Unchanged repos will be retagged instead of rebuilt.
+  # ─────────────────────────────────────────────────────────────────
+  detect-changes:
+    needs: generate-release-notes
+    runs-on: ubuntu-latest
+    outputs:
+      changed_repos: ${{ steps.detect.outputs.changed_repos }}
+      unchanged_repos: ${{ steps.detect.outputs.unchanged_repos }}
+      prev_version: ${{ steps.detect.outputs.prev_version }}
+    steps:
+      - name: Detect which repos have new commits
+        id: detect
+        env:
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+        run: |
+          VERSION="${{ inputs.version }}"
+          BRANCH="${{ inputs.target_branch }}"
+          PREV="${{ needs.generate-release-notes.outputs.prev_version }}"
+          FORCE="${{ inputs.force_rebuild_all }}"
+
+          echo "prev_version=$PREV" >> "$GITHUB_OUTPUT"
+
+          ALL_REPOS='cisco-cdr ct-quasar jtapi-sidecar jtapi-operator'
+
+          if [ "$FORCE" = "true" ] || [ -z "$PREV" ]; then
+            echo "Force rebuild all (force=$FORCE, prev=$PREV)"
+            CHANGED_JSON='["cisco-cdr","ct-quasar","jtapi-sidecar","jtapi-operator"]'
+            echo "changed_repos=$CHANGED_JSON" >> "$GITHUB_OUTPUT"
+            echo "unchanged_repos=[]" >> "$GITHUB_OUTPUT"
+
+            echo "### Build Optimization" >> $GITHUB_STEP_SUMMARY
+            echo "**Force rebuild all** — no previous release or force flag set" >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+
+          CHANGED=()
+          UNCHANGED=()
+
+          echo "### Build Optimization" >> $GITHUB_STEP_SUMMARY
+          echo "| Repo | Commits | Action |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|---------|--------|" >> $GITHUB_STEP_SUMMARY
+
+          for repo in $ALL_REPOS; do
+            TARGET="$BRANCH"
+
+            # Use GitHub compare API to count commits between prev tag and branch HEAD
+            COMMITS=$(gh api "repos/calltelemetry/$repo/compare/${PREV}...${TARGET}" \
+              --jq '.total_commits' 2>/dev/null || echo "999")
+
+            if [ "$COMMITS" = "0" ]; then
+              echo "$repo: UNCHANGED (0 new commits since $PREV)"
+              UNCHANGED+=("\"$repo\"")
+              echo "| $repo | 0 | [retag] Retag from $PREV |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "$repo: CHANGED ($COMMITS new commits since $PREV)"
+              CHANGED+=("\"$repo\"")
+              echo "| $repo | $COMMITS | [build] Full rebuild |" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+
+          CHANGED_JSON="[$(IFS=,; echo "${CHANGED[*]}")]"
+          UNCHANGED_JSON="[$(IFS=,; echo "${UNCHANGED[*]}")]"
+
+          echo "changed_repos=$CHANGED_JSON" >> "$GITHUB_OUTPUT"
+          echo "unchanged_repos=$UNCHANGED_JSON" >> "$GITHUB_OUTPUT"
+
+          SKIP_COUNT=${#UNCHANGED[@]}
+          BUILD_COUNT=${#CHANGED[@]}
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**$BUILD_COUNT repos to build, $SKIP_COUNT repos to retag**" >> $GITHUB_STEP_SUMMARY
+
+  # ─────────────────────────────────────────────────────────────────
+  # Job 3: Create GitHub releases ONLY for changed repos
+  # The release:published events trigger Docker builds in each repo.
+  # ─────────────────────────────────────────────────────────────────
+  create-releases:
+    needs: [generate-release-notes, detect-changes]
+    if: ${{ !inputs.skip_component_releases && needs.detect-changes.outputs.changed_repos != '[]' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      # Dynamic matrix — ONLY changed repos get releases (and Docker builds)
+      matrix:
+        repo: ${{ fromJson(needs.detect-changes.outputs.changed_repos) }}
+    steps:
+      - name: Create ${{ matrix.repo }} release
+        env:
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+        run: |
+          REPO="${{ matrix.repo }}"
+          echo "Building $REPO (changed since last release)"
+          VERSION="${{ inputs.version }}"
+
+          TARGET="${{ inputs.target_branch }}"
+
+          echo "Creating $REPO release: $VERSION (target: $TARGET)"
+          NOTES="Unified release $VERSION"$'\n\n'"**Appliance Upgrade Instructions:** https://docs.calltelemetry.com/troubleshoot/upgrade"
+
+          gh release delete "$VERSION" --repo "calltelemetry/$REPO" --yes 2>/dev/null || true
+          gh release create "$VERSION" \
+            --repo "calltelemetry/$REPO" \
+            --target "$TARGET" \
+            --title "$VERSION" \
+            --latest \
+            --notes "$NOTES"
+
+          echo "Created release: calltelemetry/$REPO@$VERSION"
+
+  # ─────────────────────────────────────────────────────────────────
+  # Job 4: Retag unchanged repos — copy previous Docker image manifest
+  # Uses `docker buildx imagetools create` to copy multi-arch manifests
+  # from the previous version tag to the new one (~10 seconds per image).
+  # ─────────────────────────────────────────────────────────────────
+  retag-unchanged:
+    needs: [detect-changes]
+    if: ${{ needs.detect-changes.outputs.unchanged_repos != '[]' && !inputs.skip_component_releases }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - repo: cisco-cdr
+            image: web
+          - repo: ct-quasar
+            image: vue
+          - repo: jtapi-sidecar
+            image: jtapi-sidecar
+          - repo: jtapi-operator
+            image: jtapi-operator
+    steps:
+      - name: Retag ${{ matrix.repo }} image
+        if: ${{ contains(needs.detect-changes.outputs.unchanged_repos, matrix.repo) }}
+        run: |
+          VERSION="${{ inputs.version }}"
+          PREV="${{ needs.detect-changes.outputs.prev_version }}"
+          IMAGE="calltelemetry/${{ matrix.image }}"
+
+          echo "[retag] Retagging $IMAGE:$PREV → $IMAGE:$VERSION"
+
+          # Login to Docker Hub
+          echo "${{ secrets.DOCKERHUB_TOKEN || secrets.DOCKER_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME || secrets.DOCKER_USERNAME }}" --password-stdin
+
+          # Set up buildx for imagetools
+          docker buildx create --use --name retagger 2>/dev/null || true
+
+          # Copy multi-arch manifest (preserves AMD64 + ARM64 layers)
+          docker buildx imagetools create \
+            --tag "$IMAGE:$VERSION" \
+            "$IMAGE:$PREV"
+
+          echo "[OK] Retagged $IMAGE:$PREV → $IMAGE:$VERSION"
+
+  # ─────────────────────────────────────────────────────────────────
+  # Job 5: Wait for Docker images, generate OVA files, package, deploy
+  # Polls Docker Hub until the unified-release images plus semver-managed
+  # dependency images are available, then runs the full OVA pipeline.
+  # ─────────────────────────────────────────────────────────────────
+  finalize:
+    needs: [generate-release-notes, create-releases, retag-unchanged, detect-changes]
+    if: ${{ !cancelled() && needs.generate-release-notes.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Resolve traceroute-go version
+        id: traceroute
+        env:
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+        run: |
+          TRACEROUTE_VERSION="${{ inputs.traceroute_version }}"
+          if [ -z "$TRACEROUTE_VERSION" ]; then
+            TRACEROUTE_VERSION=$(gh release list \
+              --repo calltelemetry/ct-traceroute-go \
+              --limit 1 \
+              --json tagName \
+              --jq '.[0].tagName')
+          fi
+
+          if [ -z "$TRACEROUTE_VERSION" ] || [ "$TRACEROUTE_VERSION" = "null" ]; then
+            echo "[FAIL] Unable to resolve a ct-traceroute-go release tag"
+            exit 1
+          fi
+
+          echo "version=$TRACEROUTE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Resolved ct-traceroute-go version: $TRACEROUTE_VERSION"
+
+      - name: Resolve ct-media-go version
+        id: media
+        env:
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+        run: |
+          CT_MEDIA_VERSION="${{ inputs.ct_media_version }}"
+          if [ -z "$CT_MEDIA_VERSION" ]; then
+            CT_MEDIA_VERSION=$(gh release list \
+              --repo calltelemetry/ct-media-go \
+              --limit 1 \
+              --json tagName \
+              --jq '.[0].tagName')
+          fi
+
+          if [ -z "$CT_MEDIA_VERSION" ] || [ "$CT_MEDIA_VERSION" = "null" ]; then
+            echo "[FAIL] Unable to resolve a ct-media-go release tag"
+            exit 1
+          fi
+
+          echo "version=$CT_MEDIA_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Resolved ct-media-go version: $CT_MEDIA_VERSION"
+
+      - name: Resolve ct-syslog-ingest-go version
+        id: syslog_ingest
+        env:
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+        run: |
+          SYSLOG_INGEST_VERSION="${{ inputs.syslog_ingest_version }}"
+          if [ -z "$SYSLOG_INGEST_VERSION" ]; then
+            SYSLOG_INGEST_VERSION=$(gh release list \
+              --repo calltelemetry/ct-syslog-ingest-go \
+              --limit 1 \
+              --json tagName \
+              --jq '.[0].tagName')
+          fi
+
+          if [ -z "$SYSLOG_INGEST_VERSION" ] || [ "$SYSLOG_INGEST_VERSION" = "null" ]; then
+            echo "[FAIL] Unable to resolve a ct-syslog-ingest-go release tag"
+            exit 1
+          fi
+
+          echo "version=$SYSLOG_INGEST_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Resolved ct-syslog-ingest-go version: $SYSLOG_INGEST_VERSION"
+
+      - name: Wait for all Docker images on Docker Hub
+        run: |
+          VERSION="${{ inputs.version }}"
+          CT_MEDIA="${{ steps.media.outputs.version }}"
+          TRACEROUTE="${{ steps.traceroute.outputs.version }}"
+          SYSLOG_INGEST="${{ steps.syslog_ingest.outputs.version }}"
+
+          IMAGES="web:${VERSION} vue:${VERSION} jtapi-sidecar:${VERSION} jtapi-operator:${VERSION} ct-media-go:${CT_MEDIA} traceroute-go:${TRACEROUTE} ct-syslog-ingest-go:${SYSLOG_INGEST}"
+          MAX_ATTEMPTS=30  # 30 minutes max
+          ATTEMPT=0
+
+          echo "Waiting for unified-release and semver-managed Docker images to be available on Docker Hub..."
+          echo ""
+
+          while true; do
+            ATTEMPT=$((ATTEMPT + 1))
+            ALL_READY=true
+            echo "=== Poll $ATTEMPT/$MAX_ATTEMPTS ($(date -u +%H:%M:%S UTC)) ==="
+
+            for entry in $IMAGES; do
+              IMAGE=$(echo "$entry" | cut -d: -f1)
+              TAG=$(echo "$entry" | cut -d: -f2)
+              if curl -sf "https://hub.docker.com/v2/repositories/calltelemetry/${IMAGE}/tags/${TAG}/" > /dev/null 2>&1; then
+                echo "  [OK] calltelemetry/${IMAGE}:${TAG}"
+              else
+                echo "  [WAIT] calltelemetry/${IMAGE}:${TAG} — not ready"
+                ALL_READY=false
+              fi
+            done
+
+            if [ "$ALL_READY" = true ]; then
+              echo ""
+              echo "All Docker images are available!"
+              break
+            fi
+
+            if [ "$ATTEMPT" -ge "$MAX_ATTEMPTS" ]; then
+              echo ""
+              echo "[FAIL] Timeout: Not all images available after ${MAX_ATTEMPTS} minutes"
+              exit 1
+            fi
+
+            echo "  Waiting 60s before next poll..."
+            echo ""
+            sleep 60
+          done
+
+      - name: Release Summary
+        run: |
+          VERSION="${{ inputs.version }}"
+          CT_MEDIA="${{ steps.media.outputs.version }}"
+          TRACEROUTE="${{ steps.traceroute.outputs.version }}"
+          SYSLOG_INGEST="${{ steps.syslog_ingest.outputs.version }}"
+
+          echo "### Unified Release: $VERSION" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "All Docker images confirmed available. Proceeding with OVA packaging." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Repo | Tag | Branch |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| cisco-cdr | $VERSION | ${{ inputs.target_branch }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| ct-quasar | $VERSION | ${{ inputs.target_branch }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| jtapi-sidecar | $VERSION | ${{ inputs.target_branch }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| ct-media-go | $CT_MEDIA | main |" >> $GITHUB_STEP_SUMMARY
+          echo "| jtapi-operator | $VERSION | ${{ inputs.target_branch }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| ct-traceroute-go | $TRACEROUTE | main |" >> $GITHUB_STEP_SUMMARY
+          echo "| ct-syslog-ingest-go | $SYSLOG_INGEST | main |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          token: ${{ secrets.GH_RELEASE_TOKEN }}
+
+      - name: Generate version files
+        run: |
+          VERSION="${{ inputs.version }}"
+          CT_MEDIA="${{ steps.media.outputs.version }}"
+          TRACEROUTE_VERSION="${{ steps.traceroute.outputs.version }}"
+          SYSLOG_INGEST_VERSION="${{ steps.syslog_ingest.outputs.version }}"
+
+          # Find the latest existing version file as template
+          TEMPLATE=$(ls -1 ova/versions/*.yaml 2>/dev/null | sort -V | tail -1)
+          if [ -z "$TEMPLATE" ]; then
+            echo "[FAIL] No version template found in ova/versions/"
+            exit 1
+          fi
+
+          # Generate .yaml (docker-compose override with version-stamped images)
+          TEMPLATE_VER=$(basename "$TEMPLATE" .yaml)
+          sed "s/${TEMPLATE_VER}/${VERSION}/g" "$TEMPLATE" > "ova/versions/${VERSION}.yaml"
+          sed -i -E "s|calltelemetry/traceroute-go:[^\"]*|calltelemetry/traceroute-go:${TRACEROUTE_VERSION}|g" "ova/versions/${VERSION}.yaml"
+          sed -i -E "s|calltelemetry/traceroute:[^\"]*|calltelemetry/traceroute-go:${TRACEROUTE_VERSION}|g" "ova/versions/${VERSION}.yaml"
+          sed -i -E "s|calltelemetry/ct-syslog-ingest-go:[^\"]*|calltelemetry/ct-syslog-ingest-go:${SYSLOG_INGEST_VERSION}|g" "ova/versions/${VERSION}.yaml"
+          sed -i -E "s|calltelemetry/ct-syslog-ingest:[^\"]*|calltelemetry/ct-syslog-ingest-go:${SYSLOG_INGEST_VERSION}|g" "ova/versions/${VERSION}.yaml"
+          sed -i -E "s|calltelemetry/ct-media-go:[^\"]*|calltelemetry/ct-media-go:${CT_MEDIA}|g" "ova/versions/${VERSION}.yaml"
+          sed -i -E "s|calltelemetry/ct-media:[^\"]*|calltelemetry/ct-media-go:${CT_MEDIA}|g" "ova/versions/${VERSION}.yaml"
+          echo "[OK] Generated ova/versions/${VERSION}.yaml from ${TEMPLATE_VER}"
+
+          # Generate .env (version environment variables)
+          TEMPLATE_ENV=$(ls -1 ova/versions/*.env 2>/dev/null | sort -V | tail -1)
+          if [ -z "$TEMPLATE_ENV" ]; then
+            echo "[FAIL] No env template found in ova/versions/"
+            exit 1
+          fi
+
+          TEMPLATE_ENV_VER=$(basename "$TEMPLATE_ENV" .env)
+          sed "s/${TEMPLATE_ENV_VER}/${VERSION}/g" "$TEMPLATE_ENV" > "ova/versions/${VERSION}.env"
+          sed -i -E "s|^TRACEROUTE_VERSION=.*$|TRACEROUTE_VERSION=${TRACEROUTE_VERSION}|g" "ova/versions/${VERSION}.env"
+          sed -i -E "s|^CT_MEDIA_VERSION=.*$|CT_MEDIA_VERSION=${CT_MEDIA}|g" "ova/versions/${VERSION}.env"
+          sed -i -E "s|^CT_SYSLOG_INGEST_VERSION=.*$|CT_SYSLOG_INGEST_VERSION=${SYSLOG_INGEST_VERSION}|g" "ova/versions/${VERSION}.env"
+          echo "[OK] Generated ova/versions/${VERSION}.env"
+
+          # Commit and push
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add ova/versions/${VERSION}.*
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "chore: auto-generate version files for ${VERSION}"
+            git pull --rebase origin master || git pull --rebase origin main || true
+            git push
+            echo "[OK] Version files pushed"
+          fi
+
+      - name: Upload version files to release
+        env:
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+        run: |
+          VERSION="${{ inputs.version }}"
+
+          # Upload .env and .yaml as release assets
+          for ext in env yaml; do
+            FILE="ova/versions/${VERSION}.${ext}"
+            if [ -f "$FILE" ]; then
+              gh release upload "$VERSION" "$FILE" \
+                --repo calltelemetry/calltelemetry \
+                --clobber
+              echo "[OK] Uploaded ${FILE} to release"
+            fi
+          done
+
+      - name: Dispatch Package Release Bundle
+        env:
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+        run: |
+          gh workflow run "Package Release Bundle" \
+            --repo calltelemetry/calltelemetry \
+            -f version=${{ inputs.version }}
+          echo "[OK] Package Release Bundle dispatched"
+
+      - name: Dispatch Notify OVA Build
+        env:
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+        run: |
+          gh workflow run "Notify OVA Build" \
+            --repo calltelemetry/calltelemetry \
+            -f version=${{ inputs.version }}
+          echo "[OK] Appliance build dispatched (OVA + QCOW2 conversion)"
+
+      - name: Publish release as prerelease (draft → prerelease)
+        env:
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+        run: |
+          VERSION="${{ inputs.version }}"
+          # Always publish as prerelease. Use promote-release.yml to
+          # mark a validated version as latest/stable.
+          gh release edit "$VERSION" \
+            --repo calltelemetry/calltelemetry \
+            --draft=false \
+            --prerelease
+          echo "[OK] Release $VERSION published as prerelease"
+          echo "   To promote: gh workflow run promote-release.yml -f version=$VERSION -f channel=latest"

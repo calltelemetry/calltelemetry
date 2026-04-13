@@ -21,9 +21,9 @@ kubectl apply -n ct-dev -f postgres-operator-examples/kustomize/postgres/ct-post
 cat <<EOF > ./custom_dev.yaml
 # ct_dev.yaml
 environment: dev
-primary_ip: 192.168.123.100/32
-secondary_ip: 192.168.123.101/32
-admin_ip: 192.168.123.102/32
+primary_ip: <your_primary_ip>/32
+secondary_ip: <your_secondary_ip>/32
+admin_ip: <your_admin_ip>/32
 EOF
 ```
 

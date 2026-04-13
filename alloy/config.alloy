@@ -1,0 +1,126 @@
+// =============================================================================
+// Grafana Alloy — Docker container log collection for Call Telemetry
+//
+// Tails container json-file logs DIRECTLY from disk, bypassing the Docker
+// streaming API. This eliminates 150%+ dockerd CPU caused by 20 concurrent
+// streaming connections via /var/run/docker.sock.
+//
+// Docker socket is still used for container discovery (lightweight polling),
+// but log reading goes straight to the filesystem.
+//
+// Label cardinality rules:
+//   LABELS (indexed):  compose_service, level  (bounded, ~6 * 4 = 24 streams)
+//   PARSED (queryable): module, org_id, request_id, pid, trace_id  (via | json)
+// =============================================================================
+
+// ---------------------------------------------------------------------------
+// Docker container discovery — finds running containers and their log paths
+// ---------------------------------------------------------------------------
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+// ---------------------------------------------------------------------------
+// Relabel: extract compose_service, container name, and log file path
+// ---------------------------------------------------------------------------
+discovery.relabel "docker_labels" {
+  targets = discovery.docker.containers.targets
+
+  // Extract compose service name
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "compose_service"
+  }
+
+  // Extract container name (strip leading slash)
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+
+  // Build the json-file log path from container ID
+  // Docker stores logs at /var/lib/docker/containers/<id>/<id>-json.log
+  rule {
+    source_labels = ["__meta_docker_container_id"]
+    target_label  = "__path__"
+    replacement   = "/var/lib/docker/containers/$1/$1-json.log"
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Source: tail json-file logs directly from disk (bypasses dockerd entirely)
+// ---------------------------------------------------------------------------
+local.file_match "container_logs" {
+  path_targets = discovery.relabel.docker_labels.output
+}
+
+loki.source.file "containers" {
+  targets    = local.file_match.container_logs.targets
+  forward_to = [loki.process.docker_json.receiver]
+}
+
+// ---------------------------------------------------------------------------
+// Docker json-file wrapper extraction
+// Docker json-file format: {"log":"actual log line\n","stream":"stdout","time":"..."}
+// Extract the inner "log" field and "stream" label before passing to the pipeline.
+// ---------------------------------------------------------------------------
+loki.process "docker_json" {
+  // Parse the Docker json-file wrapper
+  stage.json {
+    expressions = {
+      output = "log",
+      stream = "stream",
+    }
+  }
+
+  // Replace log line with the inner content (strip Docker wrapper)
+  stage.output {
+    source = "output"
+  }
+
+  // Promote stream (stdout/stderr) to a label
+  stage.labels {
+    values = {
+      stream = "",
+    }
+  }
+
+  forward_to = [loki.process.pipeline.receiver]
+}
+
+// ---------------------------------------------------------------------------
+// Processing pipeline: JSON parse for structured services, pass-through rest
+// ---------------------------------------------------------------------------
+loki.process "pipeline" {
+  // Stage 1: Try JSON parse (succeeds for ct-api with LoggerJSON, no-op for plain text)
+  stage.json {
+    expressions = {
+      level    = "severity",
+      msg      = "message",
+    }
+  }
+
+  // Stage 2: Drop high-cardinality labels
+  stage.label_drop {
+    values = ["filename"]
+  }
+
+  // Stage 3: Promote only low-cardinality fields to labels
+  stage.labels {
+    values = {
+      level = "",
+    }
+  }
+
+  forward_to = [loki.write.loki.receiver]
+}
+
+// ---------------------------------------------------------------------------
+// Write: push to Loki
+// ---------------------------------------------------------------------------
+loki.write "loki" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

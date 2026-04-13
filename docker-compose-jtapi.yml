@@ -1,0 +1,201 @@
+# DEPRECATED: JTAPI services are now in the base docker-compose.yml using
+# Docker Compose profiles. Enable with COMPOSE_PROFILES=jtapi in .env.
+#
+# This overlay file is kept for backwards compatibility with older cli.sh
+# versions that reference it via -f flags. It will be removed in a future release.
+#
+# Migration:
+#   1. Set COMPOSE_PROFILES=jtapi in .env (ct-cli jtapi enable does this)
+#   2. Run: docker compose up -d
+#   3. The -f docker-compose-jtapi.yml flag is no longer needed
+#
+# Legacy usage (still works but deprecated):
+#   docker compose -f docker-compose.yml -f docker-compose-jtapi.yml up -d
+#
+# Prerequisites:
+#   JTAPI JAR uploaded via UI (Settings > JTAPI)
+#   CUCM credentials configured via UI (Settings > JTAPI > Servers)
+#
+# Bootstrapping sequence:
+#   1. sudo ./cli.sh jtapi enable   (auto-restarts services)
+#   2. Upload JTAPI JAR via UI (Settings > JTAPI)
+#   3. Restart services: sudo ./cli.sh restart
+#      (jtapi-jar-init pulls JAR from NATS ObjectStore to sidecar volume)
+#   4. Add CUCM server via UI (Settings > JTAPI > Servers)
+#      (credentials flow through NATS KV — CtiConfigWatcher auto-connects)
+#
+# SeaweedFS credentials:
+#   Set S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY in your .env file BEFORE first start.
+#   Changing credentials after data exists requires reconfiguration.
+
+services:
+  web:
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      # Docker Engine API — enables container management from the web UI
+      - DOCKER_SOCKET=/var/run/docker.sock
+      # JTAPI direct mode — API talks to sidecar gRPC without K8s operator
+      - JTAPI_MODE=direct
+      - JTAPI_SIDECAR_ENDPOINT=jtapi-sidecar:50051
+      - JTAPI_SIDECAR_URL=http://jtapi-sidecar:8080
+      # NATS for KV credential distribution + ObjectStore JAR storage
+      - NATS_URL=nats://nats:4222
+      # SeaweedFS S3 for audio storage (greetings, recordings)
+      - S3_ENABLED=true
+      - S3_ENDPOINT=http://seaweedfs:8333
+      - S3_ACCESS_KEY_ID=${S3_ACCESS_KEY_ID:-changeme}
+      - S3_SECRET_ACCESS_KEY=${S3_SECRET_ACCESS_KEY:-changeme}
+      - S3_REGION=us-east-1
+      # ct-media gRPC for audio transcoding (G.711 encoding for JTAPI greetings)
+      - CT_MEDIA_ENDPOINT=ct-media:50053
+    # NOTE: Do NOT add volumes for /data here — the base compose already
+    # bind-mounts ./org-data:/data:rw. Overlay volumes would conflict.
+    depends_on:
+      jtapi-sidecar:
+        condition: service_started
+      seaweedfs:
+        condition: service_healthy
+
+  jtapi-jar-init:
+    image: natsio/nats-box:0.14.5
+    pull_policy: if_not_present
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Checking NATS ObjectStore for JTAPI JAR..."
+        BUCKET="jtapi-jars-$${NATS_ORG_ID:-1}"
+        # Wait for NATS to be ready
+        for i in $$(seq 1 30); do
+          nats -s "$${NATS_URL}" server ping --count=1 2>/dev/null && break
+          echo "  Waiting for NATS... ($$i/30)"
+          sleep 2
+        done
+        # Try to download JAR from ObjectStore
+        if nats -s "$${NATS_URL}" object get "$$BUCKET" jtapi.jar --output /jars/jtapi.jar 2>/dev/null; then
+          SIZE=$$(stat -c%s /jars/jtapi.jar 2>/dev/null || echo "unknown")
+          echo "Downloaded jtapi.jar from NATS ObjectStore ($$SIZE bytes)"
+        elif [ -f /jars/jtapi.jar ]; then
+          echo "JAR already present on volume, skipping download"
+        else
+          echo "No JAR in NATS ObjectStore yet — sidecar will wait for upload via UI"
+        fi
+    environment:
+      - NATS_URL=nats://nats:4222
+      - NATS_ORG_ID=1
+    volumes:
+      - jtapi-jars:/jars
+    depends_on:
+      nats:
+        condition: service_started
+    networks:
+      - ct
+
+  jtapi-sidecar:
+    image: "calltelemetry/jtapi-sidecar:${JTAPI_VERSION:-1.14.5}"
+    restart: unless-stopped
+    mem_limit: 1g
+    expose:
+      - "50051"
+      - "8080"
+    environment:
+      - SPRING_PROFILES_ACTIVE=standalone
+      - NATS_URL=nats://nats:4222
+      - NATS_ORG_ID=1
+      - POD_NAME=jtapi-sidecar-1
+      - GRPC_PORT=50051
+      - JTAPI_PORT=8080
+      # Auto-connect/configure via NATS KV (CtiConfigWatcher)
+      - CTI_POOL_AUTO_CONNECT=true
+      - CTI_POOL_AUTO_CONFIGURE=true
+      - CTI_POOL_SOURCE=nats
+      - CTI_POOL_ENABLE_MEDIA=true
+      # SeaweedFS for audio storage
+      - S3_ENABLED=true
+      - S3_ENDPOINT=http://seaweedfs:8333
+      - S3_ACCESS_KEY_ID=${S3_ACCESS_KEY_ID:-changeme}
+      - S3_SECRET_ACCESS_KEY=${S3_SECRET_ACCESS_KEY:-changeme}
+      # JAR auto-restart when downloaded from NATS ObjectStore
+      - WATCH_JARS=true
+      # Disable OpenTelemetry by default (no collector in Docker Compose)
+      - OTEL_ENABLED=false
+      - OTEL_SDK_DISABLED=true
+      - MANAGEMENT_TRACING_ENABLED=false
+      # OpenTelemetry (to enable: set OTEL_ENABLED=true, OTEL_SDK_DISABLED=false, MANAGEMENT_TRACING_ENABLED=true)
+      # - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      # - OTEL_TRACING_SAMPLING_PROBABILITY=1.0
+    volumes:
+      - jtapi-jars:/app/jars
+    depends_on:
+      jtapi-jar-init:
+        condition: service_completed_successfully
+      nats:
+        condition: service_started
+    networks:
+      - ct
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8080/actuator/health || curl -sf http://127.0.0.1:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+
+  ct-media:
+    image: "calltelemetry/ct-media-go:${CT_MEDIA_VERSION:-1.1.1}"
+    restart: unless-stopped
+    expose:
+      - "50053"
+    environment:
+      - GRPC_PORT=50053
+      - S3_ENDPOINT=seaweedfs:8333
+      - S3_ACCESS_KEY_ID=${S3_ACCESS_KEY_ID:-changeme}
+      - S3_SECRET_ACCESS_KEY=${S3_SECRET_ACCESS_KEY:-changeme}
+    networks:
+      - ct
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/ct-media-go", "--health-check"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    depends_on:
+      seaweedfs:
+        condition: service_healthy
+
+  seaweedfs:
+    image: chrislusf/seaweedfs:4.13
+    pull_policy: if_not_present
+    init: true
+    entrypoint: /usr/bin/weed
+    command: >
+      -logtostderr=true server -dir=/data
+      -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json
+      -master.volumeSizeLimitMB=100
+      -master.defaultReplication=000
+      -metricsPort=9325
+    restart: unless-stopped
+    cpus: 0.5
+    environment:
+      - GOGC=50
+    expose:
+      - "8333"   # S3 API
+      - "8888"   # Filer
+      - "9333"   # Master
+    volumes:
+      - seaweedfs-data:/data
+      - ./seaweedfs-s3.json:/etc/seaweedfs/s3.json:ro
+    networks:
+      - ct
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:9333/cluster/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  jtapi-jars:
+    driver: local
+  seaweedfs-data:
+    driver: local

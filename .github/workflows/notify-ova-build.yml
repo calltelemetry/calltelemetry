@@ -1,0 +1,33 @@
+name: Notify OVA Build
+
+on:
+  # Triggered explicitly by Unified Release workflow (no release:published dependency)
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to build OVA for (e.g. 0.8.6-rc127) — must already exist on Docker Hub"
+        required: true
+        type: string
+      # OVA builds on ESXi, QCOW2 is converted from OVA in the same job.
+      # No separate QCOW2 dispatch needed.
+
+jobs:
+  trigger-ova-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${{ github.event.release.tag_name }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Trigger appliance build (OVA + QCOW2)
+        uses: peter-evans/repository-dispatch@ff45666b9427631e3450c54a1bcbee4d9ff4d7c0 # v3
+        with:
+          token: ${{ secrets.CT_WORKSPACE_DISPATCH_TOKEN }}
+          repository: calltelemetry/ct-appliance
+          event-type: build-ova
+          client-payload: '{"version": "${{ steps.ver.outputs.version }}", "image_format": "ova"}'
