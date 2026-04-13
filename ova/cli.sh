@@ -206,21 +206,18 @@ NMDEOF
     sudo nmcli general reload 2>/dev/null || true
   fi
 
-  # Ensure daemon.json has correct bip/address-pools, and nftables backend
-  # if Docker 29+ is available. Avoids iptables/nftables conflicts on RHEL 9.
+  # Ensure Docker uses nftables backend to avoid iptables/nftables conflicts
+  # with firewalld on RHEL 9 / AlmaLinux 9 OVAs.
   local DAEMON_JSON="/etc/docker/daemon.json"
-  local docker_major
-  docker_major=$(docker version --format '{{.Server.Version}}' 2>/dev/null | cut -d. -f1)
   if [ -f "$DAEMON_JSON" ] && command -v python3 &>/dev/null; then
-    if ! python3 -c "import json,sys; d=json.load(open('$DAEMON_JSON')); sys.exit(0 if (d.get('firewall-backend')=='nftables' or int('${docker_major:-0}')<29) and d.get('bip')=='100.64.0.1/24' else 1)" 2>/dev/null; then
-      python3 - "$DAEMON_JSON" "${docker_major:-0}" << 'PYEOF'
+    if ! python3 -c "import json,sys; d=json.load(open('$DAEMON_JSON')); sys.exit(0 if d.get('firewall-backend')=='nftables' and d.get('bip')=='100.64.0.1/24' else 1)" 2>/dev/null; then
+      python3 - "$DAEMON_JSON" << 'PYEOF'
 import json, sys
 path = sys.argv[1]
-docker_major = int(sys.argv[2])
 with open(path) as f:
     d = json.load(f)
 changed = False
-if docker_major >= 29 and d.get("firewall-backend") != "nftables":
+if d.get("firewall-backend") != "nftables":
     d["firewall-backend"] = "nftables"
     changed = True
 if d.get("bip") != "100.64.0.1/24":
@@ -297,103 +294,6 @@ get_current_postgres_image() {
   fi
 }
 
-POSTGRES_COMPAT_SCRIPT="postgres-bitnami-convert.sh"
-
-resolve_latest_ct_media_go_version() {
-  local hub_api="https://hub.docker.com/v2/repositories/calltelemetry/ct-media-go/tags?page_size=100"
-  local tags=""
-
-  if command -v curl >/dev/null 2>&1; then
-    tags=$(curl -fsSL "$hub_api" 2>/dev/null | grep -o '"name":"[^"]*"' | sed 's/"name":"\([^"]*\)"/\1/')
-  elif command -v wget >/dev/null 2>&1; then
-    tags=$(wget -qO- "$hub_api" 2>/dev/null | grep -o '"name":"[^"]*"' | sed 's/"name":"\([^"]*\)"/\1/')
-  fi
-
-  local tag
-  tag=$(printf '%s\n' "$tags" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
-  if echo "$tag" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-    echo "$tag"
-    return 0
-  fi
-
-  return 1
-}
-
-normalize_ct_media_bundle() {
-  local appliance_version="$1"
-  local current_media_version
-  current_media_version="$(env_get "CT_MEDIA_VERSION")"
-
-  local legacy_image=false
-  if grep -q 'calltelemetry/ct-media:' "$TEMP_FILE" 2>/dev/null; then
-    legacy_image=true
-  fi
-
-  local legacy_version=false
-  if [ -z "$current_media_version" ] || echo "$current_media_version" | grep -q -- '-rc'; then
-    legacy_version=true
-  fi
-
-  if [ "$legacy_image" = false ] && [ "$legacy_version" = false ]; then
-    return 0
-  fi
-
-  local replacement_version=""
-  if ! replacement_version="$(resolve_latest_ct_media_go_version)"; then
-    echo "[FAIL] Legacy ct-media bundle detected, but failed to resolve the latest ct-media-go release."
-    echo "   Please set CT_MEDIA_VERSION manually to a valid ct-media-go semver release and retry."
-    return 1
-  fi
-
-  echo "Normalizing legacy media bundle references to ct-media-go:${replacement_version}..."
-  env_set "CT_MEDIA_VERSION" "$replacement_version"
-
-  if grep -q 'calltelemetry/ct-media:' "$TEMP_FILE" 2>/dev/null; then
-    sed -i -E "s|calltelemetry/ct-media:[^\"[:space:]]*|calltelemetry/ct-media-go:${replacement_version}|g" "$TEMP_FILE"
-  fi
-
-  if grep -q 'calltelemetry/ct-media-go:' "$TEMP_FILE" 2>/dev/null; then
-    sed -i -E "s|calltelemetry/ct-media-go:[^\"[:space:]]*|calltelemetry/ct-media-go:${replacement_version}|g" "$TEMP_FILE"
-  fi
-
-  if grep -q 'calltelemetry/ct-media-go:\${CT_MEDIA_VERSION' "$TEMP_FILE" 2>/dev/null; then
-    :
-  fi
-
-  echo "[OK] Legacy media references upgraded for appliance ${appliance_version}"
-}
-
-# Repair missing PostgreSQL config files in existing data dirs created by older
-# appliance/database image combinations. Only missing files are restored.
-repair_postgres_compat() {
-  local repair_script="${INSTALL_DIR}/${POSTGRES_COMPAT_SCRIPT}"
-  local pg_data="${INSTALL_DIR}/${POSTGRES_DATA_DIR}/data"
-  local image="${1:-$(get_current_postgres_image)}"
-  shift || true
-
-  if [ ! -f "${pg_data}/PG_VERSION" ]; then
-    return 0
-  fi
-
-  if [ -f "${pg_data}/postgresql.conf" ] && [ -f "${pg_data}/pg_hba.conf" ] && [ -f "${pg_data}/pg_ident.conf" ]; then
-    return 0
-  fi
-
-  if [ ! -f "$repair_script" ]; then
-    echo "[WARN] PostgreSQL compatibility repair script not found: $repair_script"
-    return 0
-  fi
-
-  echo "Repairing missing PostgreSQL config files in ${pg_data}..."
-  if bash "$repair_script" --image "$image" --data-dir "$pg_data" "$@"; then
-    return 0
-  fi
-
-  echo "[FAIL] PostgreSQL compatibility repair failed."
-  echo "   Run manually: ${repair_script} --image ${image} --data-dir ${pg_data}"
-  return 1
-}
-
 # JTAPI feature state — now driven by COMPOSE_PROFILES in .env
 JTAPI_STATE_FILE=".jtapi-enabled"
 ENV_FILE="${INSTALL_DIR}/.env"
@@ -420,127 +320,74 @@ env_set() {
   fi
 }
 
-# Set a key in .env only if it is not already set (no-clobber)
-env_set_default() {
-  local key="$1" value="$2"
-  if [ -z "$(env_get "$key")" ]; then
-    env_set "$key" "$value"
-  fi
-}
-
-# Ensure baseline PG/pool settings exist in .env during upgrades.
-# Uses env_set_default so existing customer overrides are preserved.
-# Values match the "small" profile — safe for 4-8GB appliances.
-ensure_postgres_defaults() {
-  echo "Ensuring PostgreSQL defaults..."
-  env_set_default "PG_PROFILE" "small"
-  env_set_default "PG_SHM_SIZE" "4gb"
-  env_set_default "PG_SHARED_BUFFERS" "1GB"
-  env_set_default "PG_EFFECTIVE_CACHE_SIZE" "3GB"
-  env_set_default "PG_WORK_MEM" "32MB"
-  env_set_default "PG_MAINTENANCE_WORK_MEM" "128MB"
-  env_set_default "PG_PARALLEL_WORKERS" "2"
-  env_set_default "PG_MAX_PARALLEL_WORKERS" "4"
-  env_set_default "PG_AUTOVACUUM_WORKERS" "4"
-  env_set_default "PG_AUTOVACUUM_VACUUM_SCALE" "0.01"
-  env_set_default "PG_AUTOVACUUM_ANALYZE_SCALE" "0.005"
-  env_set_default "PG_MAX_CONNECTIONS" "200"
-  env_set_default "DB_MEM_LIMIT" "4g"
-  env_set_default "WEB_MEM_LIMIT" "3g"
-  env_set_default "DB_CPU_LIMIT" "2.0"
-  env_set_default "DB_POOL_SIZE" "50"
-  env_set_default "DB_BACKGROUND_POOL_SIZE" "15"
-  env_set_default "DB_DISCOVERY_POOL_SIZE" "25"
-  env_set_default "DB_OBAN_POOL_SIZE" "20"
-  # Disk I/O tuning — safe defaults for spinning disk (most appliances)
-  # SSD deployments should override: random_page_cost=1.1, effective_io_concurrency=200
-  env_set_default "PG_RANDOM_PAGE_COST" "4.0"
-  env_set_default "PG_EFFECTIVE_IO_CONCURRENCY" "2"
-  echo "[OK] PostgreSQL defaults applied (existing values preserved)"
-}
-
 # Apply a PostgreSQL memory sizing profile (small/medium/large)
 apply_postgres_profile() {
   local profile="$1"
   case "$profile" in
     small)
-      # Production-tuned from OVA field experience (2026-04)
       env_set "PG_PROFILE" "small"
-      env_set "PG_SHM_SIZE" "4gb"
-      env_set "PG_SHARED_BUFFERS" "1GB"
-      env_set "PG_EFFECTIVE_CACHE_SIZE" "3GB"
-      env_set "PG_WORK_MEM" "32MB"
-      env_set "PG_MAINTENANCE_WORK_MEM" "128MB"
-      env_set "PG_PARALLEL_WORKERS" "2"
-      env_set "PG_MAX_PARALLEL_WORKERS" "4"
-      env_set "PG_AUTOVACUUM_WORKERS" "4"
-      env_set "PG_AUTOVACUUM_VACUUM_SCALE" "0.01"
-      env_set "PG_AUTOVACUUM_ANALYZE_SCALE" "0.005"
-      env_set "PG_MAX_CONNECTIONS" "200"
-      env_set "DB_MEM_LIMIT" "4g"
-      env_set "WEB_MEM_LIMIT" "3g"
-      env_set "DB_CPU_LIMIT" "2.0"
-      env_set "DB_POOL_SIZE" "50"
-      env_set "DB_BACKGROUND_POOL_SIZE" "15"
-      env_set "DB_DISCOVERY_POOL_SIZE" "25"
-      env_set "DB_OBAN_POOL_SIZE" "20"
-      # Spinning disk defaults — override for SSD: 1.1 / 200
-      env_set "PG_RANDOM_PAGE_COST" "4.0"
-      env_set "PG_EFFECTIVE_IO_CONCURRENCY" "2"
-      ;;
-    medium)
-      # 16GB RAM target — DB gets 3g, web gets 2.5g, rest for OS/containers
-      env_set "PG_PROFILE" "medium"
-      env_set "PG_SHM_SIZE" "2gb"
-      env_set "PG_SHARED_BUFFERS" "768MB"
-      env_set "PG_EFFECTIVE_CACHE_SIZE" "2GB"
-      env_set "PG_WORK_MEM" "16MB"
-      env_set "PG_MAINTENANCE_WORK_MEM" "128MB"
+      env_set "PG_SHM_SIZE" "1gb"
+      env_set "PG_SHARED_BUFFERS" "512MB"
+      env_set "PG_EFFECTIVE_CACHE_SIZE" "1536MB"
+      env_set "PG_WORK_MEM" "8MB"
+      env_set "PG_MAINTENANCE_WORK_MEM" "256MB"
+      env_set "PG_WAL_BUFFERS" "64MB"
       env_set "PG_PARALLEL_WORKERS" "1"
       env_set "PG_MAX_PARALLEL_WORKERS" "2"
-      env_set "PG_AUTOVACUUM_WORKERS" "3"
+      env_set "PG_AUTOVACUUM_WORKERS" "2"
+      env_set "PG_AUTOVACUUM_VACUUM_SCALE" "0.05"
+      env_set "PG_AUTOVACUUM_ANALYZE_SCALE" "0.02"
+      env_set "PG_MAX_CONNECTIONS" "105"
+      env_set "DB_MEM_LIMIT" "3g"
+      env_set "WEB_MEM_LIMIT" "2g"
+      env_set "DB_POOL_SIZE" "30"
+      env_set "DB_BACKGROUND_POOL_SIZE" "5"
+      env_set "DB_DISCOVERY_POOL_SIZE" "10"
+      env_set "DB_OBAN_POOL_SIZE" "10"
+      ;;
+    medium)
+      # 8GB RAM target — DB gets 4g, web gets 2.5g, ~1.5g for OS/containers
+      env_set "PG_PROFILE" "medium"
+      env_set "PG_SHM_SIZE" "2gb"
+      env_set "PG_SHARED_BUFFERS" "1GB"
+      env_set "PG_EFFECTIVE_CACHE_SIZE" "3GB"
+      env_set "PG_WORK_MEM" "16MB"
+      env_set "PG_MAINTENANCE_WORK_MEM" "512MB"
+      env_set "PG_WAL_BUFFERS" "64MB"
+      env_set "PG_PARALLEL_WORKERS" "1"
+      env_set "PG_MAX_PARALLEL_WORKERS" "2"
+      env_set "PG_AUTOVACUUM_WORKERS" "2"
       env_set "PG_AUTOVACUUM_VACUUM_SCALE" "0.02"
       env_set "PG_AUTOVACUUM_ANALYZE_SCALE" "0.01"
-      env_set "PG_MAX_CONNECTIONS" "250"
-      env_set "DB_MEM_LIMIT" "3g"
+      env_set "PG_MAX_CONNECTIONS" "150"
+      env_set "DB_MEM_LIMIT" "4g"
       env_set "WEB_MEM_LIMIT" "2500m"
-      env_set "DB_CPU_LIMIT" "1.5"
       env_set "DB_POOL_SIZE" "35"
-      env_set "DB_BACKGROUND_POOL_SIZE" "15"
+      env_set "DB_BACKGROUND_POOL_SIZE" "8"
       env_set "DB_DISCOVERY_POOL_SIZE" "12"
       env_set "DB_OBAN_POOL_SIZE" "12"
-      # Spinning disk defaults — override for SSD: 1.1 / 200
-      env_set "PG_RANDOM_PAGE_COST" "4.0"
-      env_set "PG_EFFECTIVE_IO_CONCURRENCY" "2"
       ;;
     large)
-      # 32GB+ RAM target — DB gets 6g, web gets 4g, rest for OS/containers
-      # Tuned from OVA production (2026-04): old 2GB shared_buffers, 8GB cache,
-      # 1GB maintenance_work_mem, 20g DB_MEM_LIMIT all caused OOM pressure.
-      # Rutgers field incident: 53GB DB on spinning disk with SSD planner settings
-      # caused 5-minute query holds and connection pool exhaustion.
+      # 16GB+ RAM target — DB gets 8g, web gets 4g, rest for OS/containers
       env_set "PG_PROFILE" "large"
       env_set "PG_SHM_SIZE" "4gb"
       env_set "PG_SHARED_BUFFERS" "2GB"
-      env_set "PG_EFFECTIVE_CACHE_SIZE" "6GB"
+      env_set "PG_EFFECTIVE_CACHE_SIZE" "8GB"
       env_set "PG_WORK_MEM" "32MB"
-      env_set "PG_MAINTENANCE_WORK_MEM" "256MB"
+      env_set "PG_MAINTENANCE_WORK_MEM" "1GB"
+      env_set "PG_WAL_BUFFERS" "128MB"
       env_set "PG_PARALLEL_WORKERS" "2"
       env_set "PG_MAX_PARALLEL_WORKERS" "4"
-      env_set "PG_AUTOVACUUM_WORKERS" "5"
+      env_set "PG_AUTOVACUUM_WORKERS" "3"
       env_set "PG_AUTOVACUUM_VACUUM_SCALE" "0.01"
       env_set "PG_AUTOVACUUM_ANALYZE_SCALE" "0.005"
-      env_set "PG_MAX_CONNECTIONS" "300"
-      env_set "DB_MEM_LIMIT" "6g"
-      env_set "WEB_MEM_LIMIT" "4g"
-      env_set "DB_CPU_LIMIT" "4.0"
+      env_set "PG_MAX_CONNECTIONS" "305"
+      env_set "DB_MEM_LIMIT" "20g"
+      env_set "WEB_MEM_LIMIT" "6g"
       env_set "DB_POOL_SIZE" "60"
-      env_set "DB_BACKGROUND_POOL_SIZE" "20"
+      env_set "DB_BACKGROUND_POOL_SIZE" "10"
       env_set "DB_DISCOVERY_POOL_SIZE" "25"
       env_set "DB_OBAN_POOL_SIZE" "20"
-      # Spinning disk defaults — override for SSD: 1.1 / 200
-      env_set "PG_RANDOM_PAGE_COST" "4.0"
-      env_set "PG_EFFECTIVE_IO_CONCURRENCY" "2"
       ;;
     *)
       echo "Usage: cli.sh postgres profile <small|medium|large|show>"
@@ -552,6 +399,7 @@ apply_postgres_profile() {
   echo "  effective_cache_size:  $(env_get PG_EFFECTIVE_CACHE_SIZE)"
   echo "  work_mem:              $(env_get PG_WORK_MEM)"
   echo "  maintenance_work_mem:  $(env_get PG_MAINTENANCE_WORK_MEM)"
+  echo "  wal_buffers:           $(env_get PG_WAL_BUFFERS)"
   echo "  parallel_workers:      $(env_get PG_PARALLEL_WORKERS)/$(env_get PG_MAX_PARALLEL_WORKERS)"
   echo "  autovacuum_workers:    $(env_get PG_AUTOVACUUM_WORKERS)"
   echo "  db_cpu_limit:          $(env_get DB_CPU_LIMIT || echo '2.0 (default)')"
@@ -562,13 +410,8 @@ apply_postgres_profile() {
   echo "  db_pool (background):  $(env_get DB_BACKGROUND_POOL_SIZE)"
   echo "  db_pool (discovery):   $(env_get DB_DISCOVERY_POOL_SIZE)"
   echo "  db_pool (oban):        $(env_get DB_OBAN_POOL_SIZE)"
-  echo "  random_page_cost:      $(env_get PG_RANDOM_PAGE_COST)"
-  echo "  effective_io_concurrency: $(env_get PG_EFFECTIVE_IO_CONCURRENCY)"
   echo ""
-  echo "Restarting services to apply new profile..."
-  $DOCKER_COMPOSE_CMD down db 2>/dev/null
-  $DOCKER_COMPOSE_CMD up -d 2>/dev/null
-  echo "[OK] Services restarted with $profile profile"
+  echo "Restart required to apply: cli.sh restart"
 }
 
 # Remove a key from .env
@@ -1552,21 +1395,6 @@ fix_systemd_service_if_needed() {
     echo "Restart policy added (on-failure, 60s delay)."
   fi
 
-  # Add an explicit stop timeout so compose can hand SIGTERM through cleanly.
-  if ! grep -q "^TimeoutStopSec=" "$SERVICE_FILE" 2>/dev/null; then
-    echo "Adding TimeoutStopSec=45 to systemd service..."
-    if [ "$needs_reload" != true ]; then
-      sudo cp "$SERVICE_FILE" "${SERVICE_FILE}.backup" 2>/dev/null
-    fi
-    if grep -q "^TimeoutStartSec=" "$SERVICE_FILE"; then
-      sudo sed -i '/^TimeoutStartSec=/a TimeoutStopSec=45' "$SERVICE_FILE"
-    else
-      sudo sed -i '/^\[Install\]/i TimeoutStopSec=45' "$SERVICE_FILE"
-    fi
-    needs_reload=true
-    echo "Stop timeout added."
-  fi
-
   # Add network-online.target dependency if missing (boot ordering)
   if ! grep -q "network-online.target" "$SERVICE_FILE" 2>/dev/null; then
     echo "Adding network-online.target dependency to systemd service..."
@@ -2187,66 +2015,6 @@ cli_update() {
   rm -f "$tmp_file"
 }
 
-# Pre-flight self-update for the update command.
-# Downloads the latest cli.sh from GCS and re-execs so that hotfixes
-# (e.g. TimescaleDB removal, postgres compat) are always applied
-# regardless of which release the customer is upgrading FROM.
-self_update_and_reexec() {
-  # Guard: skip if we already re-exec'd this invocation
-  if [ "${_CT_CLI_REEXECED:-}" = "1" ]; then
-    return 0
-  fi
-
-  echo "Checking for cli.sh updates before upgrade..."
-  local tmp_file
-  tmp_file=$(mktemp)
-
-  # Try wget first, then curl
-  if ! wget -q "$SCRIPT_URL" -O "$tmp_file" 2>/dev/null && \
-     ! curl -sfL "$SCRIPT_URL" -o "$tmp_file" 2>/dev/null; then
-    rm -f "$tmp_file"
-    if [ -t 0 ]; then
-      echo "[WARN] Could not download latest cli.sh from GCS."
-      echo -n "Continue with current (possibly outdated) cli.sh? [y/N] "
-      read -r answer
-      case "$answer" in
-        [yY]*) echo "Continuing with local cli.sh..."; return 0 ;;
-        *)     echo "Aborting upgrade."; exit 1 ;;
-      esac
-    else
-      echo "[WARN] Could not fetch latest cli.sh (non-interactive). Continuing with local version."
-      return 0
-    fi
-    return 0
-  fi
-
-  # Verify download
-  if [ ! -s "$tmp_file" ]; then
-    echo "[WARN] Downloaded cli.sh is empty. Continuing with local version."
-    rm -f "$tmp_file"
-    return 0
-  fi
-
-  # Check if update needed
-  if diff -q "$tmp_file" "$CURRENT_SCRIPT_PATH" >/dev/null 2>&1; then
-    echo "[OK] cli.sh is up-to-date."
-    rm -f "$tmp_file"
-    return 0
-  fi
-
-  # Replace and re-exec
-  echo "Newer cli.sh available. Updating and restarting upgrade..."
-  if cp "$tmp_file" "$CURRENT_SCRIPT_PATH" && chmod +x "$CURRENT_SCRIPT_PATH"; then
-    rm -f "$tmp_file"
-    export _CT_CLI_REEXECED=1
-    exec "$CURRENT_SCRIPT_PATH" update "$@"
-  else
-    echo "[WARN] Failed to update cli.sh. Continuing with current version."
-    rm -f "$tmp_file"
-    return 0
-  fi
-}
-
 # Function to extract image tags from a docker-compose file
 # Resolves ${VAR:-default} patterns using values from .env
 extract_images() {
@@ -2445,12 +2213,6 @@ download_bundle() {
     fi
   fi
 
-  if ! normalize_ct_media_bundle "$version"; then
-    rm -f "$bundle_name"
-    rm -rf "$extract_dir"
-    return 1
-  fi
-
   # .env.example -> always overwrite template
   if [ -f "$extract_dir/.env.example" ]; then
     cp "$extract_dir/.env.example" ./.env.example
@@ -2465,17 +2227,6 @@ download_bundle() {
       echo "  [OK] cli.sh (updated)"
     else
       echo "  [OK] cli.sh (no changes)"
-    fi
-  fi
-
-  # postgres-bitnami-convert.sh -> install/update compatibility repair helper
-  if [ -f "$extract_dir/${POSTGRES_COMPAT_SCRIPT}" ]; then
-    if ! diff -q "$extract_dir/${POSTGRES_COMPAT_SCRIPT}" "./${POSTGRES_COMPAT_SCRIPT}" >/dev/null 2>&1; then
-      cp "$extract_dir/${POSTGRES_COMPAT_SCRIPT}" "./${POSTGRES_COMPAT_SCRIPT}"
-      chmod +x "./${POSTGRES_COMPAT_SCRIPT}"
-      echo "  [OK] ${POSTGRES_COMPAT_SCRIPT} (updated)"
-    else
-      echo "  [OK] ${POSTGRES_COMPAT_SCRIPT} (no changes)"
     fi
   fi
 
@@ -3242,44 +2993,6 @@ update() {
     fix_systemd_service_if_needed
     fix_systemd_compose_files
 
-    # Ensure PG/pool .env defaults exist (no-clobber — preserves customer overrides)
-    ensure_postgres_defaults
-
-    # Remove legacy postgres override file — these shipped with PG 14 and contain
-    # hardcoded values (max_connections=300, autovacuum_max_workers=5) that conflict
-    # with .env-driven configuration. The main docker-compose.yml now uses .env vars.
-    if [ -f "$POSTGRES_OVERRIDE_FILE" ]; then
-      if grep -q "calltelemetry/postgres" "$POSTGRES_OVERRIDE_FILE" 2>/dev/null; then
-        echo "Removing legacy PostgreSQL override file ($POSTGRES_OVERRIDE_FILE)..."
-        rm -f "$POSTGRES_OVERRIDE_FILE"
-        echo "[OK] Removed — PG settings now driven by .env (cli.sh postgres profile)"
-      fi
-    fi
-
-    # Remove TimescaleDB references — the extension is no longer shipped in our
-    # postgres images. If present in docker-compose.yml or postgresql.conf, PG
-    # crashes on startup with "could not access file timescaledb".
-    if grep -q "timescaledb" "$ORIGINAL_FILE" 2>/dev/null; then
-      echo "Removing TimescaleDB references from docker-compose.yml..."
-      sed -i "s/shared_preload_libraries='timescaledb,pg_stat_statements'/shared_preload_libraries='pg_stat_statements'/" "$ORIGINAL_FILE"
-      sed -i "s/shared_preload_libraries='timescaledb'/shared_preload_libraries=''/" "$ORIGINAL_FILE"
-      sed -i '/-c timescaledb\./d' "$ORIGINAL_FILE"
-      echo "[OK] TimescaleDB references removed from compose"
-    fi
-    local pg_conf="${INSTALL_DIR}/postgres-data/data/postgresql.conf"
-    if [ -f "$pg_conf" ] && grep -q "timescaledb" "$pg_conf" 2>/dev/null; then
-      echo "Removing TimescaleDB from postgresql.conf..."
-      sudo sed -i "s/shared_preload_libraries = 'timescaledb,pg_stat_statements'/shared_preload_libraries = 'pg_stat_statements'/" "$pg_conf"
-      sudo sed -i "s/shared_preload_libraries = 'timescaledb'/shared_preload_libraries = ''/" "$pg_conf"
-      echo "[OK] TimescaleDB references removed from postgresql.conf"
-    fi
-
-    if ! repair_postgres_compat "$(get_current_postgres_image)"; then
-      rm -f "$caddyfile_tmp"
-      rm -f "${INSTALL_DIR}/.ssh/authorized_keys"
-      return 1
-    fi
-
     # Check swap compliance: 8GB total, or 50% of RAM if RAM > 16GB
     local SWAPFILE="/swapfile"
     local total_ram_gb target_swap_gb non_file_swap_gb swapfile_target_gb current_swapfile_gb
@@ -3348,15 +3061,6 @@ update() {
     wait_for_services
     services_ok=$?
 
-    # Drop TimescaleDB extension from the database if it was installed.
-    # The extension .so is no longer in our postgres images, so every query
-    # fails with "could not access file timescaledb-2.x.x" until it's dropped.
-    if $DOCKER_COMPOSE_CMD exec -T db psql -U calltelemetry -d calltelemetry_prod -tAc "SELECT 1 FROM pg_extension WHERE extname='timescaledb'" 2>/dev/null | grep -q 1; then
-      echo "Dropping TimescaleDB extension from database..."
-      $DOCKER_COMPOSE_CMD exec -T db psql -U calltelemetry -d calltelemetry_prod -c "DROP EXTENSION IF EXISTS timescaledb CASCADE;" 2>/dev/null
-      echo "[OK] TimescaleDB extension dropped"
-    fi
-
     # Platform migration: Node.js 22 (one-time, skip if already done)
     REQUIRED_NODE_MAJOR=22
     CURRENT_NODE_MAJOR=$(node --version 2>/dev/null | sed 's/v\([0-9]*\).*/\1/' || echo "0")
@@ -3382,20 +3086,11 @@ update() {
     fi
 
     # Update ct CLI (skip if node migration failed)
-    # npm may not be in PATH — try common locations
-    local npm_bin=""
-    if command -v npm &>/dev/null; then
-      npm_bin="npm"
-    elif [ -x /usr/bin/npm ]; then
-      npm_bin="/usr/bin/npm"
-    elif [ -x /usr/lib/node_modules/npm/bin/npm-cli.js ]; then
-      npm_bin="/usr/lib/node_modules/npm/bin/npm-cli.js"
-    fi
-    if command -v node &>/dev/null && [ -n "$npm_bin" ]; then
+    if command -v node &>/dev/null && command -v npm &>/dev/null; then
       [ -f /usr/local/bin/ct ] && sudo rm -f /usr/local/bin/ct
       echo "Updating @calltelemetry/cli..."
-      sudo "$npm_bin" install -g @calltelemetry/cli &>/dev/null && \
-        CT_CLI_VER=$("$npm_bin" list -g --depth=0 @calltelemetry/cli 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1) && \
+      sudo npm install -g @calltelemetry/cli &>/dev/null && \
+        CT_CLI_VER=$(npm list -g --depth=0 @calltelemetry/cli 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1) && \
         echo "[OK] ct CLI updated to ${CT_CLI_VER:-unknown}" || echo "[WARN] ct CLI update failed (non-critical)"
     fi
 
@@ -3684,11 +3379,11 @@ wait_for_services() {
 
       # Extract the currently running migration filename from Ecto's "== Running VERSION Name" log
       local running_migration
-      running_migration=$(printf '%s\n' "$log_tail" | grep '== Running' | tail -1 | sed 's/.*== Running //' | sed 's/\.change\/0.*//' 2>/dev/null || echo "")
+      running_migration=$(printf '%s\n' "$log_tail" | grep '== Running' | tail -1 | sed 's/.*== Running [0-9]* //' | sed 's/\.change\/0.*//' 2>/dev/null || echo "")
 
       # Also check the last "[Release]   - VERSION filename" entry for the pending list
       if [ -z "$running_migration" ]; then
-        running_migration=$(printf '%s\n' "$log_tail" | grep '\[Release\]   - ' | tail -1 | sed 's/.*\[Release\]   - //' 2>/dev/null || echo "")
+        running_migration=$(printf '%s\n' "$log_tail" | grep '\[Release\]   - ' | tail -1 | sed 's/.*\[Release\]   - [0-9]* //' 2>/dev/null || echo "")
       fi
       running_migration=$(printf '%s' "$running_migration" | tr -d '\r' | sed 's/[[:space:]]*$//')
 
@@ -3748,21 +3443,7 @@ wait_for_services() {
       elif [ -n "$last_migration" ]; then
         display_name=" — latest applied: ${last_migration}"
       fi
-      # Show elapsed time of active DB query to prove progress during long migrations
-      local query_elapsed=""
-      query_elapsed=$($DOCKER_COMPOSE_CMD exec -e PGPASSWORD=postgres -T db psql -U calltelemetry -d calltelemetry_prod -t -c \
-        "SELECT EXTRACT(EPOCH FROM now() - query_start)::int FROM pg_stat_activity WHERE state = 'active' AND query NOT LIKE '%pg_stat_activity%' AND usename = 'calltelemetry' ORDER BY query_start LIMIT 1;" 2>/dev/null | tr -d ' \r\n')
-      local elapsed_display=""
-      if [[ "$query_elapsed" =~ ^[0-9]+$ ]] && [ "$query_elapsed" -gt 2 ]; then
-        local mins=$((query_elapsed / 60))
-        local secs=$((query_elapsed % 60))
-        if [ "$mins" -gt 0 ]; then
-          elapsed_display=" (${mins}m${secs}s)"
-        else
-          elapsed_display=" (${secs}s)"
-        fi
-      fi
-      printf "\r  Migrations: %s/%s applied, running...%s%s    " "${applied_count:-?}" "$display_total" "$display_name" "$elapsed_display"
+      printf "\r  Migrations: %s/%s applied, running...%s    " "${applied_count:-?}" "$display_total" "$display_name"
     else
       local display_total="${total_count:-?}"
       printf "\r  Migrations: %s/%s applied, waiting for status...    " "${applied_count:-?}" "$display_total"
@@ -3800,23 +3481,6 @@ wait_for_services() {
     echo "  [FAIL] Web health check failed after 20s"
     phase_failures=$((phase_failures + 1))
     failed_phases="$failed_phases health-check"
-  fi
-
-  local traceroute_healthy=false
-  for i in {1..10}; do
-    if $DOCKER_COMPOSE_CMD exec -T traceroute wget -q --spider http://127.0.0.1:4100/healthz >/dev/null 2>&1; then
-      traceroute_healthy=true
-      break
-    fi
-    sleep 2
-  done
-
-  if [ "$traceroute_healthy" = true ]; then
-    echo "  ✓ Traceroute service healthy"
-  else
-    echo "  [FAIL] Traceroute health check failed after 20s"
-    phase_failures=$((phase_failures + 1))
-    failed_phases="$failed_phases traceroute-health"
   fi
 
   # Check for startup issues in logs
@@ -4277,9 +3941,9 @@ get_release_migration_count() {
   local release_root="${release_bin%/bin/*}"
 
   $DOCKER_COMPOSE_CMD exec -T web sh -lc "
-    count=\$(find \"$release_root/lib\" -path '*/priv/repo/migrations/[0-9]*.exs' -type f 2>/dev/null | wc -l)
+    count=\$(find \"$release_root/lib\" -path '*/priv/repo/migrations/*.exs' -type f 2>/dev/null | wc -l)
     if [ \"\${count:-0}\" -eq 0 ]; then
-      count=\$(find /app/lib -path '*/priv/repo/migrations/[0-9]*.exs' -type f 2>/dev/null | wc -l)
+      count=\$(find /app/lib -path '*/priv/repo/migrations/*.exs' -type f 2>/dev/null | wc -l)
     fi
     printf '%s' \"\$count\"
   " 2>/dev/null | tr -d '[:space:]'
@@ -5825,7 +5489,6 @@ case "$1" in
     ;;
   update)
     shift
-    self_update_and_reexec "$@"
     ensure_ip_forward
     nm_heal_connections
     generate_self_signed_certificates
@@ -5885,7 +5548,6 @@ case "$1" in
         echo "Usage:"
         echo "  cli.sh postgres set <version>              Set version for next update"
         echo "  cli.sh postgres upgrade <version>          Upgrade to new major version"
-        echo "  cli.sh postgres convert-bitnami [--dry-run] Repair missing config files in postgres-data/data"
         echo "  cli.sh postgres profile <small|medium|large|show>  Set memory sizing profile"
         ;;
       profile)
@@ -5895,25 +5557,21 @@ case "$1" in
             current=$(env_get "PG_PROFILE")
             echo "Current PostgreSQL profile: ${current:-small (default)}"
             echo ""
-            echo "  small  —  1GB shared_buffers, 32MB work_mem, DB limit 4g  (8GB RAM,  <40GB DB)"
-            echo "  medium — 768MB shared_buffers, 16MB work_mem, DB limit 3g  (16GB RAM, 40-100GB DB)"
-            echo "  large  —  2GB shared_buffers, 32MB work_mem, DB limit 6g  (32GB RAM, 100GB+ DB)"
-            echo ""
-            echo "All profiles default to spinning disk I/O settings (random_page_cost=4.0)."
-            echo "For SSD: set PG_RANDOM_PAGE_COST=1.1 and PG_EFFECTIVE_IO_CONCURRENCY=200 in .env"
+            echo "  small  — 512MB shared_buffers,  8MB work_mem,  DB limit 3GB   (8GB RAM,  <40GB DB)"
+            echo "  medium —   2GB shared_buffers, 32MB work_mem,  DB limit 8GB   (16GB RAM, 40-100GB DB)"
+            echo "  large  —   8GB shared_buffers, 64MB work_mem,  DB limit 20GB  (32GB RAM, 100GB+ DB)"
             echo ""
             echo "Current values:"
-            echo "  shared_buffers:        $(env_get PG_SHARED_BUFFERS || echo '1GB (default)')"
-            echo "  effective_cache_size:  $(env_get PG_EFFECTIVE_CACHE_SIZE || echo '3GB (default)')"
-            echo "  work_mem:              $(env_get PG_WORK_MEM || echo '32MB (default)')"
-            echo "  maintenance_work_mem:  $(env_get PG_MAINTENANCE_WORK_MEM || echo '128MB (default)')"
+            echo "  shared_buffers:        $(env_get PG_SHARED_BUFFERS || echo '512MB (default)')"
+            echo "  effective_cache_size:  $(env_get PG_EFFECTIVE_CACHE_SIZE || echo '1536MB (default)')"
+            echo "  work_mem:              $(env_get PG_WORK_MEM || echo '8MB (default)')"
+            echo "  maintenance_work_mem:  $(env_get PG_MAINTENANCE_WORK_MEM || echo '256MB (default)')"
+            echo "  wal_buffers:           $(env_get PG_WAL_BUFFERS || echo '64MB (default)')"
             echo "  parallel_workers:      $(env_get PG_PARALLEL_WORKERS || echo '2 (default)')/$(env_get PG_MAX_PARALLEL_WORKERS || echo '4 (default)')"
-            echo "  autovacuum_workers:    $(env_get PG_AUTOVACUUM_WORKERS || echo '4 (default)')"
-            echo "  random_page_cost:      $(env_get PG_RANDOM_PAGE_COST || echo '4.0 (default — spinning disk)')"
-            echo "  effective_io_concurrency: $(env_get PG_EFFECTIVE_IO_CONCURRENCY || echo '2 (default — spinning disk)')"
+            echo "  autovacuum_workers:    $(env_get PG_AUTOVACUUM_WORKERS || echo '5 (default)')"
             echo "  db_cpu_limit:          $(env_get DB_CPU_LIMIT || echo '2.0 (default)')"
-            echo "  db_mem_limit:          $(env_get DB_MEM_LIMIT || echo '4g (default)')"
-            echo "  web_mem_limit:         $(env_get WEB_MEM_LIMIT || echo '3g (default)')"
+            echo "  db_mem_limit:          $(env_get DB_MEM_LIMIT || echo '2g (default — WARNING: too low for medium/large)')"
+            echo "  web_mem_limit:         $(env_get WEB_MEM_LIMIT || echo '4g (default)')"
             ;;
           small|medium|large)
             apply_postgres_profile "$subaction"
@@ -6111,13 +5769,9 @@ case "$1" in
           echo "Backup preserved at: $backup_file"
         fi
         ;;
-      convert-bitnami)
-        shift 2
-        repair_postgres_compat "$(get_current_postgres_image)" "$@"
-        ;;
       *)
         echo "Unknown postgres command: $2"
-        echo "Usage: cli.sh postgres [status|set <version>|upgrade <version>|convert-bitnami [--dry-run]|profile <small|medium|large|show>]"
+        echo "Usage: cli.sh postgres [status|set <version>|upgrade <version>|profile <small|medium|large|show>]"
         exit 1
         ;;
     esac
