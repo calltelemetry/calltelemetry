@@ -3061,6 +3061,20 @@ update() {
     wait_for_services
     services_ok=$?
 
+    # Reinstate TimescaleDB extension if it was previously dropped.
+    # A prior cli.sh version ran DROP EXTENSION timescaledb CASCADE during upgrades.
+    # This restores it so catalog queries don't crash. Idempotent — no-op if already present.
+    if ! $DOCKER_COMPOSE_CMD exec -T db psql -U calltelemetry -d calltelemetry_prod -tAc \
+        "SELECT 1 FROM pg_extension WHERE extname='timescaledb'" 2>/dev/null | grep -q 1; then
+      echo "Reinstating TimescaleDB extension (previously removed by older cli.sh)..."
+      if $DOCKER_COMPOSE_CMD exec -T db psql -U calltelemetry -d calltelemetry_prod \
+          -c "CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE" 2>/dev/null; then
+        echo "[OK] TimescaleDB extension restored"
+      else
+        echo "[WARN] TimescaleDB extension restore failed (non-critical)"
+      fi
+    fi
+
     # Platform migration: Node.js 22 (one-time, skip if already done)
     REQUIRED_NODE_MAJOR=22
     CURRENT_NODE_MAJOR=$(node --version 2>/dev/null | sed 's/v\([0-9]*\).*/\1/' || echo "0")
