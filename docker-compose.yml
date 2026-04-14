@@ -74,7 +74,7 @@ services:
     image: "calltelemetry/postgres:14"
     user: root
     restart: "always"
-    shm_size: "${PG_SHM_SIZE:-4gb}"
+    shm_size: "1gb"
     logging:
       driver: "json-file"
       options:
@@ -87,27 +87,23 @@ services:
       - PGDATA=/bitnami/postgresql/data
     command: >
       postgres
-      -c max_connections=${PG_MAX_CONNECTIONS:-200}
-      -c shared_buffers=${PG_SHARED_BUFFERS:-1GB}
-      -c effective_cache_size=${PG_EFFECTIVE_CACHE_SIZE:-3GB}
-      -c work_mem=${PG_WORK_MEM:-32MB}
-      -c maintenance_work_mem=${PG_MAINTENANCE_WORK_MEM:-128MB}
+      -c max_connections=${PG_MAX_CONNECTIONS:-100}
       -c max_wal_size=2GB
       -c checkpoint_completion_target=0.9
-      -c random_page_cost=${PG_RANDOM_PAGE_COST:-4.0}
-      -c effective_io_concurrency=${PG_EFFECTIVE_IO_CONCURRENCY:-2}
-      -c max_parallel_workers_per_gather=${PG_PARALLEL_WORKERS:-2}
-      -c max_parallel_workers=${PG_MAX_PARALLEL_WORKERS:-4}
-      -c autovacuum_max_workers=${PG_AUTOVACUUM_WORKERS:-4}
-      -c autovacuum_vacuum_scale_factor=${PG_AUTOVACUUM_VACUUM_SCALE:-0.01}
-      -c autovacuum_analyze_scale_factor=${PG_AUTOVACUUM_ANALYZE_SCALE:-0.005}
+      -c random_page_cost=4.0
+      -c effective_io_concurrency=2
+      -c max_parallel_workers_per_gather=2
+      -c max_parallel_workers=4
+      -c autovacuum_max_workers=4
+      -c autovacuum_vacuum_scale_factor=0.01
+      -c autovacuum_analyze_scale_factor=0.005
       -c autovacuum_vacuum_cost_delay=2
       -c log_min_duration_statement=1000
       -c track_io_timing=on
       -c track_functions=all
       -c shared_preload_libraries='timescaledb,pg_stat_statements'
-      -c timescaledb.max_background_workers=${TS_MAX_BACKGROUND_WORKERS:-8}
-      -c timescaledb.bgw_scheduler_restart_time=${TS_BGW_SCHEDULER_RESTART_TIME:-60000}
+      -c timescaledb.max_background_workers=8
+      -c timescaledb.bgw_scheduler_restart_time=60000
       -c pg_stat_statements.track=all
       -c pg_stat_statements.max=10000
       -c bgwriter_lru_maxpages=200
@@ -122,14 +118,13 @@ services:
       - ./postgres-data:/bitnami/postgresql
     networks:
       - ct
-    mem_limit: ${DB_MEM_LIMIT:-4g}
+    mem_limit: 4g
     deploy:
       resources:
         limits:
-          # Hard cgroup quota for the DB container. Docker may still report 100% of quota
-          # in container metrics, but host usage will not exceed DB_CPU_LIMIT logical CPUs.
-          cpus: '${DB_CPU_LIMIT:-2.0}'
-          memory: ${DB_MEM_LIMIT:-4g}
+          # Hard cgroup quota for the DB container.
+          cpus: '4.0'
+          memory: 4g
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-calltelemetry} -d $${POSTGRES_DB:-calltelemetry_prod}"]
       interval: 30s
@@ -244,13 +239,16 @@ services:
       - NATS_URL=nats://nats:4222
       - DB_POOL_SIZE=${DB_POOL_SIZE:-15}
       - DB_CALL_CONTROL_POOL_SIZE=${DB_CALL_CONTROL_POOL_SIZE:-15}
+      - DB_BACKGROUND_POOL_SIZE=${DB_BACKGROUND_POOL_SIZE:-15}
+      - DB_DISCOVERY_POOL_SIZE=${DB_DISCOVERY_POOL_SIZE:-15}
+      - DB_OBAN_POOL_SIZE=${DB_OBAN_POOL_SIZE:-15}
       # OpenTelemetry (enable via: ct otel enable)
       - OTEL_ENABLED=${OTEL_ENABLED:-false}
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}
     deploy:
       resources:
         limits:
-          memory: ${WEB_MEM_LIMIT:-4g}
+          memory: 4g
     tmpfs:
       - /var/log:rw,mode=0555,size=5000m
     networks:
