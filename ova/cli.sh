@@ -428,119 +428,51 @@ env_set_default() {
   fi
 }
 
-# Ensure baseline PG/pool settings exist in .env during upgrades.
+# Ensure baseline PG connection settings exist in .env during upgrades.
 # Uses env_set_default so existing customer overrides are preserved.
-# Values match the "small" profile — safe for 4-8GB appliances.
+# Values match the "small" profile — conservative defaults for 4-8GB appliances.
 ensure_postgres_defaults() {
   echo "Ensuring PostgreSQL defaults..."
   env_set_default "PG_PROFILE" "small"
-  env_set_default "PG_SHM_SIZE" "4gb"
-  env_set_default "PG_SHARED_BUFFERS" "1GB"
-  env_set_default "PG_EFFECTIVE_CACHE_SIZE" "3GB"
-  env_set_default "PG_WORK_MEM" "32MB"
-  env_set_default "PG_MAINTENANCE_WORK_MEM" "128MB"
-  env_set_default "PG_PARALLEL_WORKERS" "2"
-  env_set_default "PG_MAX_PARALLEL_WORKERS" "4"
-  env_set_default "PG_AUTOVACUUM_WORKERS" "4"
-  env_set_default "PG_AUTOVACUUM_VACUUM_SCALE" "0.01"
-  env_set_default "PG_AUTOVACUUM_ANALYZE_SCALE" "0.005"
-  env_set_default "PG_MAX_CONNECTIONS" "200"
-  env_set_default "DB_MEM_LIMIT" "4g"
-  env_set_default "WEB_MEM_LIMIT" "3g"
-  env_set_default "DB_CPU_LIMIT" "2.0"
-  env_set_default "DB_POOL_SIZE" "50"
+  env_set_default "PG_MAX_CONNECTIONS" "100"
+  env_set_default "DB_POOL_SIZE" "15"
+  env_set_default "DB_CALL_CONTROL_POOL_SIZE" "15"
   env_set_default "DB_BACKGROUND_POOL_SIZE" "15"
-  env_set_default "DB_DISCOVERY_POOL_SIZE" "25"
-  env_set_default "DB_OBAN_POOL_SIZE" "20"
-  # Disk I/O tuning — safe defaults for spinning disk (most appliances)
-  # SSD deployments should override: random_page_cost=1.1, effective_io_concurrency=200
-  env_set_default "PG_RANDOM_PAGE_COST" "4.0"
-  env_set_default "PG_EFFECTIVE_IO_CONCURRENCY" "2"
+  env_set_default "DB_DISCOVERY_POOL_SIZE" "15"
+  env_set_default "DB_OBAN_POOL_SIZE" "15"
   echo "[OK] PostgreSQL defaults applied (existing values preserved)"
 }
 
-# Apply a PostgreSQL memory sizing profile (small/medium/large)
+# Apply a PostgreSQL connection sizing profile (small/medium/large)
 apply_postgres_profile() {
   local profile="$1"
   case "$profile" in
     small)
-      # Production-tuned from OVA field experience (2026-04)
       env_set "PG_PROFILE" "small"
-      env_set "PG_SHM_SIZE" "4gb"
-      env_set "PG_SHARED_BUFFERS" "1GB"
-      env_set "PG_EFFECTIVE_CACHE_SIZE" "3GB"
-      env_set "PG_WORK_MEM" "32MB"
-      env_set "PG_MAINTENANCE_WORK_MEM" "128MB"
-      env_set "PG_PARALLEL_WORKERS" "2"
-      env_set "PG_MAX_PARALLEL_WORKERS" "4"
-      env_set "PG_AUTOVACUUM_WORKERS" "4"
-      env_set "PG_AUTOVACUUM_VACUUM_SCALE" "0.01"
-      env_set "PG_AUTOVACUUM_ANALYZE_SCALE" "0.005"
-      env_set "PG_MAX_CONNECTIONS" "200"
-      env_set "DB_MEM_LIMIT" "4g"
-      env_set "WEB_MEM_LIMIT" "3g"
-      env_set "DB_CPU_LIMIT" "2.0"
-      env_set "DB_POOL_SIZE" "50"
+      env_set "PG_MAX_CONNECTIONS" "100"
+      env_set "DB_POOL_SIZE" "15"
+      env_set "DB_CALL_CONTROL_POOL_SIZE" "15"
       env_set "DB_BACKGROUND_POOL_SIZE" "15"
-      env_set "DB_DISCOVERY_POOL_SIZE" "25"
-      env_set "DB_OBAN_POOL_SIZE" "20"
-      # Spinning disk defaults — override for SSD: 1.1 / 200
-      env_set "PG_RANDOM_PAGE_COST" "4.0"
-      env_set "PG_EFFECTIVE_IO_CONCURRENCY" "2"
+      env_set "DB_DISCOVERY_POOL_SIZE" "15"
+      env_set "DB_OBAN_POOL_SIZE" "15"
       ;;
     medium)
-      # 16GB RAM target — DB gets 3g, web gets 2.5g, rest for OS/containers
       env_set "PG_PROFILE" "medium"
-      env_set "PG_SHM_SIZE" "2gb"
-      env_set "PG_SHARED_BUFFERS" "768MB"
-      env_set "PG_EFFECTIVE_CACHE_SIZE" "2GB"
-      env_set "PG_WORK_MEM" "16MB"
-      env_set "PG_MAINTENANCE_WORK_MEM" "128MB"
-      env_set "PG_PARALLEL_WORKERS" "1"
-      env_set "PG_MAX_PARALLEL_WORKERS" "2"
-      env_set "PG_AUTOVACUUM_WORKERS" "3"
-      env_set "PG_AUTOVACUUM_VACUUM_SCALE" "0.02"
-      env_set "PG_AUTOVACUUM_ANALYZE_SCALE" "0.01"
-      env_set "PG_MAX_CONNECTIONS" "250"
-      env_set "DB_MEM_LIMIT" "3g"
-      env_set "WEB_MEM_LIMIT" "2500m"
-      env_set "DB_CPU_LIMIT" "1.5"
-      env_set "DB_POOL_SIZE" "35"
-      env_set "DB_BACKGROUND_POOL_SIZE" "15"
-      env_set "DB_DISCOVERY_POOL_SIZE" "12"
-      env_set "DB_OBAN_POOL_SIZE" "12"
-      # Spinning disk defaults — override for SSD: 1.1 / 200
-      env_set "PG_RANDOM_PAGE_COST" "4.0"
-      env_set "PG_EFFECTIVE_IO_CONCURRENCY" "2"
+      env_set "PG_MAX_CONNECTIONS" "200"
+      env_set "DB_POOL_SIZE" "20"
+      env_set "DB_CALL_CONTROL_POOL_SIZE" "20"
+      env_set "DB_BACKGROUND_POOL_SIZE" "20"
+      env_set "DB_DISCOVERY_POOL_SIZE" "20"
+      env_set "DB_OBAN_POOL_SIZE" "20"
       ;;
     large)
-      # 32GB+ RAM target — DB gets 6g, web gets 4g, rest for OS/containers
-      # Tuned from OVA production (2026-04): old 2GB shared_buffers, 8GB cache,
-      # 1GB maintenance_work_mem, 20g DB_MEM_LIMIT all caused OOM pressure.
-      # Rutgers field incident: 53GB DB on spinning disk with SSD planner settings
-      # caused 5-minute query holds and connection pool exhaustion.
       env_set "PG_PROFILE" "large"
-      env_set "PG_SHM_SIZE" "4gb"
-      env_set "PG_SHARED_BUFFERS" "2GB"
-      env_set "PG_EFFECTIVE_CACHE_SIZE" "6GB"
-      env_set "PG_WORK_MEM" "32MB"
-      env_set "PG_MAINTENANCE_WORK_MEM" "256MB"
-      env_set "PG_PARALLEL_WORKERS" "2"
-      env_set "PG_MAX_PARALLEL_WORKERS" "4"
-      env_set "PG_AUTOVACUUM_WORKERS" "5"
-      env_set "PG_AUTOVACUUM_VACUUM_SCALE" "0.01"
-      env_set "PG_AUTOVACUUM_ANALYZE_SCALE" "0.005"
       env_set "PG_MAX_CONNECTIONS" "300"
-      env_set "DB_MEM_LIMIT" "6g"
-      env_set "WEB_MEM_LIMIT" "4g"
-      env_set "DB_CPU_LIMIT" "4.0"
-      env_set "DB_POOL_SIZE" "60"
-      env_set "DB_BACKGROUND_POOL_SIZE" "20"
+      env_set "DB_POOL_SIZE" "25"
+      env_set "DB_CALL_CONTROL_POOL_SIZE" "25"
+      env_set "DB_BACKGROUND_POOL_SIZE" "25"
       env_set "DB_DISCOVERY_POOL_SIZE" "25"
-      env_set "DB_OBAN_POOL_SIZE" "20"
-      # Spinning disk defaults — override for SSD: 1.1 / 200
-      env_set "PG_RANDOM_PAGE_COST" "4.0"
-      env_set "PG_EFFECTIVE_IO_CONCURRENCY" "2"
+      env_set "DB_OBAN_POOL_SIZE" "25"
       ;;
     *)
       echo "Usage: cli.sh postgres profile <small|medium|large|show>"
@@ -548,22 +480,12 @@ apply_postgres_profile() {
       ;;
   esac
   echo "PostgreSQL profile set to: $profile"
-  echo "  shared_buffers:        $(env_get PG_SHARED_BUFFERS)"
-  echo "  effective_cache_size:  $(env_get PG_EFFECTIVE_CACHE_SIZE)"
-  echo "  work_mem:              $(env_get PG_WORK_MEM)"
-  echo "  maintenance_work_mem:  $(env_get PG_MAINTENANCE_WORK_MEM)"
-  echo "  parallel_workers:      $(env_get PG_PARALLEL_WORKERS)/$(env_get PG_MAX_PARALLEL_WORKERS)"
-  echo "  autovacuum_workers:    $(env_get PG_AUTOVACUUM_WORKERS)"
-  echo "  db_cpu_limit:          $(env_get DB_CPU_LIMIT || echo '2.0 (default)')"
   echo "  max_connections:       $(env_get PG_MAX_CONNECTIONS)"
-  echo "  db_mem_limit:          $(env_get DB_MEM_LIMIT)"
-  echo "  web_mem_limit:         $(env_get WEB_MEM_LIMIT)"
   echo "  db_pool (main):        $(env_get DB_POOL_SIZE)"
+  echo "  db_pool (callctl):     $(env_get DB_CALL_CONTROL_POOL_SIZE)"
   echo "  db_pool (background):  $(env_get DB_BACKGROUND_POOL_SIZE)"
   echo "  db_pool (discovery):   $(env_get DB_DISCOVERY_POOL_SIZE)"
   echo "  db_pool (oban):        $(env_get DB_OBAN_POOL_SIZE)"
-  echo "  random_page_cost:      $(env_get PG_RANDOM_PAGE_COST)"
-  echo "  effective_io_concurrency: $(env_get PG_EFFECTIVE_IO_CONCURRENCY)"
   echo ""
   echo "Restarting services to apply new profile..."
   $DOCKER_COMPOSE_CMD down db 2>/dev/null
@@ -3256,22 +3178,24 @@ update() {
       fi
     fi
 
+    local pg_conf="${INSTALL_DIR}/postgres-data/data/postgresql.conf"
+    local timescale_setting_applied=false
     # Remove TimescaleDB references — the extension is no longer shipped in our
     # postgres images. If present in docker-compose.yml or postgresql.conf, PG
     # crashes on startup with "could not access file timescaledb".
-    if grep -q "timescaledb" "$ORIGINAL_FILE" 2>/dev/null; then
-      echo "Removing TimescaleDB references from docker-compose.yml..."
-      sed -i "s/shared_preload_libraries='timescaledb,pg_stat_statements'/shared_preload_libraries='pg_stat_statements'/" "$ORIGINAL_FILE"
-      sed -i "s/shared_preload_libraries='timescaledb'/shared_preload_libraries=''/" "$ORIGINAL_FILE"
-      sed -i '/-c timescaledb\./d' "$ORIGINAL_FILE"
-      echo "[OK] TimescaleDB references removed from compose"
-    fi
-    local pg_conf="${INSTALL_DIR}/postgres-data/data/postgresql.conf"
-    if [ -f "$pg_conf" ] && grep -q "timescaledb" "$pg_conf" 2>/dev/null; then
-      echo "Removing TimescaleDB from postgresql.conf..."
-      sudo sed -i "s/shared_preload_libraries = 'timescaledb,pg_stat_statements'/shared_preload_libraries = 'pg_stat_statements'/" "$pg_conf"
-      sudo sed -i "s/shared_preload_libraries = 'timescaledb'/shared_preload_libraries = ''/" "$pg_conf"
-      echo "[OK] TimescaleDB references removed from postgresql.conf"
+    if grep -q "timescaledb" "$ORIGINAL_FILE" 2>/dev/null || \
+       { [ -f "$pg_conf" ] && grep -q "timescaledb" "$pg_conf" 2>/dev/null; }; then
+      echo "Applying Timescale DB setting..."
+      timescale_setting_applied=true
+      if grep -q "timescaledb" "$ORIGINAL_FILE" 2>/dev/null; then
+        sed -i "s/shared_preload_libraries='timescaledb,pg_stat_statements'/shared_preload_libraries='pg_stat_statements'/" "$ORIGINAL_FILE"
+        sed -i "s/shared_preload_libraries='timescaledb'/shared_preload_libraries=''/" "$ORIGINAL_FILE"
+        sed -i '/-c timescaledb\./d' "$ORIGINAL_FILE"
+      fi
+      if [ -f "$pg_conf" ] && grep -q "timescaledb" "$pg_conf" 2>/dev/null; then
+        sudo sed -i "s/shared_preload_libraries = 'timescaledb,pg_stat_statements'/shared_preload_libraries = 'pg_stat_statements'/" "$pg_conf"
+        sudo sed -i "s/shared_preload_libraries = 'timescaledb'/shared_preload_libraries = ''/" "$pg_conf"
+      fi
     fi
 
     if ! repair_postgres_compat "$(get_current_postgres_image)"; then
@@ -3352,9 +3276,10 @@ update() {
     # The extension .so is no longer in our postgres images, so every query
     # fails with "could not access file timescaledb-2.x.x" until it's dropped.
     if $DOCKER_COMPOSE_CMD exec -T db psql -U calltelemetry -d calltelemetry_prod -tAc "SELECT 1 FROM pg_extension WHERE extname='timescaledb'" 2>/dev/null | grep -q 1; then
-      echo "Dropping TimescaleDB extension from database..."
-      $DOCKER_COMPOSE_CMD exec -T db psql -U calltelemetry -d calltelemetry_prod -c "DROP EXTENSION IF EXISTS timescaledb CASCADE;" 2>/dev/null
-      echo "[OK] TimescaleDB extension dropped"
+      if [ "$timescale_setting_applied" = false ]; then
+        echo "Applying Timescale DB setting..."
+      fi
+      $DOCKER_COMPOSE_CMD exec -T db psql -U calltelemetry -d calltelemetry_prod -c "DROP EXTENSION IF EXISTS timescaledb CASCADE;" >/dev/null 2>&1
     fi
 
     # Platform migration: Node.js 22 (one-time, skip if already done)
@@ -5886,7 +5811,7 @@ case "$1" in
         echo "  cli.sh postgres set <version>              Set version for next update"
         echo "  cli.sh postgres upgrade <version>          Upgrade to new major version"
         echo "  cli.sh postgres convert-bitnami [--dry-run] Repair missing config files in postgres-data/data"
-        echo "  cli.sh postgres profile <small|medium|large|show>  Set memory sizing profile"
+        echo "  cli.sh postgres profile <small|medium|large|show>  Set connection sizing profile"
         ;;
       profile)
         subaction="${3:-show}"
@@ -5895,25 +5820,17 @@ case "$1" in
             current=$(env_get "PG_PROFILE")
             echo "Current PostgreSQL profile: ${current:-small (default)}"
             echo ""
-            echo "  small  —  1GB shared_buffers, 32MB work_mem, DB limit 4g  (8GB RAM,  <40GB DB)"
-            echo "  medium — 768MB shared_buffers, 16MB work_mem, DB limit 3g  (16GB RAM, 40-100GB DB)"
-            echo "  large  —  2GB shared_buffers, 32MB work_mem, DB limit 6g  (32GB RAM, 100GB+ DB)"
-            echo ""
-            echo "All profiles default to spinning disk I/O settings (random_page_cost=4.0)."
-            echo "For SSD: set PG_RANDOM_PAGE_COST=1.1 and PG_EFFECTIVE_IO_CONCURRENCY=200 in .env"
+            echo "  small  — 100 max_connections, 15 per repo pool"
+            echo "  medium — 200 max_connections, 20 per repo pool"
+            echo "  large  — 300 max_connections, 25 per repo pool"
             echo ""
             echo "Current values:"
-            echo "  shared_buffers:        $(env_get PG_SHARED_BUFFERS || echo '1GB (default)')"
-            echo "  effective_cache_size:  $(env_get PG_EFFECTIVE_CACHE_SIZE || echo '3GB (default)')"
-            echo "  work_mem:              $(env_get PG_WORK_MEM || echo '32MB (default)')"
-            echo "  maintenance_work_mem:  $(env_get PG_MAINTENANCE_WORK_MEM || echo '128MB (default)')"
-            echo "  parallel_workers:      $(env_get PG_PARALLEL_WORKERS || echo '2 (default)')/$(env_get PG_MAX_PARALLEL_WORKERS || echo '4 (default)')"
-            echo "  autovacuum_workers:    $(env_get PG_AUTOVACUUM_WORKERS || echo '4 (default)')"
-            echo "  random_page_cost:      $(env_get PG_RANDOM_PAGE_COST || echo '4.0 (default — spinning disk)')"
-            echo "  effective_io_concurrency: $(env_get PG_EFFECTIVE_IO_CONCURRENCY || echo '2 (default — spinning disk)')"
-            echo "  db_cpu_limit:          $(env_get DB_CPU_LIMIT || echo '2.0 (default)')"
-            echo "  db_mem_limit:          $(env_get DB_MEM_LIMIT || echo '4g (default)')"
-            echo "  web_mem_limit:         $(env_get WEB_MEM_LIMIT || echo '3g (default)')"
+            echo "  max_connections:       $(env_get PG_MAX_CONNECTIONS || echo '100 (default)')"
+            echo "  db_pool (main):        $(env_get DB_POOL_SIZE || echo '15 (default)')"
+            echo "  db_pool (callctl):     $(env_get DB_CALL_CONTROL_POOL_SIZE || echo '15 (default)')"
+            echo "  db_pool (background):  $(env_get DB_BACKGROUND_POOL_SIZE || echo '15 (default)')"
+            echo "  db_pool (discovery):   $(env_get DB_DISCOVERY_POOL_SIZE || echo '15 (default)')"
+            echo "  db_pool (oban):        $(env_get DB_OBAN_POOL_SIZE || echo '15 (default)')"
             ;;
           small|medium|large)
             apply_postgres_profile "$subaction"
