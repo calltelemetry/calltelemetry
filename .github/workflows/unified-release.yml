@@ -514,16 +514,13 @@ jobs:
             -f version=${{ inputs.version }}
           echo "[OK] Appliance build dispatched (OVA + QCOW2 conversion)"
 
-      - name: Publish release as prerelease (draft → prerelease)
+      - name: Keep release as draft (do not publish)
         env:
           GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
         run: |
           VERSION="${{ inputs.version }}"
-          # Always publish as prerelease. Use promote-release.yml to
-          # mark a validated version as latest/stable.
           gh release edit "$VERSION" \
             --repo calltelemetry/calltelemetry \
-            --draft=false \
-            --prerelease
-          echo "[OK] Release $VERSION published as prerelease"
-          echo "   To promote: gh workflow run promote-release.yml -f version=$VERSION -f channel=latest"
+            --draft=true
+          echo "[OK] Release $VERSION retained as DRAFT — not published."
+          echo "   To publish as prerelease later: gh release edit $VERSION --repo calltelemetry/calltelemetry --draft=false --prerelease"
