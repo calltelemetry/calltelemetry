@@ -455,6 +455,7 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           token: ${{ secrets.GH_RELEASE_TOKEN }}
+          fetch-depth: 0
 
       - name: Generate version files
         run: |
@@ -498,17 +499,47 @@ jobs:
           sed -i -E "s|^JTAPI_VERSION=.*$|JTAPI_VERSION=${JTAPI_SIDECAR_VERSION}|g" "ova/versions/${VERSION}.env"
           echo "[OK] Generated ova/versions/${VERSION}.env"
 
-          # Commit and push
+          # Commit version files directly to master (or main), regardless
+          # of which branch this workflow was dispatched from. Uses a
+          # temporary worktree so the dispatch ref's checkout stays intact
+          # for subsequent steps that need the generated files locally.
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add ova/versions/${VERSION}.*
-          if git diff --cached --quiet; then
-            echo "No changes to commit"
+
+          if [ -z "$(ls -A ova/versions/${VERSION}.* 2>/dev/null)" ]; then
+            echo "No version files generated"
           else
-            git commit -m "chore: auto-generate version files for ${VERSION}"
-            git pull --rebase origin master || git pull --rebase origin main || true
-            git push
-            echo "[OK] Version files pushed"
+            # Determine target branch (master or main)
+            TARGET_BR=master
+            if ! git ls-remote --exit-code --heads origin master >/dev/null 2>&1; then
+              TARGET_BR=main
+            fi
+            git fetch origin "$TARGET_BR"
+
+            # Stash generated files, switch to target branch in a worktree,
+            # drop files in, commit, push.
+            TMP_DIR=$(mktemp -d)
+            cp ova/versions/${VERSION}.yaml "$TMP_DIR/"
+            cp ova/versions/${VERSION}.env  "$TMP_DIR/"
+
+            WT_DIR=$(mktemp -d)
+            git worktree add "$WT_DIR" "origin/${TARGET_BR}"
+            (
+              cd "$WT_DIR"
+              mkdir -p ova/versions
+              cp "$TMP_DIR/${VERSION}.yaml" ova/versions/
+              cp "$TMP_DIR/${VERSION}.env"  ova/versions/
+              git add ova/versions/${VERSION}.*
+              if git diff --cached --quiet; then
+                echo "Version files already on ${TARGET_BR} — skipping commit"
+              else
+                git commit -m "chore: auto-generate version files for ${VERSION}"
+                git push origin "HEAD:${TARGET_BR}"
+                echo "[OK] Version files pushed to ${TARGET_BR}"
+              fi
+            )
+            git worktree remove --force "$WT_DIR"
+            rm -rf "$TMP_DIR"
           fi
 
       - name: Upload version files to release
