@@ -73,10 +73,20 @@ jobs:
             exit 1
           fi
 
-          # JTAPI defaults to main version (unified release stamps all repos)
+          # JTAPI is independently versioned — resolve latest release
           JTAPI_VERSION="${{ inputs.jtapi_version }}"
           if [ -z "$JTAPI_VERSION" ]; then
-            JTAPI_VERSION="$VERSION"
+            JTAPI_VERSION=$(gh release list \
+              --repo calltelemetry/jtapi-sidecar \
+              --exclude-pre-releases \
+              --limit 1 \
+              --json tagName \
+              --jq '.[0].tagName')
+            JTAPI_VERSION="${JTAPI_VERSION#v}"
+          fi
+          if [ -z "$JTAPI_VERSION" ] || [ "$JTAPI_VERSION" = "null" ]; then
+            echo "[FAIL] Unable to resolve a jtapi-sidecar release tag"
+            exit 1
           fi
 
           CT_MEDIA_VERSION="${{ inputs.ct_media_version }}"

@@ -3,8 +3,8 @@ run-name: "Unified Release ${{ inputs.version }}"
 
 # Single workflow dispatch that stamps one appliance version across the
 # releasable component repos while pinning independently versioned images such
-# as ct-media-go, ct-traceroute-go, and ct-syslog-ingest-go into the appliance
-# bundle from their own semver release streams.
+# as jtapi-sidecar, ct-media-go, ct-traceroute-go, and ct-syslog-ingest-go
+# into the appliance bundle from their own semver release streams.
 
 on:
   workflow_dispatch:
@@ -28,6 +28,10 @@ on:
         type: string
       syslog_ingest_version:
         description: "ct-syslog-ingest-go version override (leave empty to resolve the latest release)"
+        required: false
+        type: string
+      jtapi_sidecar_version:
+        description: "jtapi-sidecar version override (leave empty to resolve the latest release)"
         required: false
         type: string
       skip_component_releases:
@@ -76,7 +80,7 @@ jobs:
           NOTES="${NOTES}### Build Status"$'\n'
           NOTES="${NOTES}- [ ] cisco-cdr Docker build"$'\n'
           NOTES="${NOTES}- [ ] ct-quasar Docker build"$'\n'
-          NOTES="${NOTES}- [ ] jtapi-sidecar Docker build"$'\n'
+          NOTES="${NOTES}- [ ] jtapi-sidecar image available"$'\n'
           NOTES="${NOTES}- [ ] ct-media-go image available"$'\n'
           NOTES="${NOTES}- [ ] jtapi-operator Docker build"$'\n'
           NOTES="${NOTES}- [ ] ct-traceroute-go image available"$'\n'
@@ -147,11 +151,11 @@ jobs:
 
           echo "prev_version=$PREV" >> "$GITHUB_OUTPUT"
 
-          ALL_REPOS='cisco-cdr ct-quasar jtapi-sidecar jtapi-operator'
+          ALL_REPOS='cisco-cdr ct-quasar jtapi-operator'
 
           if [ "$FORCE" = "true" ] || [ -z "$PREV" ]; then
             echo "Force rebuild all (force=$FORCE, prev=$PREV)"
-            CHANGED_JSON='["cisco-cdr","ct-quasar","jtapi-sidecar","jtapi-operator"]'
+            CHANGED_JSON='["cisco-cdr","ct-quasar","jtapi-operator"]'
             echo "changed_repos=$CHANGED_JSON" >> "$GITHUB_OUTPUT"
             echo "unchanged_repos=[]" >> "$GITHUB_OUTPUT"
 
@@ -250,8 +254,6 @@ jobs:
             image: web
           - repo: ct-quasar
             image: vue
-          - repo: jtapi-sidecar
-            image: jtapi-sidecar
           - repo: jtapi-operator
             image: jtapi-operator
     steps:
@@ -354,14 +356,40 @@ jobs:
           echo "version=$SYSLOG_INGEST_VERSION" >> "$GITHUB_OUTPUT"
           echo "Resolved ct-syslog-ingest-go version: $SYSLOG_INGEST_VERSION"
 
+      - name: Resolve jtapi-sidecar version
+        id: jtapi_sidecar
+        env:
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+        run: |
+          JTAPI_SIDECAR_VERSION="${{ inputs.jtapi_sidecar_version }}"
+          if [ -z "$JTAPI_SIDECAR_VERSION" ]; then
+            JTAPI_SIDECAR_VERSION=$(gh release list \
+              --repo calltelemetry/jtapi-sidecar \
+              --exclude-pre-releases \
+              --limit 1 \
+              --json tagName \
+              --jq '.[0].tagName')
+            # Strip v prefix if present (semver tags use v1.18.x, Docker tags use 1.18.x)
+            JTAPI_SIDECAR_VERSION="${JTAPI_SIDECAR_VERSION#v}"
+          fi
+
+          if [ -z "$JTAPI_SIDECAR_VERSION" ] || [ "$JTAPI_SIDECAR_VERSION" = "null" ]; then
+            echo "[FAIL] Unable to resolve a jtapi-sidecar release tag"
+            exit 1
+          fi
+
+          echo "version=$JTAPI_SIDECAR_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Resolved jtapi-sidecar version: $JTAPI_SIDECAR_VERSION"
+
       - name: Wait for all Docker images on Docker Hub
         run: |
           VERSION="${{ inputs.version }}"
           CT_MEDIA="${{ steps.media.outputs.version }}"
           TRACEROUTE="${{ steps.traceroute.outputs.version }}"
           SYSLOG_INGEST="${{ steps.syslog_ingest.outputs.version }}"
+          JTAPI_SIDECAR="${{ steps.jtapi_sidecar.outputs.version }}"
 
-          IMAGES="web:${VERSION} vue:${VERSION} jtapi-sidecar:${VERSION} jtapi-operator:${VERSION} ct-media-go:${CT_MEDIA} traceroute-go:${TRACEROUTE} ct-syslog-ingest-go:${SYSLOG_INGEST}"
+          IMAGES="web:${VERSION} vue:${VERSION} jtapi-operator:${VERSION} jtapi-sidecar:${JTAPI_SIDECAR} ct-media-go:${CT_MEDIA} traceroute-go:${TRACEROUTE} ct-syslog-ingest-go:${SYSLOG_INGEST}"
           MAX_ATTEMPTS=30  # 30 minutes max
           ATTEMPT=0
 
@@ -407,6 +435,7 @@ jobs:
           CT_MEDIA="${{ steps.media.outputs.version }}"
           TRACEROUTE="${{ steps.traceroute.outputs.version }}"
           SYSLOG_INGEST="${{ steps.syslog_ingest.outputs.version }}"
+          JTAPI_SIDECAR="${{ steps.jtapi_sidecar.outputs.version }}"
 
           echo "### Unified Release: $VERSION" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -416,7 +445,7 @@ jobs:
           echo "|------|-----|--------|" >> $GITHUB_STEP_SUMMARY
           echo "| cisco-cdr | $VERSION | ${{ inputs.target_branch }} |" >> $GITHUB_STEP_SUMMARY
           echo "| ct-quasar | $VERSION | ${{ inputs.target_branch }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| jtapi-sidecar | $VERSION | ${{ inputs.target_branch }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| jtapi-sidecar | $JTAPI_SIDECAR | main |" >> $GITHUB_STEP_SUMMARY
           echo "| ct-media-go | $CT_MEDIA | main |" >> $GITHUB_STEP_SUMMARY
           echo "| jtapi-operator | $VERSION | ${{ inputs.target_branch }} |" >> $GITHUB_STEP_SUMMARY
           echo "| ct-traceroute-go | $TRACEROUTE | main |" >> $GITHUB_STEP_SUMMARY
@@ -433,6 +462,7 @@ jobs:
           CT_MEDIA="${{ steps.media.outputs.version }}"
           TRACEROUTE_VERSION="${{ steps.traceroute.outputs.version }}"
           SYSLOG_INGEST_VERSION="${{ steps.syslog_ingest.outputs.version }}"
+          JTAPI_SIDECAR_VERSION="${{ steps.jtapi_sidecar.outputs.version }}"
 
           # Find the latest existing version file as template
           TEMPLATE=$(ls -1 ova/versions/*.yaml 2>/dev/null | sort -V | tail -1)
@@ -450,6 +480,7 @@ jobs:
           sed -i -E "s|calltelemetry/ct-syslog-ingest:[^\"]*|calltelemetry/ct-syslog-ingest-go:${SYSLOG_INGEST_VERSION}|g" "ova/versions/${VERSION}.yaml"
           sed -i -E "s|calltelemetry/ct-media-go:[^\"]*|calltelemetry/ct-media-go:${CT_MEDIA}|g" "ova/versions/${VERSION}.yaml"
           sed -i -E "s|calltelemetry/ct-media:[^\"]*|calltelemetry/ct-media-go:${CT_MEDIA}|g" "ova/versions/${VERSION}.yaml"
+          sed -i -E "s|calltelemetry/jtapi-sidecar:[^\"]*|calltelemetry/jtapi-sidecar:${JTAPI_SIDECAR_VERSION}|g" "ova/versions/${VERSION}.yaml"
           echo "[OK] Generated ova/versions/${VERSION}.yaml from ${TEMPLATE_VER}"
 
           # Generate .env (version environment variables)
@@ -464,6 +495,7 @@ jobs:
           sed -i -E "s|^TRACEROUTE_VERSION=.*$|TRACEROUTE_VERSION=${TRACEROUTE_VERSION}|g" "ova/versions/${VERSION}.env"
           sed -i -E "s|^CT_MEDIA_VERSION=.*$|CT_MEDIA_VERSION=${CT_MEDIA}|g" "ova/versions/${VERSION}.env"
           sed -i -E "s|^CT_SYSLOG_INGEST_VERSION=.*$|CT_SYSLOG_INGEST_VERSION=${SYSLOG_INGEST_VERSION}|g" "ova/versions/${VERSION}.env"
+          sed -i -E "s|^JTAPI_VERSION=.*$|JTAPI_VERSION=${JTAPI_SIDECAR_VERSION}|g" "ova/versions/${VERSION}.env"
           echo "[OK] Generated ova/versions/${VERSION}.env"
 
           # Commit and push
