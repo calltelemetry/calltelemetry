@@ -511,6 +511,102 @@ fix_systemd_compose_files() {
   fi
 }
 
+# Grafana is already exposed through Caddy at /grafana, so the direct host
+# port binding is redundant and can collide with other software on :3000.
+# Strip that binding from appliance compose files before CLI-managed restarts.
+disable_grafana_host_port_binding() {
+  local compose_file="${1:-$ORIGINAL_FILE}"
+  [ -f "$compose_file" ] || return 0
+
+  if ! grep -q 'grafana/grafana' "$compose_file" 2>/dev/null; then
+    return 0
+  fi
+
+  local tmp_file
+  tmp_file="$(mktemp)"
+
+  awk '
+    function flush_ports() {
+      if (!ports_captured) {
+        return
+      }
+
+      if (port_count > 0) {
+        print ports_header
+        for (i = 1; i <= port_count; i++) {
+          print port_lines[i]
+        }
+      }
+
+      delete port_lines
+      port_count = 0
+      ports_captured = 0
+      ports_header = ""
+    }
+
+    function is_service_boundary(line) {
+      return line ~ /^  [^[:space:]][^:]*:/ && line !~ /^  grafana:[[:space:]]*$/
+    }
+
+    BEGIN {
+      in_grafana = 0
+      ports_captured = 0
+      port_count = 0
+    }
+
+    {
+      if (in_grafana && is_service_boundary($0)) {
+        flush_ports()
+        in_grafana = 0
+      }
+
+      if ($0 ~ /^  grafana:[[:space:]]*$/) {
+        in_grafana = 1
+        print
+        next
+      }
+
+      if (in_grafana) {
+        if (ports_captured) {
+          if ($0 ~ /^      - "?3000:3000"?[[:space:]]*$/ || $0 ~ /^      - "?[$][{]GRAFANA_HOST_PORT:-3000[}]:3000"?[[:space:]]*$/) {
+            next
+          }
+
+          if ($0 ~ /^      - /) {
+            port_lines[++port_count] = $0
+            next
+          }
+
+          flush_ports()
+        }
+
+        if ($0 ~ /^    ports:[[:space:]]*$/) {
+          ports_captured = 1
+          ports_header = $0
+          port_count = 0
+          next
+        }
+      }
+
+      print
+    }
+
+    END {
+      if (in_grafana) {
+        flush_ports()
+      }
+    }
+  ' "$compose_file" > "$tmp_file"
+
+  if cmp -s "$compose_file" "$tmp_file"; then
+    rm -f "$tmp_file"
+    return 0
+  fi
+
+  mv "$tmp_file" "$compose_file"
+  echo "[OK] Removed direct Grafana host port binding; use /grafana via Caddy."
+}
+
 jtapi_cmd() {
   local subcmd="${1:-}"
   shift 2>/dev/null || true
@@ -1433,6 +1529,8 @@ fix_systemd_service_if_needed() {
 restart_service() {
   local context="${1:-}" # optional caller context for log messages
   local service="docker-compose-app.service"
+
+  disable_grafana_host_port_binding
 
   # Ensure bind-mount files exist before Docker starts (prevents directory auto-creation)
   ensure_bind_mount_files
