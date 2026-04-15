@@ -3324,9 +3324,22 @@ update() {
     if command -v node &>/dev/null && [ -n "$npm_bin" ]; then
       [ -f /usr/local/bin/ct ] && sudo rm -f /usr/local/bin/ct
       echo "Updating @calltelemetry/cli..."
-      sudo "$npm_bin" install -g @calltelemetry/cli &>/dev/null && \
-        CT_CLI_VER=$("$npm_bin" list -g --depth=0 @calltelemetry/cli 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1) && \
-        echo "[OK] ct CLI updated to ${CT_CLI_VER:-unknown}" || echo "[WARN] ct CLI update failed (non-critical)"
+      if sudo "$npm_bin" install -g @calltelemetry/cli &>/dev/null; then
+        CT_CLI_VER=$("$npm_bin" list -g --depth=0 @calltelemetry/cli 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+        echo "[OK] ct CLI updated to ${CT_CLI_VER:-unknown}"
+
+        # sudo often uses a restricted secure_path that omits /usr/local/bin.
+        # Keep ct reachable as `sudo ct ...` without changing sudoers policy.
+        if [ -e /usr/local/bin/ct ]; then
+          if sudo ln -sfn /usr/local/bin/ct /usr/bin/ct 2>/dev/null; then
+            echo "[OK] ct CLI linked into sudo path"
+          else
+            echo "[WARN] ct CLI sudo-path link failed (non-critical)"
+          fi
+        fi
+      else
+        echo "[WARN] ct CLI update failed (non-critical)"
+      fi
     fi
 
     # Apply console loglevel fix for existing VMs
