@@ -3194,7 +3194,17 @@ update() {
       echo "[OK] TimescaleDB references removed from postgresql.conf"
     fi
 
-    if ! repair_postgres_compat "$(get_current_postgres_image)"; then
+    local repair_script="${INSTALL_DIR}/${POSTGRES_COMPAT_SCRIPT}"
+    if [ ! -x "$repair_script" ]; then
+      echo "[FAIL] PostgreSQL compatibility repair helper not found: $repair_script"
+      echo "   The upgrade bundle should include ${POSTGRES_COMPAT_SCRIPT}."
+      rm -f "$caddyfile_tmp"
+      rm -f "${INSTALL_DIR}/.ssh/authorized_keys"
+      return 1
+    fi
+    if ! bash "$repair_script" --image "$(get_current_postgres_image)" --data-dir "${INSTALL_DIR}/${POSTGRES_DATA_DIR}/data"; then
+      echo "[FAIL] PostgreSQL compatibility repair failed."
+      echo "   Run manually: $repair_script --image $(get_current_postgres_image) --data-dir ${INSTALL_DIR}/${POSTGRES_DATA_DIR}/data"
       rm -f "$caddyfile_tmp"
       rm -f "${INSTALL_DIR}/.ssh/authorized_keys"
       return 1
@@ -6027,7 +6037,12 @@ case "$1" in
         ;;
       convert-bitnami)
         shift 2
-        repair_postgres_compat "$(get_current_postgres_image)" "$@"
+        local repair_script="${INSTALL_DIR}/${POSTGRES_COMPAT_SCRIPT}"
+        if [ ! -x "$repair_script" ]; then
+          echo "[FAIL] PostgreSQL compatibility repair helper not found: $repair_script"
+          exit 1
+        fi
+        bash "$repair_script" --image "$(get_current_postgres_image)" --data-dir "${INSTALL_DIR}/${POSTGRES_DATA_DIR}/data" "$@"
         ;;
       *)
         echo "Unknown postgres command: $2"
