@@ -3053,9 +3053,11 @@ update() {
       return 1
     fi
 
-    # Check swap compliance: 8GB total, or 50% of RAM if RAM > 16GB
+    # Check swap compliance: minimum 8GB total, or 50% of RAM if RAM > 16GB.
+    # Treat this as a floor, not an exact target, so hosts with zram or
+    # larger existing swap are not resized downward during upgrades.
     local SWAPFILE="/swapfile"
-    local total_ram_gb target_swap_gb non_file_swap_gb swapfile_target_gb current_swapfile_gb
+    local total_ram_gb target_swap_gb non_file_swap_gb swapfile_target_gb current_swapfile_gb current_total_gb
     total_ram_gb=$(( $(grep MemTotal /proc/meminfo | awk '{print $2}') / 1024 / 1024 ))
     if [ "$total_ram_gb" -gt 16 ]; then
       target_swap_gb=$(( total_ram_gb / 2 ))
@@ -3063,22 +3065,29 @@ update() {
       target_swap_gb=8
     fi
     non_file_swap_gb=$(( $(swapon --show=NAME,SIZE --noheadings --bytes 2>/dev/null | grep -v "^${SWAPFILE}" | awk '{sum+=$2} END{printf "%d", sum/1024/1024/1024}') ))
-    swapfile_target_gb=$(( target_swap_gb - non_file_swap_gb ))
-    [ "$swapfile_target_gb" -lt 0 ] && swapfile_target_gb=0
     if [ -f "$SWAPFILE" ]; then
       current_swapfile_gb=$(( $(stat -c%s "$SWAPFILE") / 1024 / 1024 / 1024 ))
     else
       current_swapfile_gb=0
     fi
+
+    current_total_gb=$(( $(free | awk '/^Swap:/{print $2}') / 1024 / 1024 ))
+    if [ "$current_total_gb" -ge "$target_swap_gb" ]; then
+      swapfile_target_gb="$current_swapfile_gb"
+    else
+      swapfile_target_gb=$(( target_swap_gb - non_file_swap_gb ))
+      [ "$swapfile_target_gb" -lt "$current_swapfile_gb" ] && swapfile_target_gb="$current_swapfile_gb"
+      [ "$swapfile_target_gb" -lt 0 ] && swapfile_target_gb=0
+    fi
+
     if [ "$current_swapfile_gb" -eq "$swapfile_target_gb" ]; then
-      echo "[OK] Swap is $(( $(free | awk '/^Swap:/{print $2}') / 1024 / 1024 ))GB (target: ${target_swap_gb}GB)"
+      echo "[OK] Swap is ${current_total_gb}GB (minimum target: ${target_swap_gb}GB, swapfile: ${current_swapfile_gb}GB)"
     else
       # Only stop services when a swap change is actually needed
-      echo "Swap needs resize (current swapfile: ${current_swapfile_gb}GB, target: ${swapfile_target_gb}GB) — stopping services..."
+      echo "Swap is below minimum (${current_total_gb}GB < ${target_swap_gb}GB) — resizing /swapfile from ${current_swapfile_gb}GB to ${swapfile_target_gb}GB..."
+      echo "Stopping services before swap resize..."
       systemctl stop docker-compose-app.service 2>/dev/null || true
-      local current_total_gb
-      current_total_gb=$(( $(free | awk '/^Swap:/{print $2}') / 1024 / 1024 ))
-      echo "Resizing swap: ${current_total_gb}GB → ${target_swap_gb}GB total (RAM: ${total_ram_gb}GB, swapfile: ${swapfile_target_gb}GB)..."
+      echo "Resizing swap: ${current_total_gb}GB → ${target_swap_gb}GB total minimum (RAM: ${total_ram_gb}GB, swapfile: ${swapfile_target_gb}GB)..."
       if swapon --show=NAME --noheadings 2>/dev/null | grep -q "^${SWAPFILE}$"; then
         sudo swapoff "$SWAPFILE"
       fi
