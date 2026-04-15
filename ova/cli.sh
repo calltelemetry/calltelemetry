@@ -294,6 +294,40 @@ get_current_postgres_image() {
   fi
 }
 
+# Repair missing PostgreSQL config files in an existing data directory.
+# This handles upgrades from older layouts where the PG cluster existed but
+# canonical config files were missing from the bind-mounted data directory.
+repair_postgres_compat() {
+  local image="$1"
+  local helper=""
+  local script_dir
+  script_dir="$(cd "$(dirname "$CURRENT_SCRIPT_PATH")" && pwd)"
+
+  for candidate in \
+    "${INSTALL_DIR}/postgres-bitnami-convert.sh" \
+    "${script_dir}/postgres-bitnami-convert.sh" \
+    "${PWD}/postgres-bitnami-convert.sh"; do
+    if [ -f "$candidate" ]; then
+      helper="$candidate"
+      break
+    fi
+  done
+
+  if [ -z "$helper" ]; then
+    echo "[FAIL] PostgreSQL compatibility repair helper not found." >&2
+    echo "       Expected postgres-bitnami-convert.sh in ${INSTALL_DIR} or next to cli.sh." >&2
+    return 1
+  fi
+
+  chmod +x "$helper" 2>/dev/null || true
+
+  if [ -n "$image" ] && [ "$image" != "unknown" ]; then
+    bash "$helper" --image "$image" --data-dir "${INSTALL_DIR}/postgres-data/data"
+  else
+    bash "$helper" --data-dir "${INSTALL_DIR}/postgres-data/data"
+  fi
+}
+
 # JTAPI feature state — now driven by COMPOSE_PROFILES in .env
 JTAPI_STATE_FILE=".jtapi-enabled"
 ENV_FILE="${INSTALL_DIR}/.env"
@@ -2207,6 +2241,13 @@ download_bundle() {
     else
       echo "  [OK] cli.sh (no changes)"
     fi
+  fi
+
+  # postgres compatibility repair helper
+  if [ -f "$extract_dir/postgres-bitnami-convert.sh" ]; then
+    cp "$extract_dir/postgres-bitnami-convert.sh" ./postgres-bitnami-convert.sh
+    chmod +x ./postgres-bitnami-convert.sh
+    echo "  [OK] postgres-bitnami-convert.sh"
   fi
 
   # prometheus/prometheus.yml
@@ -6041,6 +6082,7 @@ case "$1" in
       [ -f "$inner_dir/docker-compose.yml" ] && cp "$inner_dir/docker-compose.yml" ./docker-compose.yml && echo "  - docker-compose.yml"
       [ -f "$inner_dir/Caddyfile" ] && cp "$inner_dir/Caddyfile" ./Caddyfile && echo "  - Caddyfile"
       [ -f "$inner_dir/cli.sh" ] && cp "$inner_dir/cli.sh" ./cli.sh && chmod +x ./cli.sh && echo "  - cli.sh"
+      [ -f "$inner_dir/postgres-bitnami-convert.sh" ] && cp "$inner_dir/postgres-bitnami-convert.sh" ./postgres-bitnami-convert.sh && chmod +x ./postgres-bitnami-convert.sh && echo "  - postgres-bitnami-convert.sh"
       [ -f "$inner_dir/nats.conf" ] && cp "$inner_dir/nats.conf" ./nats.conf && echo "  - nats.conf"
 
       # Install prometheus config if present
