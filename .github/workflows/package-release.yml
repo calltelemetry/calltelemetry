@@ -409,10 +409,11 @@ jobs:
           gsutil cp "$BUNDLE_FILE" "gs://${GCS_BUCKET}/releases/${VERSION}/"
           gsutil cp "${BUNDLE_FILE}.sha256" "gs://${GCS_BUCKET}/releases/${VERSION}/"
 
-          # Upload cli.sh and prep.sh to bucket root (always latest)
+          # Upload cli.sh, cli-dev.sh and prep.sh to bucket root (always latest)
           gsutil cp "ova/cli.sh" "gs://${GCS_BUCKET}/cli.sh"
+          gsutil cp "ova/cli-dev.sh" "gs://${GCS_BUCKET}/cli-dev.sh"
           gsutil cp "ova/prep.sh" "gs://${GCS_BUCKET}/prep.sh"
-          echo "✅ Uploaded cli.sh and prep.sh to bucket root"
+          echo "✅ Uploaded cli.sh, cli-dev.sh and prep.sh to bucket root"
 
           # Upload postgres override files (available for manual `ct config postgres`)
           for pg_file in ova/postgres-*.yaml; do
@@ -429,6 +430,7 @@ jobs:
           echo "✅ Uploaded to GCS:"
           echo "   gs://${GCS_BUCKET}/releases/${VERSION}/${BUNDLE_FILE}"
           echo "   gs://${GCS_BUCKET}/cli.sh"
+          echo "   gs://${GCS_BUCKET}/cli-dev.sh"
           echo "   gs://${GCS_BUCKET}/prep.sh"
           echo ""
           echo "⚠️  To promote this version to latest, run the Promote Release workflow."
@@ -485,9 +487,11 @@ jobs:
             echo "### Download URLs" >> $GITHUB_STEP_SUMMARY
             echo "- Bundle: \`gs://${GCS_BUCKET}/releases/${VERSION}/${BUNDLE_FILE}\`" >> $GITHUB_STEP_SUMMARY
             echo "- CLI: \`gs://${GCS_BUCKET}/cli.sh\`" >> $GITHUB_STEP_SUMMARY
+            echo "- CLI dev: \`gs://${GCS_BUCKET}/cli-dev.sh\`" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "### Public URLs" >> $GITHUB_STEP_SUMMARY
             echo "- Bundle: https://storage.googleapis.com/${GCS_BUCKET}/releases/${VERSION}/${BUNDLE_FILE}" >> $GITHUB_STEP_SUMMARY
             echo "- CLI: https://storage.googleapis.com/${GCS_BUCKET}/cli.sh" >> $GITHUB_STEP_SUMMARY
+            echo "- CLI dev: https://storage.googleapis.com/${GCS_BUCKET}/cli-dev.sh" >> $GITHUB_STEP_SUMMARY
             echo "- Prep: https://storage.googleapis.com/${GCS_BUCKET}/prep.sh" >> $GITHUB_STEP_SUMMARY
           fi
