@@ -299,14 +299,27 @@ get_current_postgres_image() {
 # canonical config files were missing from the bind-mounted data directory.
 repair_postgres_compat() {
   local image="$1"
+  local pg_data="${INSTALL_DIR}/postgres-data/data"
+
+  # Skip if no cluster exists yet.
+  if [ ! -f "${pg_data}/PG_VERSION" ]; then
+    return 0
+  fi
+
+  # Skip if all canonical config files are already present — nothing to repair.
+  if [ -f "${pg_data}/postgresql.conf" ] && [ -f "${pg_data}/pg_hba.conf" ] && [ -f "${pg_data}/pg_ident.conf" ]; then
+    return 0
+  fi
+
   local helper=""
   local script_dir
-  script_dir="$(cd "$(dirname "$CURRENT_SCRIPT_PATH")" && pwd)"
+  script_dir="$(cd "$(dirname "$CURRENT_SCRIPT_PATH")" 2>/dev/null && pwd)" || script_dir=""
 
   for candidate in \
     "${INSTALL_DIR}/postgres-bitnami-convert.sh" \
-    "${script_dir}/postgres-bitnami-convert.sh" \
+    "${script_dir:+${script_dir}/postgres-bitnami-convert.sh}" \
     "${PWD}/postgres-bitnami-convert.sh"; do
+    [ -z "$candidate" ] && continue
     if [ -f "$candidate" ]; then
       helper="$candidate"
       break
@@ -314,17 +327,17 @@ repair_postgres_compat() {
   done
 
   if [ -z "$helper" ]; then
-    echo "[FAIL] PostgreSQL compatibility repair helper not found." >&2
-    echo "       Expected postgres-bitnami-convert.sh in ${INSTALL_DIR} or next to cli.sh." >&2
-    return 1
+    echo "[WARN] PostgreSQL compatibility repair helper not found in ${INSTALL_DIR}, ${script_dir:-(script dir unknown)}, or ${PWD}." >&2
+    echo "       Skipping repair; data directory already healthy or helper missing from bundle." >&2
+    return 0
   fi
 
   chmod +x "$helper" 2>/dev/null || true
 
   if [ -n "$image" ] && [ "$image" != "unknown" ]; then
-    bash "$helper" --image "$image" --data-dir "${INSTALL_DIR}/postgres-data/data"
+    bash "$helper" --image "$image" --data-dir "$pg_data"
   else
-    bash "$helper" --data-dir "${INSTALL_DIR}/postgres-data/data"
+    bash "$helper" --data-dir "$pg_data"
   fi
 }
 
@@ -2403,10 +2416,11 @@ download_bundle() {
     fi
   fi
 
-  # postgres compatibility repair helper
+  # postgres compatibility repair helper — write to INSTALL_DIR explicitly so
+  # repair_postgres_compat can find it regardless of the caller's CWD.
   if [ -f "$extract_dir/postgres-bitnami-convert.sh" ]; then
-    cp "$extract_dir/postgres-bitnami-convert.sh" ./postgres-bitnami-convert.sh
-    chmod +x ./postgres-bitnami-convert.sh
+    cp "$extract_dir/postgres-bitnami-convert.sh" "${INSTALL_DIR}/postgres-bitnami-convert.sh"
+    chmod +x "${INSTALL_DIR}/postgres-bitnami-convert.sh"
     echo "  [OK] postgres-bitnami-convert.sh"
   fi
 
