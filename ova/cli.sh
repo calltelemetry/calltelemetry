@@ -299,14 +299,52 @@ get_current_postgres_image() {
 # canonical config files were missing from the bind-mounted data directory.
 repair_postgres_compat() {
   local image="$1"
+  local pg_data="${INSTALL_DIR}/postgres-data/data"
+
+  # Skip if no cluster exists yet.
+  if [ ! -f "${pg_data}/PG_VERSION" ]; then
+    return 0
+  fi
+
+  # Skip if all canonical config files are already present — nothing to repair.
+  if [ -f "${pg_data}/postgresql.conf" ] && [ -f "${pg_data}/pg_hba.conf" ] && [ -f "${pg_data}/pg_ident.conf" ]; then
+    return 0
+  fi
+
+  # Search INSTALL_DIR, then next to cli.sh. We deliberately do NOT search
+  # PWD: this function may run under sudo/root and executing an arbitrary
+  # helper from a user-controlled CWD is a local-privilege-escalation risk.
+  # download_bundle places the helper in INSTALL_DIR, so the trusted paths
+  # are sufficient under normal operation.
+  #
+  # Resolve CURRENT_SCRIPT_PATH to an absolute path before taking dirname, so
+  # the script_dir fallback works even when cli.sh was invoked via a relative
+  # path or bare name on $PATH.
   local helper=""
-  local script_dir
-  script_dir="$(cd "$(dirname "$CURRENT_SCRIPT_PATH")" && pwd)"
+  local script_dir=""
+  local resolved_script_path=""
+  if [ -n "${CURRENT_SCRIPT_PATH:-}" ]; then
+    if command -v realpath >/dev/null 2>&1; then
+      resolved_script_path="$(realpath "$CURRENT_SCRIPT_PATH" 2>/dev/null)" || resolved_script_path=""
+    elif command -v readlink >/dev/null 2>&1; then
+      resolved_script_path="$(readlink -f "$CURRENT_SCRIPT_PATH" 2>/dev/null)" || resolved_script_path=""
+    fi
+    if [ -z "$resolved_script_path" ]; then
+      case "$CURRENT_SCRIPT_PATH" in
+        /*) resolved_script_path="$CURRENT_SCRIPT_PATH" ;;
+        */*) resolved_script_path="$(cd "$(dirname "$CURRENT_SCRIPT_PATH")" 2>/dev/null && pwd)/$(basename "$CURRENT_SCRIPT_PATH")" || resolved_script_path="" ;;
+        *) resolved_script_path="$(command -v -- "$CURRENT_SCRIPT_PATH" 2>/dev/null)" || resolved_script_path="" ;;
+      esac
+    fi
+    if [ -n "$resolved_script_path" ]; then
+      script_dir="$(cd "$(dirname "$resolved_script_path")" 2>/dev/null && pwd)" || script_dir=""
+    fi
+  fi
 
   for candidate in \
     "${INSTALL_DIR}/postgres-bitnami-convert.sh" \
-    "${script_dir}/postgres-bitnami-convert.sh" \
-    "${PWD}/postgres-bitnami-convert.sh"; do
+    "${script_dir:+${script_dir}/postgres-bitnami-convert.sh}"; do
+    [ -z "$candidate" ] && continue
     if [ -f "$candidate" ]; then
       helper="$candidate"
       break
@@ -314,17 +352,19 @@ repair_postgres_compat() {
   done
 
   if [ -z "$helper" ]; then
-    echo "[FAIL] PostgreSQL compatibility repair helper not found." >&2
-    echo "       Expected postgres-bitnami-convert.sh in ${INSTALL_DIR} or next to cli.sh." >&2
-    return 1
+    echo "[WARN] PostgreSQL compatibility repair helper needed but not found in ${INSTALL_DIR}${script_dir:+ or ${script_dir}}." >&2
+    echo "       Data directory is missing canonical config files (postgresql.conf / pg_hba.conf / pg_ident.conf);" >&2
+    echo "       startup or migrations may fail. Re-run the upgrade with a bundle that includes" >&2
+    echo "       postgres-bitnami-convert.sh, or install it manually into ${INSTALL_DIR} and re-run." >&2
+    return 0
   fi
 
   chmod +x "$helper" 2>/dev/null || true
 
   if [ -n "$image" ] && [ "$image" != "unknown" ]; then
-    bash "$helper" --image "$image" --data-dir "${INSTALL_DIR}/postgres-data/data"
+    bash "$helper" --image "$image" --data-dir "$pg_data"
   else
-    bash "$helper" --data-dir "${INSTALL_DIR}/postgres-data/data"
+    bash "$helper" --data-dir "$pg_data"
   fi
 }
 
@@ -2403,11 +2443,16 @@ download_bundle() {
     fi
   fi
 
-  # postgres compatibility repair helper
+  # postgres compatibility repair helper — write to INSTALL_DIR explicitly so
+  # repair_postgres_compat can find it regardless of the caller's CWD. Surface
+  # cp/chmod failures so we don't claim success on a permissions/disk error.
   if [ -f "$extract_dir/postgres-bitnami-convert.sh" ]; then
-    cp "$extract_dir/postgres-bitnami-convert.sh" ./postgres-bitnami-convert.sh
-    chmod +x ./postgres-bitnami-convert.sh
-    echo "  [OK] postgres-bitnami-convert.sh"
+    local dst="${INSTALL_DIR}/postgres-bitnami-convert.sh"
+    if cp "$extract_dir/postgres-bitnami-convert.sh" "$dst" && chmod +x "$dst"; then
+      echo "  [OK] postgres-bitnami-convert.sh"
+    else
+      echo "  [WARN] postgres-bitnami-convert.sh (failed to install to ${dst} — check permissions and disk space)"
+    fi
   fi
 
   # prometheus/prometheus.yml
