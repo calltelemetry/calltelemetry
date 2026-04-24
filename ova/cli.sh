@@ -2092,6 +2092,7 @@ show_help() {
   echo "  status              Show application status and diagnostics"
   echo "  update              Update to latest stable release (default)"
   echo "  update --latest     Update to latest build (including pre-releases)"
+  echo "  update --rc         Update to latest release candidate (rc channel)"
   echo "  update <version>    Update to specific version (e.g., 0.8.4-rc191)"
   echo "                      Options: --force-upgrade, --no-cleanup, --ipv6"
   echo "  rollback            Roll back to previous docker-compose configuration"
@@ -2926,6 +2927,10 @@ update() {
         version="latest"
         shift
         ;;
+      --rc)
+        version="rc"
+        shift
+        ;;
       *)
         if [ -z "$version" ]; then
           version="$1"
@@ -2958,6 +2963,17 @@ update() {
       return 1
     fi
     echo "Latest version: $version"
+  elif [ "$version" = "rc" ]; then
+    echo "Fetching latest release candidate..."
+    version=$(curl -sfL "${GCS_BASE_URL}/latest-rc.txt" 2>/dev/null)
+    if [ -z "$version" ]; then
+      echo "[FAIL] Failed to fetch latest RC version"
+      echo ""
+      echo "No RC promoted to the rc channel yet."
+      echo "Specify a version manually: cli.sh update <version>"
+      return 1
+    fi
+    echo "Latest RC version: $version"
   fi
 
   # Get current version
