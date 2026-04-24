@@ -2092,6 +2092,7 @@ show_help() {
   echo "  status              Show application status and diagnostics"
   echo "  update              Update to latest stable release (default)"
   echo "  update --latest     Update to latest build (including pre-releases)"
+  echo "  update --rc         Update to latest release candidate (rc channel)"
   echo "  update <version>    Update to specific version (e.g., 0.8.4-rc191)"
   echo "                      Options: --force-upgrade, --no-cleanup, --ipv6"
   echo "  rollback            Roll back to previous docker-compose configuration"
@@ -2926,6 +2927,10 @@ update() {
         version="latest"
         shift
         ;;
+      --rc)
+        version="rc"
+        shift
+        ;;
       *)
         if [ -z "$version" ]; then
           version="$1"
@@ -2939,7 +2944,7 @@ update() {
   # Default (no version) = stable, use --latest for bleeding edge
   if [ -z "$version" ] || [ "$version" = "stable" ]; then
     echo "Fetching latest stable version..."
-    version=$(curl -sfL "${GCS_BASE_URL}/latest-stable.txt" 2>/dev/null)
+    version=$(curl -sfL "${GCS_BASE_URL}/latest-stable.txt" 2>/dev/null | tr -d '[:space:]')
     if [ -z "$version" ]; then
       echo "[FAIL] Failed to fetch latest stable version"
       echo ""
@@ -2950,7 +2955,7 @@ update() {
     echo "Latest stable version: $version"
   elif [ "$version" = "latest" ]; then
     echo "Fetching latest version (including pre-releases)..."
-    version=$(curl -sfL "${GCS_BASE_URL}/latest.txt" 2>/dev/null)
+    version=$(curl -sfL "${GCS_BASE_URL}/latest.txt" 2>/dev/null | tr -d '[:space:]')
     if [ -z "$version" ]; then
       echo "[FAIL] Failed to fetch latest version"
       echo ""
@@ -2958,6 +2963,28 @@ update() {
       return 1
     fi
     echo "Latest version: $version"
+  elif [ "$version" = "rc" ]; then
+    echo "Fetching latest release candidate..."
+    version=$(curl -sfL "${GCS_BASE_URL}/latest-rc.txt" 2>/dev/null | tr -d '[:space:]')
+    if [ -z "$version" ]; then
+      echo "[FAIL] Failed to fetch latest RC version"
+      echo ""
+      echo "No RC promoted to the rc channel yet."
+      echo "Specify a version manually: cli.sh update <version>"
+      return 1
+    fi
+    # Strict format check — latest-rc.txt is a public GCS marker. Reject anything
+    # that isn't a recognized release-candidate tag before using it to build a
+    # download URL. Supports both 3-segment (0.8.6-rc271) and 4-segment
+    # (0.8.6.5-rc1) version schemes.
+    if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?-rc[0-9]+$ ]]; then
+      echo "[FAIL] RC channel contains an invalid version: $version"
+      echo ""
+      echo "Expected format: X.Y.Z-rcN or X.Y.Z.W-rcN (e.g. 0.8.6-rc271 or 0.8.6.5-rc1)."
+      echo "Contact the release team or specify a version manually: cli.sh update <version>"
+      return 1
+    fi
+    echo "Latest RC version: $version"
   fi
 
   # Get current version
