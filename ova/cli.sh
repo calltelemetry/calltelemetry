@@ -2944,7 +2944,7 @@ update() {
   # Default (no version) = stable, use --latest for bleeding edge
   if [ -z "$version" ] || [ "$version" = "stable" ]; then
     echo "Fetching latest stable version..."
-    version=$(curl -sfL "${GCS_BASE_URL}/latest-stable.txt" 2>/dev/null)
+    version=$(curl -sfL "${GCS_BASE_URL}/latest-stable.txt" 2>/dev/null | tr -d '[:space:]')
     if [ -z "$version" ]; then
       echo "[FAIL] Failed to fetch latest stable version"
       echo ""
@@ -2955,7 +2955,7 @@ update() {
     echo "Latest stable version: $version"
   elif [ "$version" = "latest" ]; then
     echo "Fetching latest version (including pre-releases)..."
-    version=$(curl -sfL "${GCS_BASE_URL}/latest.txt" 2>/dev/null)
+    version=$(curl -sfL "${GCS_BASE_URL}/latest.txt" 2>/dev/null | tr -d '[:space:]')
     if [ -z "$version" ]; then
       echo "[FAIL] Failed to fetch latest version"
       echo ""
@@ -2965,12 +2965,19 @@ update() {
     echo "Latest version: $version"
   elif [ "$version" = "rc" ]; then
     echo "Fetching latest release candidate..."
-    version=$(curl -sfL "${GCS_BASE_URL}/latest-rc.txt" 2>/dev/null)
+    version=$(curl -sfL "${GCS_BASE_URL}/latest-rc.txt" 2>/dev/null | tr -d '[:space:]')
     if [ -z "$version" ]; then
       echo "[FAIL] Failed to fetch latest RC version"
       echo ""
       echo "No RC promoted to the rc channel yet."
       echo "Specify a version manually: cli.sh update <version>"
+      return 1
+    fi
+    if [[ "$version" != *-rc* ]]; then
+      echo "[FAIL] RC channel contains a non-RC version: $version"
+      echo ""
+      echo "The rc channel marker does not point to a release candidate."
+      echo "Contact the release team or specify a version manually: cli.sh update <version>"
       return 1
     fi
     echo "Latest RC version: $version"
