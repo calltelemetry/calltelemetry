@@ -2973,10 +2973,14 @@ update() {
       echo "Specify a version manually: cli.sh update <version>"
       return 1
     fi
-    if [[ "$version" != *-rc* ]]; then
-      echo "[FAIL] RC channel contains a non-RC version: $version"
+    # Strict format check — latest-rc.txt is a public GCS marker. Reject anything
+    # that isn't a recognized release-candidate tag before using it to build a
+    # download URL. Supports both 3-segment (0.8.6-rc271) and 4-segment
+    # (0.8.6.5-rc1) version schemes.
+    if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?-rc[0-9]+$ ]]; then
+      echo "[FAIL] RC channel contains an invalid version: $version"
       echo ""
-      echo "The rc channel marker does not point to a release candidate."
+      echo "Expected format: X.Y.Z-rcN or X.Y.Z.W-rcN (e.g. 0.8.6-rc271 or 0.8.6.5-rc1)."
       echo "Contact the release team or specify a version manually: cli.sh update <version>"
       return 1
     fi
