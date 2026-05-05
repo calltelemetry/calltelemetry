@@ -235,6 +235,7 @@ services:
       - S3_SECRET_ACCESS_KEY=${S3_SECRET_ACCESS_KEY:-changeme}
       - S3_REGION=us-east-1
       - CT_MEDIA_ENDPOINT=${CT_MEDIA_ENDPOINT:-}
+      - PDF_RENDERER_URL=${PDF_RENDERER_URL:-http://ct-pdf-renderer:8080}
       - DOCKER_SOCKET=/var/run/docker.sock
       - NATS_URL=nats://nats:4222
       - DB_POOL_SIZE=${DB_POOL_SIZE:-15}
@@ -274,6 +275,40 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+
+  ct-pdf-renderer:
+    image: "calltelemetry/ct-pdf-renderer:${CT_PDF_RENDERER_VERSION:-latest}"
+    restart: unless-stopped
+    mem_limit: ${CT_PDF_RENDERER_MEM_LIMIT:-768m}
+    cpus: ${CT_PDF_RENDERER_CPU_LIMIT:-1.0}
+    expose:
+      - "50054"
+      - "8080"
+    environment:
+      - GRPC_PORT=50054
+      - HTTP_PORT=8080
+      - MAX_CONCURRENCY=${CT_PDF_RENDERER_MAX_CONCURRENCY:-2}
+      - RENDER_TIMEOUT=${CT_PDF_RENDERER_TIMEOUT:-45s}
+      - NATS_URL=nats://nats:4222
+      - OTEL_ENABLED=${OTEL_ENABLED:-false}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
+      - OTEL_SERVICE_NAME=ct-pdf-renderer
+    networks:
+      - ct
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/ct-pdf-renderer", "--health-check"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    depends_on:
+      nats:
+        condition: service_healthy
 
   nats:
     image: "nats:2.11-alpine"

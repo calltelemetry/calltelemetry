@@ -22,6 +22,10 @@ on:
         description: "ct-media-go version override (leave empty to resolve the latest release)"
         required: false
         type: string
+      ct_pdf_renderer_version:
+        description: "ct-pdf-renderer version override (leave empty to resolve the latest release)"
+        required: false
+        type: string
       traceroute_version:
         description: "ct-traceroute-go version override (leave empty to resolve the latest release)"
         required: false
@@ -82,6 +86,7 @@ jobs:
           NOTES="${NOTES}- [ ] ct-quasar Docker build"$'\n'
           NOTES="${NOTES}- [ ] jtapi-sidecar image available"$'\n'
           NOTES="${NOTES}- [ ] ct-media-go image available"$'\n'
+          NOTES="${NOTES}- [ ] ct-pdf-renderer image available"$'\n'
           NOTES="${NOTES}- [ ] jtapi-operator Docker build"$'\n'
           NOTES="${NOTES}- [ ] ct-traceroute-go image available"$'\n'
           NOTES="${NOTES}- [ ] ct-syslog-ingest-go image available"$'\n'
@@ -334,6 +339,28 @@ jobs:
           echo "version=$CT_MEDIA_VERSION" >> "$GITHUB_OUTPUT"
           echo "Resolved ct-media-go version: $CT_MEDIA_VERSION"
 
+      - name: Resolve ct-pdf-renderer version
+        id: pdf_renderer
+        env:
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+        run: |
+          CT_PDF_RENDERER_VERSION="${{ inputs.ct_pdf_renderer_version }}"
+          if [ -z "$CT_PDF_RENDERER_VERSION" ]; then
+            CT_PDF_RENDERER_VERSION=$(gh release list \
+              --repo calltelemetry/ct-pdf-renderer \
+              --limit 1 \
+              --json tagName \
+              --jq '.[0].tagName')
+          fi
+
+          if [ -z "$CT_PDF_RENDERER_VERSION" ] || [ "$CT_PDF_RENDERER_VERSION" = "null" ]; then
+            echo "[FAIL] Unable to resolve a ct-pdf-renderer release tag"
+            exit 1
+          fi
+
+          echo "version=$CT_PDF_RENDERER_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Resolved ct-pdf-renderer version: $CT_PDF_RENDERER_VERSION"
+
       - name: Resolve ct-syslog-ingest-go version
         id: syslog_ingest
         env:
@@ -385,11 +412,12 @@ jobs:
         run: |
           VERSION="${{ inputs.version }}"
           CT_MEDIA="${{ steps.media.outputs.version }}"
+          CT_PDF_RENDERER="${{ steps.pdf_renderer.outputs.version }}"
           TRACEROUTE="${{ steps.traceroute.outputs.version }}"
           SYSLOG_INGEST="${{ steps.syslog_ingest.outputs.version }}"
           JTAPI_SIDECAR="${{ steps.jtapi_sidecar.outputs.version }}"
 
-          IMAGES="web:${VERSION} vue:${VERSION} jtapi-operator:${VERSION} jtapi-sidecar:${JTAPI_SIDECAR} ct-media-go:${CT_MEDIA} traceroute-go:${TRACEROUTE} ct-syslog-ingest-go:${SYSLOG_INGEST}"
+          IMAGES="web:${VERSION} vue:${VERSION} jtapi-operator:${VERSION} jtapi-sidecar:${JTAPI_SIDECAR} ct-media-go:${CT_MEDIA} ct-pdf-renderer:${CT_PDF_RENDERER} traceroute-go:${TRACEROUTE} ct-syslog-ingest-go:${SYSLOG_INGEST}"
           MAX_ATTEMPTS=30  # 30 minutes max
           ATTEMPT=0
 
@@ -433,6 +461,7 @@ jobs:
         run: |
           VERSION="${{ inputs.version }}"
           CT_MEDIA="${{ steps.media.outputs.version }}"
+          CT_PDF_RENDERER="${{ steps.pdf_renderer.outputs.version }}"
           TRACEROUTE="${{ steps.traceroute.outputs.version }}"
           SYSLOG_INGEST="${{ steps.syslog_ingest.outputs.version }}"
           JTAPI_SIDECAR="${{ steps.jtapi_sidecar.outputs.version }}"
@@ -447,6 +476,7 @@ jobs:
           echo "| ct-quasar | $VERSION | ${{ inputs.target_branch }} |" >> $GITHUB_STEP_SUMMARY
           echo "| jtapi-sidecar | $JTAPI_SIDECAR | main |" >> $GITHUB_STEP_SUMMARY
           echo "| ct-media-go | $CT_MEDIA | main |" >> $GITHUB_STEP_SUMMARY
+          echo "| ct-pdf-renderer | $CT_PDF_RENDERER | main |" >> $GITHUB_STEP_SUMMARY
           echo "| jtapi-operator | $VERSION | ${{ inputs.target_branch }} |" >> $GITHUB_STEP_SUMMARY
           echo "| ct-traceroute-go | $TRACEROUTE | main |" >> $GITHUB_STEP_SUMMARY
           echo "| ct-syslog-ingest-go | $SYSLOG_INGEST | main |" >> $GITHUB_STEP_SUMMARY
@@ -460,6 +490,7 @@ jobs:
         run: |
           VERSION="${{ inputs.version }}"
           CT_MEDIA="${{ steps.media.outputs.version }}"
+          CT_PDF_RENDERER="${{ steps.pdf_renderer.outputs.version }}"
           TRACEROUTE_VERSION="${{ steps.traceroute.outputs.version }}"
           SYSLOG_INGEST_VERSION="${{ steps.syslog_ingest.outputs.version }}"
           JTAPI_SIDECAR_VERSION="${{ steps.jtapi_sidecar.outputs.version }}"
@@ -480,6 +511,7 @@ jobs:
           sed -i -E "s|calltelemetry/ct-syslog-ingest:[^\"]*|calltelemetry/ct-syslog-ingest-go:${SYSLOG_INGEST_VERSION}|g" "ova/versions/${VERSION}.yaml"
           sed -i -E "s|calltelemetry/ct-media-go:[^\"]*|calltelemetry/ct-media-go:${CT_MEDIA}|g" "ova/versions/${VERSION}.yaml"
           sed -i -E "s|calltelemetry/ct-media:[^\"]*|calltelemetry/ct-media-go:${CT_MEDIA}|g" "ova/versions/${VERSION}.yaml"
+          sed -i -E "s|calltelemetry/ct-pdf-renderer:[^\"]*|calltelemetry/ct-pdf-renderer:${CT_PDF_RENDERER}|g" "ova/versions/${VERSION}.yaml"
           sed -i -E "s|calltelemetry/jtapi-sidecar:[^\"]*|calltelemetry/jtapi-sidecar:${JTAPI_SIDECAR_VERSION}|g" "ova/versions/${VERSION}.yaml"
           echo "[OK] Generated ova/versions/${VERSION}.yaml from ${TEMPLATE_VER}"
 
@@ -494,6 +526,11 @@ jobs:
           sed "s/${TEMPLATE_ENV_VER}/${VERSION}/g" "$TEMPLATE_ENV" > "ova/versions/${VERSION}.env"
           sed -i -E "s|^TRACEROUTE_VERSION=.*$|TRACEROUTE_VERSION=${TRACEROUTE_VERSION}|g" "ova/versions/${VERSION}.env"
           sed -i -E "s|^CT_MEDIA_VERSION=.*$|CT_MEDIA_VERSION=${CT_MEDIA}|g" "ova/versions/${VERSION}.env"
+          if grep -q '^CT_PDF_RENDERER_VERSION=' "ova/versions/${VERSION}.env"; then
+            sed -i -E "s|^CT_PDF_RENDERER_VERSION=.*$|CT_PDF_RENDERER_VERSION=${CT_PDF_RENDERER}|g" "ova/versions/${VERSION}.env"
+          else
+            echo "CT_PDF_RENDERER_VERSION=${CT_PDF_RENDERER}" >> "ova/versions/${VERSION}.env"
+          fi
           sed -i -E "s|^CT_SYSLOG_INGEST_VERSION=.*$|CT_SYSLOG_INGEST_VERSION=${SYSLOG_INGEST_VERSION}|g" "ova/versions/${VERSION}.env"
           sed -i -E "s|^JTAPI_VERSION=.*$|JTAPI_VERSION=${JTAPI_SIDECAR_VERSION}|g" "ova/versions/${VERSION}.env"
           echo "[OK] Generated ova/versions/${VERSION}.env"

@@ -314,6 +314,16 @@ jobs:
             exit 1
           fi
 
+          if ! grep -q '^  ct-pdf-renderer:' "$BUNDLE_DIR/docker-compose.yml"; then
+            echo "❌ ERROR: Bundled docker-compose.yml no longer defines service 'ct-pdf-renderer'"
+            exit 1
+          fi
+
+          if ! grep -q 'calltelemetry/ct-pdf-renderer:' "$BUNDLE_DIR/docker-compose.yml"; then
+            echo "❌ ERROR: Bundled docker-compose.yml does not reference calltelemetry/ct-pdf-renderer"
+            exit 1
+          fi
+
           if grep -q 'calltelemetry/ct-media:' "$BUNDLE_DIR/docker-compose.yml"; then
             echo "❌ ERROR: Bundled docker-compose.yml still references legacy calltelemetry/ct-media"
             exit 1
@@ -326,6 +336,11 @@ jobs:
 
           if ! grep -q '^CT_MEDIA_VERSION=' "$BUNDLE_DIR/.env"; then
             echo "❌ ERROR: Bundled .env does not contain CT_MEDIA_VERSION"
+            exit 1
+          fi
+
+          if ! grep -q '^CT_PDF_RENDERER_VERSION=' "$BUNDLE_DIR/.env"; then
+            echo "❌ ERROR: Bundled .env does not contain CT_PDF_RENDERER_VERSION"
             exit 1
           fi
 
