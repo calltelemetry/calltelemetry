@@ -235,7 +235,8 @@ services:
       - S3_SECRET_ACCESS_KEY=${S3_SECRET_ACCESS_KEY:-changeme}
       - S3_REGION=us-east-1
       - CT_MEDIA_ENDPOINT=${CT_MEDIA_ENDPOINT:-}
-      - PDF_RENDERER_URL=${PDF_RENDERER_URL:-http://ct-pdf-renderer:8080}
+      - PDF_RENDERER_GRPC_ENDPOINT=${PDF_RENDERER_GRPC_ENDPOINT:-ct-pdf-renderer:50054}
+      - PDF_RENDERER_TIMEOUT_MS=${PDF_RENDERER_TIMEOUT_MS:-60000}
       - DOCKER_SOCKET=/var/run/docker.sock
       - NATS_URL=nats://nats:4222
       - DB_POOL_SIZE=${DB_POOL_SIZE:-15}
@@ -275,9 +276,12 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+    depends_on:
+      ct-pdf-renderer:
+        condition: service_healthy
 
   ct-pdf-renderer:
-    image: "calltelemetry/ct-pdf-renderer:${CT_PDF_RENDERER_VERSION:-latest}"
+    image: "calltelemetry/ct-pdf-renderer:${CT_PDF_RENDERER_VERSION}"
     restart: unless-stopped
     mem_limit: ${CT_PDF_RENDERER_MEM_LIMIT:-768m}
     cpus: ${CT_PDF_RENDERER_CPU_LIMIT:-1.0}
@@ -493,7 +497,7 @@ services:
   # ─────────────────────────────────────────────────────────────────
 
   ct-syslog-ingest:
-    image: calltelemetry/ct-syslog-ingest-go:${CT_SYSLOG_INGEST_VERSION:-latest}
+    image: calltelemetry/ct-syslog-ingest-go:${CT_SYSLOG_INGEST_VERSION}
     restart: unless-stopped
     user: "1000:1000"
     read_only: true
