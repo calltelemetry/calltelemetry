@@ -95,8 +95,12 @@ EOF
 
 sudo systemctl daemon-reload
 
-# Enable and Start Docker
-sudo systemctl enable --now docker
+# Enable and Start Docker. Suppress routine systemd symlink messages; failures
+# still surface through the explicit error below.
+if ! sudo systemctl enable --now docker >/dev/null 2>&1; then
+  echo "ERROR: Failed to enable and start Docker." >&2
+  exit 1
+fi
 
 # Ensure install user has docker access
 sudo usermod -aG docker "$INSTALL_USER"
@@ -218,8 +222,14 @@ sudo tee /etc/logrotate.d/docker > /dev/null <<EOF
 }
 EOF
 
-sudo systemctl enable docker.service --now
-sudo systemctl enable docker-compose-app
+if ! sudo systemctl enable docker.service --now >/dev/null 2>&1; then
+  echo "ERROR: Failed to enable and start Docker." >&2
+  exit 1
+fi
+if ! sudo systemctl enable docker-compose-app >/dev/null 2>&1; then
+  echo "ERROR: Failed to enable docker-compose-app service." >&2
+  exit 1
+fi
 
 # Setup a Backup Job
 echo "0 0 * * * $INSTALL_USER $INSTALL_DIR/backup.sh" | sudo tee -a /etc/crontab > /dev/null
@@ -249,25 +259,44 @@ fi
 sudo chmod +x "$INSTALL_DIR/backup.sh"
 sudo chown "$INSTALL_USER" "$INSTALL_DIR/backup.sh"
 
-# Install Node.js 22 LTS (required for @calltelemetry MCP servers)
-REQUIRED_NODE_MAJOR=22
-CURRENT_NODE_MAJOR=$(node --version 2>/dev/null | sed 's/v\([0-9]*\).*/\1/')
-CURRENT_NODE_MAJOR="${CURRENT_NODE_MAJOR:-0}"
+update_cli_tools() {
+  local log_file xtrace_was_on
+  log_file=$(mktemp)
+  xtrace_was_on=0
+  case "$-" in
+    *x*) xtrace_was_on=1; set +x ;;
+  esac
 
-if [ "${CURRENT_NODE_MAJOR}" -lt "${REQUIRED_NODE_MAJOR}" ] 2>/dev/null; then
-  echo "Installing Node.js ${REQUIRED_NODE_MAJOR} LTS..."
-  sudo dnf remove -y nodejs npm 2>/dev/null || true
-  curl -fsSL https://rpm.nodesource.com/setup_${REQUIRED_NODE_MAJOR}.x | sudo bash -
-  sudo dnf install -y nodejs
-  echo "Node.js $(/usr/bin/node --version) installed."
-else
-  echo "Node.js v${CURRENT_NODE_MAJOR} already meets minimum (>=${REQUIRED_NODE_MAJOR})"
-fi
+  printf 'Updating CLI Tools...'
+  if (
+    REQUIRED_NODE_MAJOR=22
+    CURRENT_NODE_MAJOR=$(node --version 2>/dev/null | sed 's/v\([0-9]*\).*/\1/')
+    CURRENT_NODE_MAJOR="${CURRENT_NODE_MAJOR:-0}"
 
-# Install ct-cli (CallTelemetry CLI) globally
-echo "Installing @calltelemetry/cli..."
-sudo /usr/bin/npm install -g @calltelemetry/cli
-echo "ct-cli $(ct --version 2>/dev/null || echo 'installed') ready."
+    if [ "${CURRENT_NODE_MAJOR}" -lt "${REQUIRED_NODE_MAJOR}" ] 2>/dev/null; then
+      sudo dnf remove -y nodejs npm 2>/dev/null || true
+      curl -fsSL "https://rpm.nodesource.com/setup_${REQUIRED_NODE_MAJOR}.x" | sudo bash -
+      sudo dnf install -y nodejs
+    fi
+
+    sudo /usr/bin/npm install -g @calltelemetry/cli
+    node --version >/dev/null
+    ct --version >/dev/null 2>&1 || true
+  ) >"$log_file" 2>&1; then
+    printf ' done\n'
+  else
+    printf ' failed\n'
+    sed 's/^/  /' "$log_file" >&2
+    rm -f "$log_file"
+    [ "$xtrace_was_on" -eq 1 ] && set -x
+    return 1
+  fi
+
+  rm -f "$log_file"
+  [ "$xtrace_was_on" -eq 1 ] && set -x
+}
+
+update_cli_tools
 
 # Install k9s Kubernetes TUI
 if ! command -v k9s &> /dev/null; then
