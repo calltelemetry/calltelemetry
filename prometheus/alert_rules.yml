@@ -275,3 +275,48 @@ groups:
         annotations:
           summary: 'Over half of monitored tables are stale ({{ $value }}) for org {{ $labels.org_id }}'
           description: 'More than 50% of tables have not been purged in 48 hours. Purge system may be completely broken.'
+
+  - name: beam_port_health
+    interval: 30s
+    rules:
+      # BEAM port saturation — warn when > 60% of ports are in use.
+      # Ports (Erlang port handles) cover TCP sockets, file descriptors, and pipes.
+      # Exhaustion causes silent connection failures without clear log errors.
+      # Note: ct_beam_port_usage_ratio is (port_count / port_limit) where
+      # port_limit is the BEAM-configured cap (+Q in vm.args), NOT the OS ulimit.
+      # If ulimit < port_limit, FDs may exhaust before the BEAM limit is reached.
+      # See API-1580 for ulimit configuration and API-1583 for metric details.
+      - alert: BeamPortSaturation
+        expr: ct_beam_port_usage_ratio > 0.60
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'BEAM port usage above 60% ({{ $value | humanizePercentage }})'
+          description: >-
+            The Erlang runtime is using more than 60% of its allowed port
+            (file descriptor) budget. Current ratio: {{ $value | humanizePercentage }}.
+            At 100% the node can no longer open new TCP connections, file
+            handles, or NATS subscriptions — resulting in silent failures.
+            Investigate using :observer.start() or check for descriptor leaks
+            in phone scraping, NATS, or DB connection pools.
+          generator_url: '/grafana/d/ct-system-resources/system-resources?viewPanel=6&from=now-1h&to=now'
+
+      # Critical threshold — BEAM port near-exhaustion (> 90%)
+      - alert: BeamPortNearExhaustion
+        expr: ct_beam_port_usage_ratio > 0.90
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'BEAM port usage critical ({{ $value | humanizePercentage }})'
+          description: >-
+            The Erlang runtime is using more than 90% of its allowed port
+            (file descriptor) budget. Current ratio: {{ $value | humanizePercentage }}.
+            New connections WILL fail imminently. Restart the application
+            container or raise the port limit via +Q in rel/remote.vm.args.eex
+            (e.g. +Q 65536) or ERL_MAX_PORTS env var. Also verify ulimits:
+            the compose service needs ulimits.nofile >= the +Q value
+            (see API-1580). Do NOT use +P — that sets the process limit,
+            not the port limit.
+          generator_url: '/grafana/d/ct-system-resources/system-resources?viewPanel=6&from=now-1h&to=now'
