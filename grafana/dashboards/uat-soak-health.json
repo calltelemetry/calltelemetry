@@ -1,0 +1,239 @@
+{
+  "title": "CallTelemetry — UAT Soak Health",
+  "uid": "ct-uat-soak-health",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "timezone": "browser",
+  "tags": ["uat", "soak", "sql", "oban", "rollup", "calltelemetry"],
+  "description": "Live soak gates — rollup_xcc fetchable depth, pool/SQL pressure, CDR ingest, XCC loss. Pairs with ct-meta uat-soak-metrics skill.",
+  "panels": [
+    {
+      "type": "row",
+      "title": "🎯 Soak gate summary",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false
+    },
+    {
+      "type": "stat",
+      "title": "rollup_xcc fetchable depth",
+      "description": "PressureGate fetchable jobs (NOT naive scheduled). Gate: p95 ≤ 20 during soak; ≤8 is healthy.",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
+      "options": { "colorMode": "background", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 9 },
+              { "color": "red", "value": 21 }
+            ]
+          }
+        }
+      },
+      "targets": [{ "expr": "ct_analytical_lane_backlog_depth{lane=\"rollup_xcc\"}", "legendFormat": "fetchable" }],
+      "datasource": "Prometheus"
+    },
+    {
+      "type": "stat",
+      "title": "rollup_xcc oldest fetchable (s)",
+      "description": "Age of oldest runnable rollup_xcc job. Gate: <600s healthy; >3600s sustained is a problem.",
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 1 },
+      "options": { "colorMode": "background", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 600 },
+              { "color": "red", "value": 3600 }
+            ]
+          }
+        }
+      },
+      "targets": [{ "expr": "ct_analytical_lane_backlog_seconds{lane=\"rollup_xcc\"}", "legendFormat": "oldest" }],
+      "datasource": "Prometheus"
+    },
+    {
+      "type": "stat",
+      "title": "Pool saturation",
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 1 },
+      "options": { "colorMode": "background", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.7 },
+              { "color": "red", "value": 0.9 }
+            ]
+          }
+        }
+      },
+      "targets": [{ "expr": "ct_pg_pool_saturation_ratio", "legendFormat": "pool_sat" }],
+      "datasource": "Prometheus"
+    },
+    {
+      "type": "stat",
+      "title": "Cache hit %",
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 1 },
+      "options": { "colorMode": "background", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 95 },
+              { "color": "green", "value": 98 }
+            ]
+          }
+        }
+      },
+      "targets": [{ "expr": "ct_pg_cache_hit_ratio", "legendFormat": "cache_hit" }],
+      "datasource": "Prometheus"
+    },
+    {
+      "type": "stat",
+      "title": "CPU iowait (5m avg)",
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 1 },
+      "options": { "colorMode": "background", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.35 },
+              { "color": "red", "value": 0.55 }
+            ]
+          }
+        }
+      },
+      "targets": [{ "expr": "avg(rate(node_cpu_seconds_total{mode=\"iowait\"}[5m]))", "legendFormat": "iowait" }],
+      "datasource": "Prometheus"
+    },
+    {
+      "type": "stat",
+      "title": "CDR ingest lag (s)",
+      "description": "Informational on XCC-only soak; gate only when SFTP load expected.",
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 1 },
+      "options": { "colorMode": "background", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 300 },
+              { "color": "red", "value": 900 }
+            ]
+          }
+        }
+      },
+      "targets": [{ "expr": "max(ct_cdr_ingestion_lag_seconds)", "legendFormat": "lag" }],
+      "datasource": "Prometheus"
+    },
+    {
+      "type": "row",
+      "title": "📊 Rollup lanes & Oban",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
+      "collapsed": false
+    },
+    {
+      "type": "timeseries",
+      "title": "Analytical lane fetchable depth",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "targets": [
+        { "expr": "ct_analytical_lane_backlog_depth", "legendFormat": "{{ lane }}" }
+      ],
+      "datasource": "Prometheus"
+    },
+    {
+      "type": "timeseries",
+      "title": "PressureGate deferrals (5m rate)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "targets": [
+        { "expr": "sum by (lane, reason) (rate(ct_analytical_job_pressure_defer_total[5m]))", "legendFormat": "{{ lane }} / {{ reason }}" }
+      ],
+      "datasource": "Prometheus"
+    },
+    {
+      "type": "timeseries",
+      "title": "Rollup queue depths (available / retryable)",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 14 },
+      "targets": [
+        { "expr": "pg_oban_queue_depth_count{queue=~\"rollup.*\", state=\"available\"}", "legendFormat": "{{ queue }} available" },
+        { "expr": "pg_oban_queue_depth_count{queue=~\"rollup.*\", state=\"retryable\"}", "legendFormat": "{{ queue }} retryable" },
+        { "expr": "pg_oban_queue_depth_count{queue=~\"rollup.*\", state=\"cancelled\"}", "legendFormat": "{{ queue }} cancelled (optical)" }
+      ],
+      "datasource": "Prometheus"
+    },
+    {
+      "type": "row",
+      "title": "🐘 SQL / connection pool",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 22 },
+      "collapsed": false
+    },
+    {
+      "type": "timeseries",
+      "title": "PostgreSQL connections",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 23 },
+      "targets": [
+        { "expr": "ct_pg_connections_active", "legendFormat": "active" },
+        { "expr": "ct_pg_connections_waiting", "legendFormat": "waiting" },
+        { "expr": "pg_idle_in_transaction_connections_count", "legendFormat": "idle_in_txn" }
+      ],
+      "datasource": "Prometheus"
+    },
+    {
+      "type": "timeseries",
+      "title": "WAL sync latency & blocked queries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 23 },
+      "fieldConfig": { "defaults": { "unit": "ms" } },
+      "targets": [
+        { "expr": "ct_pg_wal_sync_latency_ms_5m", "legendFormat": "wal_sync_5m" },
+        { "expr": "pg_blocked_queries", "legendFormat": "blocked" },
+        { "expr": "pg_long_running_queries", "legendFormat": "long_running" }
+      ],
+      "datasource": "Prometheus"
+    },
+    {
+      "type": "row",
+      "title": "📡 CDR / XCC / API",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 31 },
+      "collapsed": false
+    },
+    {
+      "type": "timeseries",
+      "title": "CDR pipeline",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 32 },
+      "targets": [
+        { "expr": "max(ct_cdr_ingestion_lag_seconds)", "legendFormat": "ingest_lag_s" },
+        { "expr": "sum(rate(ct_cdr_files_ingested_total[5m]))", "legendFormat": "files/s" }
+      ],
+      "datasource": "Prometheus"
+    },
+    {
+      "type": "timeseries",
+      "title": "XCC loss & API p95",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 32 },
+      "fieldConfig": { "defaults": { "unit": "ms" } },
+      "targets": [
+        { "expr": "sum(ct_cube_telemetry_loss_window_total)", "legendFormat": "cube_loss" },
+        { "expr": "sum(increase(ct_xcc_dashboard_read_degraded_total[5m]))", "legendFormat": "xcc_degraded_5m" },
+        { "expr": "histogram_quantile(0.95, sum(rate(prom_ex_phoenix_http_request_duration_milliseconds_bucket[5m])) by (le))", "legendFormat": "phoenix_p95_ms" }
+      ],
+      "datasource": "Prometheus"
+    }
+  ]
+}
