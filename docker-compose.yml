@@ -222,6 +222,7 @@ services:
       - ERL_FLAGS=+A 64 +zdbbl 8192 +sbwt none +sbwtdcpu none +sbwtdio none
       - ERL_FULLSWEEP_AFTER=1000
       - PROM_EX_UPLOAD_DASHBOARDS=${PROM_EX_UPLOAD_DASHBOARDS:-true}
+      - DASHBOARD_ROLLUPS_ENGINE=${DASHBOARD_ROLLUPS_ENGINE:-handrolled}
       - GRAFANA_HOST=${GRAFANA_HOST_INTERNAL:-http://grafana:3000}
       - GRAFANA_TOKEN=${GRAFANA_TOKEN:-secret-token}
       - GRAFANA_PASSWORD=${GRAFANA_PASSWORD}
