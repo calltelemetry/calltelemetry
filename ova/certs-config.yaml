@@ -1,4 +1,0 @@
-tls:
-  certificates:
-    - certFile: "/certs/appliance.crt"
-      keyFile: "/certs/appliance_key.pem"
