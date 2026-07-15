@@ -132,65 +132,6 @@ services:
       retries: 5
       start_period: 30s
 
-
-  node-exporter:
-    profiles: ["otel"]
-    image: prom/node-exporter:v1.8.2
-    restart: unless-stopped
-    mem_limit: 128m
-    pid: host
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-    command:
-      - --path.rootfs=/host
-      - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)
-      - --collector.filesystem.fs-types-exclude=^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|iso9660|mqueue|nsfs|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tracefs)$$
-    volumes:
-      - /:/host:ro,rslave
-    ports:
-      - "9100:9100"
-    networks:
-      - ct
-
-  postgres-exporter:
-    profiles: ["otel"]
-    image: prometheuscommunity/postgres-exporter:v0.18.1
-    mem_limit: 256m
-    environment:
-      DATA_SOURCE_NAME: "postgresql://${POSTGRES_USER:-calltelemetry}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-calltelemetry_prod}?sslmode=disable&application_name=postgres_exporter"
-      PG_EXPORTER_AUTO_DISCOVER_DATABASES: "false"
-      PG_EXPORTER_COLLECTION_TIMEOUT: "5s"
-    command:
-      - --disable-settings-metrics
-      - --no-collector.stat_user_tables
-      - --no-collector.statio_user_tables
-      - --no-collector.statio_user_indexes
-      - --extend.query-path=/etc/postgres_exporter/queries.yaml
-    volumes:
-      - ./prometheus/postgres-queries.yaml:/etc/postgres_exporter/queries.yaml:ro
-    ports:
-      - "9187:9187"
-    depends_on:
-      db:
-        condition: service_healthy
-    restart: unless-stopped
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-    networks:
-      - ct
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:9187/metrics"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 15s
-
   web:
     image: "calltelemetry/web:${WEB_VERSION}"
     restart: "always"
@@ -260,9 +201,6 @@ services:
       # Persistent org-scoped media storage (JTAPI audio, recordings, etc)
       - ./org-data:/data:rw
       - /var/run/docker.sock:/var/run/docker.sock
-      # Shared alert rules files — API writes thresholds, Prometheus reads them
-      - ./prometheus/alert_rules.yml:/etc/prometheus/alert_rules.yml:rw
-      - ./prometheus/custom_rules.yml:/etc/prometheus/custom_rules.yml:rw
     logging:
       driver: "json-file"
       options:
@@ -298,165 +236,6 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
-
-  nats-exporter:
-    profiles: ["otel"]
-    image: "natsio/prometheus-nats-exporter:0.19.1"
-    restart: "always"
-    mem_limit: 128m
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-    command:
-      - "-varz"
-      - "-jsz=all"
-      - "-connz"
-      - "-routez"
-      - "-subz"
-      - "http://nats:8222"
-    expose:
-      - "7777"
-    networks:
-      - ct
-    depends_on:
-      nats:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:7777/metrics"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-
-  prometheus:
-    profiles: ["otel"]
-    image: prom/prometheus:v2.52.0
-    restart: "always"
-    user: root
-    mem_limit: 512m
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "25m"
-        max-file: "3"
-    ports:
-      - "9090:9090"
-    command:
-      - --config.file=/etc/prometheus/prometheus.yml
-      - --storage.tsdb.path=/prometheus
-      - --storage.tsdb.retention.time=15d
-      - --web.console.libraries=/usr/share/prometheus/console_libraries
-      - --web.console.templates=/usr/share/prometheus/consoles
-      - --web.enable-lifecycle
-      - --web.enable-admin-api
-      - --web.enable-remote-write-receiver
-    volumes:
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - ./prometheus/alert_rules.yml:/etc/prometheus/alert_rules.yml:rw
-      - ./prometheus/custom_rules.yml:/etc/prometheus/custom_rules.yml:ro
-      - prometheus-data:/prometheus
-    networks:
-      - ct
-
-  alertmanager:
-    profiles: ["otel"]
-    image: prom/alertmanager:v0.28.1
-    restart: "always"
-    mem_limit: 128m
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-    ports:
-      - "9093:9093"
-    command:
-      - --config.file=/etc/alertmanager/alertmanager.yml
-      - --storage.path=/alertmanager
-      - --web.route-prefix=/alertmanager
-      - --web.external-url=${ALERTMANAGER_EXTERNAL_URL:-http://localhost/alertmanager}
-    volumes:
-      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
-      - alertmanager-data:/alertmanager
-    networks:
-      - ct
-
-  grafana:
-    profiles: ["otel"]
-    image: grafana/grafana:12.2.1
-    restart: "always"
-    user: "472"
-    mem_limit: 256m
-    depends_on:
-      - prometheus
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "25m"
-        max-file: "3"
-    environment:
-      - GF_SECURITY_ADMIN_USER=${GF_SECURITY_ADMIN_USER:-admin}
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
-      - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
-      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/calltelemetry-overview.json
-      - GF_SERVER_ROOT_URL=/grafana
-      - GF_SERVER_SERVE_FROM_SUB_PATH=true
-      # Auth proxy — Caddy validates CT JWT and passes X-Webauth-User header
-      - GF_AUTH_PROXY_ENABLED=true
-      - GF_AUTH_PROXY_HEADER_NAME=X-Webauth-User
-      - GF_AUTH_PROXY_HEADER_PROPERTY=email
-      - GF_AUTH_PROXY_AUTO_SIGN_UP=true
-      # Empty whitelist = trust all sources (Grafana only reachable via Caddy on internal network)
-      - GF_AUTH_PROXY_WHITELIST=
-      - GF_AUTH_DISABLE_LOGIN_FORM=true
-      # Disable phone-home telemetry — prevents DNS timeout storm to stats.grafana.org
-      - GF_ANALYTICS_REPORTING_ENABLED=false
-      - GF_ANALYTICS_CHECK_FOR_UPDATES=false
-      - GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES=false
-    volumes:
-      - ./grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
-      - grafana-data:/var/lib/grafana
-    networks:
-      - ct
-
-  # ─────────────────────────────────────────────────────────────────
-  # Grafana Loki — log aggregation backend for syslog ingestion
-  # ─────────────────────────────────────────────────────────────────
-
-  loki:
-    profiles: ["otel"]
-    image: grafana/loki:3.0.0
-    command: ["-config.file=/etc/loki/loki.yaml"]
-    restart: unless-stopped
-    expose:
-      - "3100"
-    volumes:
-      - ./loki/loki.yaml:/etc/loki/loki.yaml:ro
-      - loki-data:/loki
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:3100/ready"]
-      interval: 30s
-      timeout: 5s
-      retries: 5
-      start_period: 15s
-    mem_limit: 1g
-    cpus: 2.0
-    logging:
-      driver: local
-      options:
-        max-size: "10m"
-        max-file: "5"
-    networks:
-      - ct
-
-  # ─────────────────────────────────────────────────────────────────
-  # CT Syslog Ingest — UDP+TCP syslog receiver for Cisco UC platforms
-  # Receives syslog from CUCM, CUBE, CMS, Expressway, Unity, IM&P
-  # Parses, routes critical alerts to NATS, stores all in Loki
-  # ─────────────────────────────────────────────────────────────────
 
   ct-syslog-ingest:
     image: calltelemetry/ct-syslog-ingest-go:${CT_SYSLOG_INGEST_VERSION:-latest}
@@ -508,57 +287,6 @@ services:
   # OpenTelemetry Collector (activate with COMPOSE_PROFILES=otel)
   # Receives OTLP from web + sidecar, exports metrics to Prometheus.
   # Enable via: ct otel enable  (or COMPOSE_PROFILES=otel)
-  # ─────────────────────────────────────────────────────────────────
-
-  otel-collector:
-    profiles: ["otel"]
-    image: otel/opentelemetry-collector-contrib:0.96.0
-    restart: unless-stopped
-    mem_limit: 256m
-    command: ["--config=/etc/otelcol/config.yaml"]
-    volumes:
-      - ./otel-collector/otel-collector-config.yaml:/etc/otelcol/config.yaml:ro
-    expose:
-      - "4317"   # OTLP gRPC
-      - "4318"   # OTLP HTTP
-      - "8889"   # Prometheus metrics
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "25m"
-        max-file: "3"
-    networks:
-      - ct
-
-  # ─────────────────────────────────────────────────────────────────
-  # Grafana Tempo — distributed tracing backend
-  # Receives OTLP traces from OTEL Collector, queryable via Grafana
-  # Enable via: ct otel enable  (shares profile with otel-collector)
-  # ─────────────────────────────────────────────────────────────────
-
-  tempo:
-    profiles: ["otel"]
-    image: grafana/tempo:2.6.1
-    restart: unless-stopped
-    mem_limit: 256m
-    command: ["-config.file=/etc/tempo/tempo.yaml"]
-    volumes:
-      - ./tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
-      - tempo-data:/var/tempo
-    expose:
-      - "3200"   # Tempo HTTP API (Grafana queries this)
-      - "4317"   # OTLP gRPC receiver
-      - "4318"   # OTLP HTTP receiver
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "25m"
-        max-file: "3"
-    networks:
-      - ct
-
-  # ─────────────────────────────────────────────────────────────────
-  # JTAPI Phone Control Stack (activate with COMPOSE_PROFILES=jtapi)
   # ─────────────────────────────────────────────────────────────────
 
   jtapi-jar-init:
@@ -689,9 +417,9 @@ services:
 
   seaweedfs:
     # Optional storage service — S3-compatible object store for syslog snapshots, config audits,
-    # as-built reports, and JTAPI audio. Auto-starts with jtapi or otel profiles;
+    # as-built reports, and JTAPI audio. Auto-starts with jtapi profile;
     # can also be activated standalone via COMPOSE_PROFILES=storage.
-    profiles: ["storage", "jtapi", "otel"]
+    profiles: ["storage", "jtapi"]
     image: chrislusf/seaweedfs:4.13
     pull_policy: if_not_present
     init: true
@@ -739,35 +467,6 @@ services:
   # promotes only low-cardinality labels (compose_service, level).
   # ─────────────────────────────────────────────────────────────────
 
-  alloy:
-    profiles: ["otel"]
-    image: grafana/alloy:v1.8.0
-    restart: unless-stopped
-    command: run --server.http.listen-addr=0.0.0.0:12345 /etc/alloy/config.alloy
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
-    expose:
-      - "12345"
-    depends_on:
-      loki:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/12345'"]
-      interval: 30s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-    mem_limit: 256m
-    cpus: 0.5
-    logging:
-      driver: local
-      options:
-        max-size: "10m"
-        max-file: "3"
-    networks:
-      - ct
-
 networks:
   ct:
     # enable_ipv6: true
@@ -779,19 +478,9 @@ volumes:
     driver: local
   traefik-logs:
     driver: local
-  prometheus-data:
-    driver: local
-  alertmanager-data:
-    driver: local
-  grafana-data:
-    driver: local
-  tempo-data:
-    driver: local
   nats-data:
     driver: local
   jtapi-jars:
-    driver: local
-  loki-data:
     driver: local
   seaweedfs-data:
     driver: local
