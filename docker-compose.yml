@@ -187,6 +187,19 @@ services:
       # OpenTelemetry (enable via: ct otel enable)
       - OTEL_ENABLED=${OTEL_ENABLED:-false}
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}
+      # PostHog telemetry labeling + operational levers (environment label,
+      # host/token override, error-tracking / log-capture / budget switches).
+      # Bare pass-through, NOT `=${VAR:-}`: an unconfigured var must be
+      # delivered UNSET, not as "". The app treats an empty string as a set
+      # value, so a present-but-empty POSTHOG_HOST would override the
+      # compiled default host.
+      - CT_POSTHOG_ENVIRONMENT
+      - POSTHOG_HOST
+      - POSTHOG_PROJECT_TOKEN
+      - POSTHOG_BACKEND_ENABLED
+      - POSTHOG_ERROR_TRACKING_ENABLED
+      - POSTHOG_LOG_CAPTURE_ENABLED
+      - POSTHOG_ERROR_BUDGET_DAILY
     deploy:
       resources:
         limits:
