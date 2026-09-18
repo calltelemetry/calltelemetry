@@ -22,6 +22,18 @@
     # Expose Caddy metrics (served on admin API :2019/metrics)
     metrics
 
+    # CUBE XCC callback. `post /xcc/:cube_id` is defined ONLY on the CURRI
+    # endpoint (web:4080) — the admin endpoint below (web:4000) has no such
+    # route, and its pipeline does not accept SOAP XML bodies. Without this
+    # rule an HTTPS Application URL 404s, and it 404s AFTER registration
+    # already looks successful, so it presents as a keepalive fault rather
+    # than a routing fault.
+    #
+    # Keep this ABOVE the /api* rule. Caddy matches the most specific path
+    # first, so order is not strictly required, but the two rules must stay
+    # adjacent so the split is obvious to the next reader.
+    reverse_proxy /api/xcc* web:4080
+
     reverse_proxy /api* web:4000
 
     # CT app metrics — unauthenticated, for PRTG/external Prometheus scraping
