@@ -1,7 +1,6 @@
 # Call Telemetry: Call Policy Engine and Realtime Tool Suite for Cisco Callmanager
 
----
-[Latest Version and Release Notes](https://docs.calltelemetry.com/releases)
+[Latest Version (0.8.6.27)](https://github.com/calltelemetry/calltelemetry/releases/tag/0.8.6.27) | [Release Notes & Changelog](https://support.calltelemetry.com/changelog)
 
 ## Multiple Deployment options
 
