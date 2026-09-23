@@ -1,6 +1,6 @@
 # Creating a Lab Instance
 
-This document will walk through the steps to create a lab instance for Call Telemetry. The instance will be compeletely isolated from the production instance in a difference namesapce, including using a different Postgres cluster.
+This document will walk through the steps to create a lab instance for Call Telemetry. The instance will be completely isolated from the production instance in a different namespace, including using a different Postgres cluster.
 
 ## Create Dev Namespace
 
@@ -18,7 +18,7 @@ kubectl apply -n ct-dev -f postgres-operator-examples/kustomize/postgres/ct-post
 ### Prep Helm Chart values
 
 ```bash
-cat <<EOF > ./custom_dev.yaml
+cat <<EOF > ./ct_dev.yaml
 # ct_dev.yaml
 environment: dev
 primary_ip: <your_primary_ip>/32

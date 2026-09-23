@@ -29,7 +29,7 @@ services:
       start_period: 30s
 
   vue-web:
-    image: "calltelemetry/vue:${VUE_VERSION}"
+    image: "calltelemetry/vue:${VUE_VERSION:-0.8.6.27}"
     restart: "always"
     expose:
       - "8080"
@@ -48,7 +48,7 @@ services:
       start_period: 30s
 
   traceroute:
-    image: "calltelemetry/traceroute-go:${TRACEROUTE_VERSION}"
+    image: "calltelemetry/traceroute-go:${TRACEROUTE_VERSION:-1.0.2}"
     restart: "always"
     user: root
     mem_limit: ${TRACEROUTE_MEM_LIMIT:-256m}
@@ -133,7 +133,7 @@ services:
       start_period: 30s
 
   web:
-    image: "calltelemetry/web:${WEB_VERSION}"
+    image: "calltelemetry/web:${WEB_VERSION:-0.8.6.27}"
     restart: "always"
     user: root
     expose:
@@ -342,7 +342,7 @@ services:
 
   jtapi-sidecar:
     profiles: ["jtapi"]
-    image: "calltelemetry/jtapi-sidecar:${JTAPI_VERSION}"
+    image: "calltelemetry/jtapi-sidecar:${JTAPI_VERSION:-1.14.5}"
     restart: unless-stopped
     mem_limit: 1g
     logging:
@@ -400,7 +400,7 @@ services:
 
   ct-media:
     profiles: ["jtapi"]
-    image: "calltelemetry/ct-media-go:${CT_MEDIA_VERSION}"
+    image: "calltelemetry/ct-media-go:${CT_MEDIA_VERSION:-1.1.1}"
     restart: unless-stopped
     logging:
       driver: "json-file"

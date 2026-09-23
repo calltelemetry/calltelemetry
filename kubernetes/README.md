@@ -2,12 +2,12 @@
 # Call Telemetry HA Deployment Guide
 
 ::: warning
-This document is about to be heavily updated, and our Kubernetes charts and guides have moved to a new repository. Please check the [Call Telemetry Charts Repo](https://github.com/calltelemetry/k8s) for the latest information.
+This document is about to be heavily updated, and our Kubernetes charts and guides have moved. Please check the [Call Telemetry HA Deployment Documentation](https://docs.calltelemetry.com/deployment/k3s.html) for the latest information.
 :::
 
-This guide provides detailed instructions for setting up and deploying the Call Telemetry application using Kuberenetes with load balancing an a HA PostgreSQL Cluster.
+This guide provides detailed instructions for setting up and deploying the Call Telemetry application using Kubernetes with load balancing and an HA PostgreSQL Cluster.
 
-Kubernetes is free to use on your own, and support is available please contact [Support](mailto:jason@calltelelemetry.com) for more information.
+Kubernetes is free to use on your own, and support is available please contact [Support](mailto:jason@calltelemetry.com) for more information.
 
 ## Prerequisites
 
@@ -39,7 +39,7 @@ sudo curl https://get.calltelemetry.com | sudo sh -s -- prep-cluster-node
 
 ### K3s Installation
 
-**K3s** is a lightweight Kubernetes distribution designed for easy installation and operation of Kuberenetes.
+**K3s** is a lightweight Kubernetes distribution designed for easy installation and operation of Kubernetes.
 
 #### Setting Up the Primary Node
 
@@ -65,7 +65,7 @@ sudo curl https://get.calltelemetry.com | sudo sh -s -- prep-cluster-node
 
 #### Optionally Setting Up Secondary Nodes
 
-3 Nodes is typical for a Kubenretes cluster, but you can skip this step and just run a single node.
+3 Nodes is typical for a Kubernetes cluster, but you can skip this step and just run a single node.
 
 1. **Install K3s on Secondary Nodes**
    Join secondary nodes to the K3s cluster. Note the token value, and the primary node IP address.
@@ -144,7 +144,7 @@ The **CrunchyData PostgreSQL Operator** automates PostgreSQL database cluster de
    ```bash
    # From Primary node.
    kubectl create namespace ct
-   kubectl apply -n ct -f calltelemetry/kuberentes/postgres/ct-postgres.yaml
+   kubectl apply -n ct -f kubernetes/postgres/ct-postgres.yaml
    ```
 
 ### Call Telemetry Application Deployment
@@ -206,7 +206,7 @@ To uninstall K3s, use:
 
 ## SQL - Crunchy Data PostgreSQL Operator
 
-[Cruncy Data PostgreSQL Operator Github](https://github.com/CrunchyData/postgres-operator)
+[Crunchy Data PostgreSQL Operator GitHub](https://github.com/CrunchyData/postgres-operator)
 
-[Crunch Data PostgreSQL Operator Docs](https://access.crunchydata.com/documentation/postgres-operator/latest)
+[Crunchy Data PostgreSQL Operator Docs](https://access.crunchydata.com/documentation/postgres-operator/latest)
 

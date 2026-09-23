@@ -1,4 +1,4 @@
-# Call Policy Engine, and Realtime Tool Suite for Cisco Callmanager
+# Call Telemetry: Call Policy Engine and Realtime Tool Suite for Cisco Callmanager
 
 ---
 [Latest Version and Release Notes](https://docs.calltelemetry.com/releases)
@@ -45,7 +45,7 @@ Additional features are enabled with a [paid license](https://calltelemetry.com/
 - Multiple Cluster Support - Central Policy control across all Cisco Callmanager clusters in your environment.
 - Apps and [Webhooks](https://docs.calltelemetry.com/policies/apps/crm-integration-webhook) to any incoming call event - Send to CRMs, APIs, or build workflows to send complex alerts to teams for Emergency calls.
 - Realtime Spam and [Call Reputation scoring](https://docs.calltelemetry.com/policies/truespam_filtering) via TrueSpam API. Block, Rename, or Redirect calls based on a score 0-100.
-- [Watch Lists and Triggers](https://docs.calltelemetry.com/policies/watch-lists/overview.html) to monitor and send email alerts in your environment for suspciious activity and call volume spikes. You can comment on, Block, or Ignore Watch List numbers.
+- [Watch Lists and Triggers](https://docs.calltelemetry.com/policies/watch-lists/overview.html) to monitor and send email alerts in your environment for suspicious activity and call volume spikes. You can comment on, Block, or Ignore Watch List numbers.
 - [Call Blocking API](https://docs.calltelemetry.com/mcid/block-list-api) for bulk call block management.
 - Self Care Portal for Users
   - Users can manage their own call history and block list.
@@ -69,7 +69,7 @@ Learn more about [Call Blocking](https://docs.calltelemetry.com/mcid/intro) tool
 - Send data via Email or SMS to any destination
 - XML SOAP web lookup App for querying APIs
 - Share realtime data via webhook to any third party API.
-- Need another App? [Contact me](mailto:jason@calltelemtry.com) to build a custom app for your needs.
+- Need another App? [Contact me](mailto:jason@calltelemetry.com) to build a custom app for your needs.
 
 #### Build your own CRM Connectors
 
@@ -92,20 +92,20 @@ Learn more about [Call Blocking](https://docs.calltelemetry.com/mcid/intro) tool
 - Free SFTP server for CDR processing
 - Decodes all Cisco CDR fields, not just epoch timestamps.
 - Simple and Advanced reports for quick troubleshooting.
-- Low Duration Call Report CDR Anlaytics to find spam robocallers
+- Low Duration Call Report CDR Analytics to find spam robocallers
 
 ## [911 Alerts and Emergency Features](https://docs.calltelemetry.com/e911)
 
 - [Realtime 911 Alerts](https://docs.calltelemetry.com/policies/trigger-call-alerts) with location data for Cisco IP Phones. Alerts can include CDP neighbor, Subnet, and Cisco Callmanager data.
-- Notications for Email, SMS, MS Teams, and Webex Teams.
+- Notifications for Email, SMS, MS Teams, and Webex Teams.
 - [Discover Cisco IP Phone details](https://docs.calltelemetry.com/policies/apps/e911-phone-discovery) in realtime.
 - Creates a Webex Teams Space for each rule alert, invites others, and allows you to collaborate as a team in the space for situational awareness of the call.
 
 ### [Dispatchable Location Discovery Apps for Emergency Alerts](https://docs.calltelemetry.com/e911)
 
-- [Phone Discovery](https://docs.calltelemetry.com/policies/apps/e911-phone-discovery) of CDP and LLDP Netowrk Switch Neighbor, IP Subnet, and ICMP traceroute for use in call workflows.
+- [Phone Discovery](https://docs.calltelemetry.com/policies/apps/e911-phone-discovery) of CDP and LLDP Network Switch Neighbor, IP Subnet, and ICMP traceroute for use in call workflows.
 - 911 Location Manager covering Neighbor CDP LLDP Switch, Port, and [Subnet locations](https://docs.calltelemetry.com/policies/apps/e911-subnet-csv).
-- Query APIs for dispatchable emeregency location data from discovered Cisco IP Phone data.
+- Query APIs for dispatchable emergency location data from discovered Cisco IP Phone data.
 - Meraki Location Sync for CDP neighbors and pulls switch physical address and notes.
 - 911 [QR Code generator](https://docs.calltelemetry.com/e911/qr-code) for network drop wire mapping.
 
@@ -121,3 +121,7 @@ Learn more about [Call Blocking](https://docs.calltelemetry.com/mcid/intro) tool
 ## [CDR Webhooks](https://docs.calltelemetry.com/cdr/webhooks)
 
 Fire off a webhook for every call event in CDR matching multiple conditions. Include CDR data in the webhook payload.
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
