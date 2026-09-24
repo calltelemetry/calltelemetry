@@ -15,8 +15,7 @@ Deploy on an existing Linux server (Ubuntu, Debian, AlmaLinux, or Rocky) using t
 
 ```bash
 # 1. Download CLI and prepare host (installs Docker CE, directories, and systemd service)
-# (Interactive terminals will prompt for SSH port change to 2222; for headless/automated scripts use CT_NONINTERACTIVE=1)
-curl -fsSL https://get.calltelemetry.com | sudo sh -s -- build-appliance
+curl -fsSL https://get.calltelemetry.com | sudo sh -s -- build-appliance -y
 
 # 2. Check appliance and container status
 sudo ct status

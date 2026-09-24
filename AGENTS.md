@@ -36,8 +36,7 @@ For deployment on a fresh Linux server (Ubuntu, Debian, AlmaLinux, Rocky):
 
 ```bash
 # 1. Download CLI and prepare host (installs Docker CE, required paths, and systemd service)
-# Note: In automated/headless environments, set CT_NONINTERACTIVE=1 to auto-apply SSH port 2222
-curl -fsSL https://get.calltelemetry.com | sudo CT_NONINTERACTIVE=1 sh -s -- build-appliance
+curl -fsSL https://get.calltelemetry.com | sudo sh -s -- build-appliance -y
 
 # 2. Check appliance and container status
 sudo ct status
