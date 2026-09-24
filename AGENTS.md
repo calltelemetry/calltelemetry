@@ -35,17 +35,15 @@ The OVA appliance is a pre-configured, hardened AlmaLinux 9 image with all depen
 For deployment on a fresh Linux server (Ubuntu, Debian, AlmaLinux, Rocky):
 
 ```bash
-# 1. Bootstrap the Call Telemetry native Go CLI (ct)
-sudo curl -fsSL https://get.calltelemetry.com | sudo sh
+# 1. Download CLI and prepare host (installs Docker CE, required paths, and systemd service)
+# Note: In automated/headless environments, set CT_NONINTERACTIVE=1 to auto-apply SSH port 2222
+curl -fsSL https://get.calltelemetry.com | sudo CT_NONINTERACTIVE=1 sh -s -- build-appliance
 
-# 2. Prepare the host machine (installs Docker CE, required paths, and systemd service)
-sudo ct build-appliance
+# 2. Check appliance and container status
+sudo ct status
 
-# 3. Check appliance status
-ct status
-
-# 4. Update to latest stable release anytime
-sudo curl -fsSL https://get.calltelemetry.com | sudo sh -s -- update stable
+# 3. Deploy or update to latest stable release
+curl -fsSL https://get.calltelemetry.com | sudo sh -s -- update --stable --yes
 ```
 
 ### Option C: Advanced Manual Docker Compose

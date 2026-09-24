@@ -14,17 +14,15 @@ The fastest way to deploy. A pre-built, hardened virtual appliance based on Alma
 Deploy on an existing Linux server (Ubuntu, Debian, AlmaLinux, or Rocky) using the official installation script and `ct` CLI tool:
 
 ```bash
-# 1. Download and bootstrap the Call Telemetry CLI (ct)
-sudo curl -fsSL https://get.calltelemetry.com | sudo sh
+# 1. Download CLI and prepare host (installs Docker CE, directories, and systemd service)
+# (Interactive terminals will prompt for SSH port change to 2222; for headless/automated scripts use CT_NONINTERACTIVE=1)
+curl -fsSL https://get.calltelemetry.com | sudo sh -s -- build-appliance
 
-# 2. Prepare host machine (installs Docker CE, directories, and systemd service)
-sudo ct build-appliance
+# 2. Check appliance and container status
+sudo ct status
 
-# 3. Check appliance and container status
-ct status
-
-# 4. Update to latest stable anytime
-sudo curl -fsSL https://get.calltelemetry.com | sudo sh -s -- update stable
+# 3. Deploy or update to latest stable release
+curl -fsSL https://get.calltelemetry.com | sudo sh -s -- update --stable --yes
 ```
 * **[Docker Deployment Guide](https://docs.calltelemetry.com/deployment/docker.html)**
 * Advanced: A raw [`docker-compose.yml`](docker-compose.yml) and [`.env.example`](.env.example) are provided for custom homelabs.
