@@ -71,7 +71,7 @@ services:
       start_period: 45s
 
   db:
-    image: "calltelemetry/postgres:14"
+    image: "calltelemetry/postgres:${POSTGRES_IMAGE_TAG:-14}"
     user: root
     restart: "always"
     shm_size: "1gb"
@@ -140,7 +140,7 @@ services:
       - 4000
       - 4080
     ports:
-      - "22:3022"
+      - "${CT_SFTP_HOST_PORT:-22}:3022"
     environment:
       - DB_USER=${POSTGRES_USER:-calltelemetry}
       - DB_PASSWORD=${POSTGRES_PASSWORD:-postgres}
@@ -179,7 +179,6 @@ services:
       - S3_SECRET_ACCESS_KEY=${S3_SECRET_ACCESS_KEY:-changeme}
       - S3_REGION=us-east-1
       - CT_MEDIA_ENDPOINT=${CT_MEDIA_ENDPOINT:-}
-      - DOCKER_SOCKET=/var/run/docker.sock
       - NATS_URL=nats://nats:4222
       - DB_POOL_SIZE=${DB_POOL_SIZE:-15}
       - DB_CALL_CONTROL_POOL_SIZE=${DB_CALL_CONTROL_POOL_SIZE:-15}
@@ -215,7 +214,6 @@ services:
       - ./crash-dumps:/tmp/crash-dumps:rw
       # Persistent org-scoped media storage (JTAPI audio, recordings, etc)
       - ./org-data:/data:rw
-      - /var/run/docker.sock:/var/run/docker.sock
     logging:
       driver: "json-file"
       options:
@@ -230,7 +228,7 @@ services:
       start_period: 30s
 
   nats:
-    image: "nats:2.11-alpine"
+    image: "nats:2.14-alpine"
     command: "-c /etc/nats/nats.conf"
     volumes:
       - ./nats.conf:/etc/nats/nats.conf
@@ -435,7 +433,7 @@ services:
     # as-built reports, and JTAPI audio. Auto-starts with jtapi profile;
     # can also be activated standalone via COMPOSE_PROFILES=storage.
     profiles: ["storage", "jtapi"]
-    image: chrislusf/seaweedfs:4.13
+    image: chrislusf/seaweedfs:4.39
     pull_policy: if_not_present
     init: true
     logging:

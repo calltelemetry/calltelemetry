@@ -2,11 +2,39 @@
 
 [Latest Version (0.8.6.27)](https://github.com/calltelemetry/calltelemetry/releases/tag/0.8.6.27) | [Release Notes & Changelog](https://support.calltelemetry.com/changelog)
 
-## Multiple Deployment options
+## Quick Start & Deployment Options
 
-- [Vmware OVA Appliance](https://docs.calltelemetry.com/deployment/ova.html)
-- [Bring your own OS](https://docs.calltelemetry.com/deployment/docker.html)
-- [HA Cluster](https://docs.calltelemetry.com/deployment/k3s.html)
+### 1. VMware OVA Appliance (Recommended)
+The fastest way to deploy. A pre-built, hardened virtual appliance based on AlmaLinux 9 with all services, storage, and systemd automation pre-configured.
+
+* **[Download Appliance](https://docs.calltelemetry.com/download)** — Request VMware OVA & Nutanix QCOW2 download links
+* **[VMware OVA Deployment Guide](https://docs.calltelemetry.com/deployment/ova.html)**
+
+### 2. Bring Your Own OS (Automated Linux Install)
+Deploy on an existing Linux server (Ubuntu, Debian, AlmaLinux, or Rocky) using the official installation script and `ct` CLI tool:
+
+```bash
+# 1. Download and bootstrap the Call Telemetry CLI (ct)
+sudo curl -fsSL https://get.calltelemetry.com | sudo sh
+
+# 2. Prepare host machine (installs Docker CE, directories, and systemd service)
+sudo ct build-appliance
+
+# 3. Check appliance and container status
+ct status
+
+# 4. Update to latest stable anytime
+sudo curl -fsSL https://get.calltelemetry.com | sudo sh -s -- update stable
+```
+* **[Docker Deployment Guide](https://docs.calltelemetry.com/deployment/docker.html)**
+* Advanced: A raw [`docker-compose.yml`](docker-compose.yml) and [`.env.example`](.env.example) are provided for custom homelabs.
+
+### 3. High-Availability Kubernetes / K3s Cluster
+* **[HA Cluster Deployment Guide](https://docs.calltelemetry.com/deployment/k3s.html)**
+* See [`kubernetes/README.md`](kubernetes/README.md) for CloudNativePG and Traefik ingress manifests.
+
+### For AI Coding Agents
+Running an automated workflow or working with an AI coding assistant (Claude, Cursor, Copilot, Antigravity, Devin)? See [`AGENTS.md`](AGENTS.md) for narrated architecture boundaries, port mappings, test procedures, and health verification endpoints.
 
 ### Private and Secure
 
