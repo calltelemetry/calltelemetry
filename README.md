@@ -11,18 +11,23 @@ The fastest way to deploy. A pre-built, hardened virtual appliance based on Alma
 * **[VMware OVA Deployment Guide](https://docs.calltelemetry.com/deployment/ova.html)**
 
 ### 2. Bring Your Own OS (Automated Linux Install)
-Deploy on an existing Linux server (Ubuntu, Debian, AlmaLinux, or Rocky) using the official installation script and `ct` CLI tool:
+Deploy on an existing Enterprise Linux 9 server (AlmaLinux, Rocky Linux, or RHEL) using the official installation script and `ct` CLI tool:
 
 ```bash
-# 1. Download CLI and prepare host (installs Docker CE, directories, and systemd service)
-curl -fsSL https://get.calltelemetry.com | sudo sh -s -- build-appliance -y
+# 1. Download and install the Call Telemetry CLI (ct)
+curl -fsSL https://get.calltelemetry.com | sudo sh
 
-# 2. Check appliance and container status
+# 2. Prepare host machine (installs Docker CE, directories, systemd service, SSH port 2222)
+sudo ct build-appliance
+# (or unattended/headless: sudo ct build-appliance -y)
+
+# 3. Check appliance status or deploy latest stable release
 sudo ct status
-
-# 3. Deploy or update to latest stable release
-curl -fsSL https://get.calltelemetry.com | sudo sh -s -- update --stable --yes
+sudo ct update stable
 ```
+
+> **Note on SSH Access**: Appliance preparation moves the host SSH daemon to port **2222** (reserving port 22 for Call Telemetry's internal SFTP server for CUCM CDR collection). If reconnecting after `build-appliance`, connect via `ssh -p 2222 user@host`.
+
 * **[Docker Deployment Guide](https://docs.calltelemetry.com/deployment/docker.html)**
 * Advanced: A raw [`docker-compose.yml`](docker-compose.yml) and [`.env.example`](.env.example) are provided for custom homelabs.
 

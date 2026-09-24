@@ -32,18 +32,23 @@ The OVA appliance is a pre-configured, hardened AlmaLinux 9 image with all depen
 - **Deployment Guide**: [https://docs.calltelemetry.com/deployment/ova.html](https://docs.calltelemetry.com/deployment/ova.html)
 
 ### Option B: Bring Your Own OS (Automated Linux / Docker Script)
-For deployment on a fresh Linux server (Ubuntu, Debian, AlmaLinux, Rocky):
+For deployment on a fresh Enterprise Linux 9 server (AlmaLinux, Rocky Linux, RHEL):
 
 ```bash
-# 1. Download CLI and prepare host (installs Docker CE, required paths, and systemd service)
-curl -fsSL https://get.calltelemetry.com | sudo sh -s -- build-appliance -y
+# 1. Download and install CLI
+curl -fsSL https://get.calltelemetry.com | sudo sh
 
-# 2. Check appliance and container status
-sudo ct status
+# 2. Prepare host machine (Docker CE, directories, systemd service, SSH port 2222)
+sudo ct build-appliance -y
 
 # 3. Deploy or update to latest stable release
-curl -fsSL https://get.calltelemetry.com | sudo sh -s -- update --stable --yes
+sudo ct update stable
+
+# 4. Check appliance and container status
+sudo ct status
 ```
+
+> **Note on SSH Access**: Appliance preparation moves the host SSH daemon to port **2222** (reserving port 22 for Call Telemetry's internal SFTP server for CUCM CDR collection). Agents executing over SSH must reconnect using port 2222 (`ssh -p 2222 ...`).
 
 ### Option C: Advanced Manual Docker Compose
 For homelabs or custom environments managing raw containers directly:
