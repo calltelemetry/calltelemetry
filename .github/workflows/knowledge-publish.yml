@@ -1,0 +1,38 @@
+name: Knowledge publish
+
+# Publishes the public deployment README files to the Call Telemetry knowledge plane (public scope) on every merge
+# that changes them. Content is already public (this repository is public). The action skips with a notice when the
+# org secret KNOWLEDGE_PUBLISH_DOPPLER_TOKEN is not available; it never runs for pull requests.
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'README.md'
+      - 'SECURITY.md'
+      - 'kubernetes/README.md'
+      - '.github/workflows/knowledge-publish.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: knowledge-publish-calltelemetry-deploy
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish knowledge source
+    if: github.repository == 'calltelemetry/calltelemetry'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: calltelemetry/mcp-worker-actions/knowledge-publish@fff0f927fd8e217c9938a0cb2379ffae4bc3de92
+        with:
+          source: calltelemetry-deploy
+          scope: public
+          format: md-dir
+          path: .
+          include: '^(README|SECURITY|kubernetes/README)\.md$'
+          doppler-token: ${{ secrets.KNOWLEDGE_PUBLISH_DOPPLER_TOKEN }}
