@@ -28,7 +28,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - uses: calltelemetry/mcp-worker-actions/knowledge-publish@100ff28852c55e918bce5a9435bc3dc3da017e86
+      - uses: calltelemetry/mcp-worker-actions/knowledge-publish@a43133a17aefe2cd70727c53f5ed8db4e8ec0057
         with:
           source: calltelemetry-deploy
           scope: public
