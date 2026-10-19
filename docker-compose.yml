@@ -212,6 +212,9 @@ services:
     volumes:
       - ./certs:/home/app/cert:rw
       - ./crash-dumps:/tmp/crash-dumps:rw
+      # Host ct binary, read-only: enables `ct show-tech` inside the web
+      # container for the Download Logs bundle (calltelemetry/cisco-cdr#6221).
+      - /usr/local/bin/ct:/usr/local/bin/ct:ro
       # Persistent org-scoped media storage (JTAPI audio, recordings, etc)
       - ./org-data:/data:rw
     logging:
