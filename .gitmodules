@@ -1,0 +1,3 @@
+[submodule "kubernetes/postgres-operator-examples"]
+	path = kubernetes/postgres-operator-examples
+	url = https://github.com/CrunchyData/postgres-operator-examples.git
