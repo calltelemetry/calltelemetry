@@ -396,46 +396,6 @@ services:
       retries: 3
       start_period: 90s
 
-  appliance-mcp:
-    # Appliance Edition of the JTAPI MCP (UAT-1865): the per-claim, per-version
-    # agent surface that ships inside this appliance. Its tools are generated
-    # from THIS stack's own jtapi-sidecar (/v3/api-docs), so tools/list is the
-    # schema fingerprint of the running release — a 0.8.6 appliance and a later
-    # recording/transcription build legitimately expose different tools.
-    # Started by `ct jtapi enable` (jtapi profile); the `mcp` profile lets
-    # future product tools run without the jtapi stack. /mcp requires the
-    # caller's Authorization and forwards it to the sidecar; no static
-    # credential is stored in the image.
-    profiles: ["mcp", "jtapi"]
-    image: "calltelemetry/appliance-mcp:${APPLIANCE_MCP_VERSION:-0.1.0}"
-    restart: unless-stopped
-    mem_limit: 256m
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "50m"
-        max-file: "3"
-    # Published for the claim router / claim-access envelope (UAT-1865): the
-    # router resolves the claim and proxies here. The /mcp auth gate applies.
-    ports:
-      - "8090:8090"
-    environment:
-      - APPLIANCE_MCP_PORT=8090
-      - JTAPI_SIDECAR_URL=http://jtapi-sidecar:8080
-      # The tool surface self-describes the appliance release under test.
-      - APPLIANCE_VERSION=${WEB_VERSION:-dev}
-    depends_on:
-      jtapi-sidecar:
-        condition: service_healthy
-    networks:
-      - ct
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8090/health || curl -sf http://127.0.0.1:8090/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 20s
-
   ct-media:
     profiles: ["jtapi"]
     image: "calltelemetry/ct-media-go:${CT_MEDIA_VERSION:-1.1.1}"
