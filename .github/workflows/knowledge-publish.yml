@@ -28,7 +28,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - uses: calltelemetry/mcp-worker-actions/knowledge-publish@a43133a17aefe2cd70727c53f5ed8db4e8ec0057
+      - uses: calltelemetry/mcp-worker-actions/knowledge-publish@bf4ade6c8420bc63c8bb58aced9fe8fc8c0f1e95
         with:
           source: calltelemetry-deploy
           scope: public
@@ -36,3 +36,6 @@ jobs:
           path: .
           include: '^(README|SECURITY|kubernetes/README)\.md$'
           doppler-token: ${{ secrets.KNOWLEDGE_PUBLISH_DOPPLER_TOKEN }}
+          dispatch-public-refresh: "true"
+          release-app-id: ${{ secrets.RELEASE_APP_ID }}
+          release-app-private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
